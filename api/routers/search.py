@@ -1,0 +1,518 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+
+"""FastAPI router for aggregate search + login endpoints."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Optional
+
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Header, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from ..schemas.search import SearchJobRequestSchema, SearchJobResponse
+from ..services.search_job_manager import (
+    search_job_manager, JobConflictError, InvalidPlatformsError,
+)
+from ..services import accounts as accounts_service
+
+search_router = APIRouter(prefix="/api/search", tags=["aggregate-search"])
+
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
+
+# ── Shared operation lock (search + login mutual exclusion) ─────────────
+
+_op_lock = asyncio.Lock()
+
+# ── Login state ─────────────────────────────────────────────────────────
+
+_login_jobs: Dict[str, dict] = {}
+_login_procs: Dict[str, asyncio.subprocess.Process] = {}
+_login_tasks: Dict[str, asyncio.Task] = {}
+_MAX_LOGIN_JOBS = 20  # keep at most this many terminal login jobs
+
+LOGIN_TOTAL_TIMEOUT = 620  # 10 min + margin
+LOGIN_DRAIN_TIMEOUT = 5
+LOGIN_KILL_TIMEOUT = 3
+
+
+def _cleanup_old_login_jobs():
+    terminal = [k for k, v in _login_jobs.items()
+                if v.get("status") in ("succeeded", "failed", "timed_out")]
+    excess = len(terminal) - _MAX_LOGIN_JOBS
+    for k in terminal[:max(0, excess)]:
+        _login_jobs.pop(k, None)
+    # also clean up corresponding tasks
+    for k in list(_login_tasks.keys()):
+        if k not in _login_jobs:
+            t = _login_tasks.pop(k, None)
+            if t and not t.done():
+                t.cancel()
+
+
+async def _run_login_worker(platform: str, job_id: str):
+    _login_jobs[job_id] = {
+        "platform": platform, "status": "running", "message": "Starting...",
+        "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None,
+    }
+    proc = None
+    stdout_task = None
+    stderr_task = None
+    done_received = False
+    error_received = False
+    final_status = "failed"
+    final_message = "Unknown error"
+
+    try:
+        env = {**os.environ, "PYTHONUTF8": "1",
+               "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, _WORKER_SCRIPT,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
+        )
+        _login_procs[job_id] = proc
+
+        request_json = json.dumps({
+            "job_id": job_id, "mode": "login", "platform": platform,
+            "keyword": "", "limit": 0,
+        }) + "\n"
+        if proc.stdin:
+            proc.stdin.write(request_json.encode("utf-8"))
+            await proc.stdin.drain()
+            proc.stdin.close()
+
+        from aggregate_search.protocol import parse_event_line
+
+        async def _read_out():
+            nonlocal done_received, error_received, final_status, final_message
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                try:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    continue
+                if not line:
+                    continue
+                evt = parse_event_line(line)
+                if evt is None:
+                    continue
+                # Identity validation
+                if evt.job_id != job_id:
+                    continue
+                if evt.platform != platform:
+                    continue
+                if evt.event == "status":
+                    d = evt.data or {}
+                    s = d.get("status", final_status)
+                    if s in ("running", "succeeded"):
+                        final_status = s
+                    final_message = d.get("message", final_message)
+                elif evt.event == "error":
+                    error_received = True
+                    d = evt.data or {}
+                    final_status = d.get("type", "failed")
+                    final_message = d.get("message", final_message)
+                elif evt.event == "done":
+                    done_received = True
+                    break
+
+        async def _read_err():
+            while True:
+                raw = await proc.stderr.readline()
+                if not raw:
+                    break
+
+        stdout_task = asyncio.create_task(_read_out())
+        stderr_task = asyncio.create_task(_read_err())
+
+        # Wait with total timeout
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(stdout_task, stderr_task),
+                timeout=LOGIN_TOTAL_TIMEOUT)
+        except asyncio.TimeoutError:
+            final_status = "timed_out"
+            final_message = "Login process timed out"
+            # Terminate → kill
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=LOGIN_KILL_TIMEOUT)
+                except asyncio.TimeoutError:
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
+
+        # Drain remaining stdout/stderr to EOF
+        try:
+            while True:
+                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=LOGIN_DRAIN_TIMEOUT)
+                if not raw:
+                    break
+        except (asyncio.TimeoutError, Exception):
+            pass
+        try:
+            while True:
+                raw = await asyncio.wait_for(proc.stderr.readline(), timeout=LOGIN_DRAIN_TIMEOUT)
+                if not raw:
+                    break
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # Wait for exit
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=LOGIN_DRAIN_TIMEOUT)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+
+        rc = proc.returncode if proc.returncode is not None else -1
+
+        # Final status determination
+        if final_status == "timed_out":
+            pass  # keep timed_out
+        elif error_received:
+            # Keep the real error emitted by the worker — never override
+            # it with a "no done event" heuristic.
+            pass
+        elif not done_received:
+            final_status = "failed"
+            final_message = f"exit {rc}, no done event"
+        elif rc != 0:
+            final_status = "failed"
+            final_message = f"exit {rc}"
+        elif final_status == "succeeded" and done_received and rc == 0:
+            final_status = "succeeded"
+        else:
+            final_status = "failed"
+            final_message = final_message or "unknown state"
+
+    except Exception as e:
+        final_status = "failed"
+        final_message = type(e).__name__
+    finally:
+        for t in (stdout_task, stderr_task):
+            if t and not t.done():
+                t.cancel()
+        if stdout_task or stderr_task:
+            await asyncio.gather(
+                *(t for t in (stdout_task, stderr_task) if t),
+                return_exceptions=True)
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+        _login_procs.pop(job_id, None)
+
+    _login_jobs[job_id].update(
+        status=final_status, message=final_message,
+        completed_at=datetime.now(timezone.utc).isoformat())
+    _cleanup_old_login_jobs()
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    platform: str = Field(..., description="Platform slug")
+
+
+class LoginStatusResponse(BaseModel):
+    job_id: str
+    platform: str
+    status: str
+    message: str = ""
+    created_at: str
+    completed_at: Optional[str] = None
+
+
+@search_router.post("/login")
+async def start_login(req: LoginRequest, background_tasks: BackgroundTasks):
+    valid = {"xhs", "douyin", "bilibili", "zhihu"}
+    if req.platform not in valid:
+        raise HTTPException(status_code=422, detail=f"Invalid platform: {req.platform}")
+
+    async with _op_lock:
+        # Check active login
+        for info in _login_jobs.values():
+            if info["status"] in ("pending", "running"):
+                raise HTTPException(status_code=409, detail="A login session is already active.")
+        # Check active search
+        if search_job_manager.is_search_active():
+            raise HTTPException(status_code=409,
+                               detail="A search job is running. Wait for it to complete before logging in.")
+
+        job_id = uuid.uuid4().hex[:12]
+        _login_jobs[job_id] = {
+            "platform": req.platform, "status": "pending", "message": "Login queued...",
+            "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None,
+        }
+        task = asyncio.create_task(_run_login_worker(req.platform, job_id))
+        _login_tasks[job_id] = task
+
+    names = {"xhs": "小红书", "douyin": "抖音", "bilibili": "B站", "zhihu": "知乎"}
+    return {
+        "job_id": job_id, "platform": req.platform, "status": "pending",
+        "message": f"正在启动 {names.get(req.platform, req.platform)} 登录窗口...",
+    }
+
+
+@search_router.get("/login/{job_id}", response_model=LoginStatusResponse)
+async def get_login_status(job_id: str):
+    info = _login_jobs.get(job_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Login job not found.")
+    return LoginStatusResponse(job_id=job_id, **info)
+
+
+@search_router.post("/jobs", response_model=SearchJobResponse, status_code=201)
+async def create_search_job(req: SearchJobRequestSchema):
+    req.keyword = req.keyword.strip()
+    if not req.keyword:
+        raise HTTPException(status_code=422, detail="Keyword must not be empty.")
+
+    async with _op_lock:
+        # Check active login
+        for info in _login_jobs.values():
+            if info["status"] in ("pending", "running"):
+                raise HTTPException(status_code=409,
+                                   detail="A login session is active. Wait for it to complete before searching.")
+        try:
+            return await search_job_manager.create_job(req)
+        except InvalidPlatformsError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except JobConflictError:
+            raise HTTPException(status_code=409, detail="A search job is already running.")
+
+
+@search_router.get("/jobs/current")
+async def get_current_job():
+    return await search_job_manager.get_current()
+
+
+@search_router.get("/jobs/{job_id}", response_model=SearchJobResponse)
+async def get_search_job(job_id: str):
+    resp = await search_job_manager.get_job(job_id)
+    if resp is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return resp
+
+
+@search_router.post("/jobs/{job_id}/cancel")
+async def cancel_search_job(job_id: str):
+    cancelled = await search_job_manager.cancel_job(job_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Job not found or already completed.")
+    return {"status": "cancelled", "job_id": job_id}
+
+
+# ── Account management (browser-extension cookie sync) ──────────────────
+
+class SyncTicketRequest(BaseModel):
+    platform: str = Field(..., description="Platform slug")
+
+
+class SyncCookiesRequest(BaseModel):
+    cookies: list = Field(..., description="Chrome-v1 raw cookie list")
+    cookie_format: str = Field(..., description="Must be 'chrome-v1'")
+    extension_protocol_version: int = 0
+    request_id: str = ""
+    skipped_partitioned: int = 0
+    browser_cookie_store_count: int = 0
+
+
+def _account_error(status_code: int, safe_code: str, safe_message: str,
+                   platform: Optional[str] = None,
+                   diagnostics: Optional[dict] = None) -> JSONResponse:
+    """Structured account error — the extension and web UI read these fields."""
+    d = diagnostics or {}
+    return JSONResponse(status_code=status_code, content={
+        "success": False,
+        "platform": platform,
+        "verified": False,
+        "safe_error_code": safe_code,
+        "safe_message": safe_message,
+        "sync_stage": d.get("sync_stage"),
+        "received_cookie_count": d.get("received_cookie_count"),
+        "accepted_cookie_count": d.get("accepted_cookie_count"),
+        "skipped_cookie_count": d.get("skipped_cookie_count"),
+        "rejected_cookie_count": d.get("rejected_cookie_count"),
+        "required_cookie_present": d.get("required_cookie_present"),
+        "login_marker_presence": d.get("login_marker_presence"),
+        "browser_cookie_store_count": d.get("browser_cookie_store_count"),
+    })
+
+
+def _account_error_from_exc(exc: Exception, status_code: int,
+                            platform: Optional[str] = None) -> JSONResponse:
+    return _account_error(
+        status_code,
+        getattr(exc, "safe_code", "account_error"),
+        str(exc) or "操作失败，请重试",
+        platform=platform,
+        diagnostics=getattr(exc, "diagnostics", None),
+    )
+
+
+@search_router.get("/accounts")
+async def get_accounts():
+    """Per-platform account state — never includes cookies/tokens/paths."""
+    return {"accounts": accounts_service.get_accounts()}
+
+
+@search_router.post("/accounts/sync-ticket")
+async def create_sync_ticket(req: SyncTicketRequest):
+    """Issue a one-time sync ticket (>=128-bit, 60s, memory-only, single-use)."""
+    try:
+        ticket = accounts_service.create_sync_ticket(req.platform)
+    except accounts_service.PlatformError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {
+        "ticket": ticket,
+        "platform": req.platform,
+        "expires_in": accounts_service.TICKET_TTL_SECONDS,
+    }
+
+
+@search_router.post("/accounts/{platform}/sync")
+async def sync_account_cookies(
+    platform: str,
+    req: SyncCookiesRequest,
+    request: Request,
+    x_sync_ticket: Optional[str] = Header(default=None, alias="X-Sync-Ticket"),
+):
+    """Extension-only endpoint: import chrome-v1 cookies + bounded verify."""
+    origin = request.headers.get("origin", "")
+    if not origin.startswith("chrome-extension://"):
+        return _account_error(403, "extension_origin_required",
+                              "仅允许浏览器扩展调用同步接口", platform)
+    if not x_sync_ticket:
+        return _account_error(400, "sync_ticket_invalid",
+                              "缺少一次性同步票据", platform)
+
+    async with _op_lock:
+        if search_job_manager.is_search_active():
+            return _account_error(409, "search_in_progress",
+                                  "正在搜索，暂时不能同步账号，请等待搜索完成", platform)
+        if accounts_service.is_verify_active(platform):
+            # 有界验证超时后任务在后台继续跑：再次 sync 会与后台任务并发
+            # 操作同一 profile —— 409。检查在 ticket 消费之前，新 ticket
+            # 不被消费（可重试语义：等验证完成拿新票据再同步）。
+            return _account_error(409, "verification_in_progress",
+                                  "该平台正在后台验证登录状态，请稍等验证完成后再同步",
+                                  platform)
+        try:
+            await accounts_service.consume_sync_ticket(x_sync_ticket, platform)
+        except accounts_service.TicketError as e:
+            return _account_error(400, e.safe_code, str(e), platform)
+        try:
+            result = await accounts_service.sync_platform_cookies(
+                platform, req.cookies, cookie_format=req.cookie_format,
+                extension_protocol_version=req.extension_protocol_version,
+                browser_cookie_store_count=req.browser_cookie_store_count)
+        except accounts_service.CookieFormatInvalidError as e:
+            return _account_error_from_exc(e, 400, platform)
+        except accounts_service.CookieDomainRejectedError as e:
+            return _account_error_from_exc(e, 400, platform)
+        except accounts_service.ExtensionProtocolOutdatedError as e:
+            return _account_error_from_exc(e, 422, platform)
+        except accounts_service.SessionImportError as e:
+            return _account_error_from_exc(e, 400, platform)
+        except accounts_service.PlatformError as e:
+            return _account_error_from_exc(e, 422, platform)
+
+    # No background verify is spawned here: sync_platform_cookies' bounded
+    # verify keeps running inside the accounts service (single task per
+    # platform, cancelled on shutdown) — the router must NOT start a second
+    # verify of the same profile.
+    return result
+
+
+@search_router.post("/accounts/{platform}/verify")
+async def verify_account(platform: str):
+    """Re-open the headless profile and verify the session via pong."""
+    async with _op_lock:
+        if search_job_manager.is_search_active():
+            return _account_error(409, "search_in_progress",
+                                  "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
+        if accounts_service.is_verify_active(platform):
+            # 后台验证进行中：直接再验证会与后台任务并发操作同一 profile
+            # 并等待同一 profile 锁（丢失历史状态或重复验证）—— 409。
+            return _account_error(409, "verification_in_progress",
+                                  "该平台正在后台验证登录状态，请稍等验证完成后再试",
+                                  platform)
+        try:
+            return await accounts_service.verify_platform(platform)
+        except accounts_service.PlatformError as e:
+            return _account_error_from_exc(e, 422, platform)
+        except accounts_service.SessionImportError as e:
+            return _account_error_from_exc(e, 400, platform)
+
+
+@search_router.delete("/accounts/{platform}/session")
+async def delete_account_session(platform: str):
+    """Delete the platform's profile (browser_data only, path-verified)."""
+    async with _op_lock:
+        if search_job_manager.is_search_active():
+            return _account_error(409, "search_in_progress",
+                                  "正在搜索，暂时不能清除账号，请等待搜索完成", platform)
+        if accounts_service.is_verify_active(platform):
+            # 后台验证进行中：删除 profile 会让验证任务操作已删除的目录 /
+            # 验证结果与删除动作竞态 —— 409。
+            return _account_error(409, "verification_in_progress",
+                                  "该平台正在后台验证登录状态，请稍等验证完成后再清除",
+                                  platform)
+        try:
+            return await accounts_service.delete_platform_session(platform)
+        except accounts_service.PlatformError as e:
+            return _account_error_from_exc(e, 422, platform)
+        except accounts_service.SessionImportError as e:
+            return _account_error_from_exc(e, 400, platform)
+
+
+# ── Shutdown ────────────────────────────────────────────────────────────
+
+async def _cleanup_login_on_shutdown():
+    for job_id, proc in list(_login_procs.items()):
+        try:
+            if proc.returncode is None:
+                proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                pass
+        except Exception:
+            pass
+    _login_procs.clear()
+    for job_id, task in list(_login_tasks.items()):
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+    _login_tasks.clear()

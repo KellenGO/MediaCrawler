@@ -1,0 +1,239 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
+# 1. 不得用于任何商业用途。
+# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
+# 3. 不得进行大规模爬取或对平台造成运营干扰。
+# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
+# 5. 不得用于任何非法或不当的用途。
+#
+# 详细许可条款请参阅项目根目录下的LICENSE文件。
+# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
+
+"""
+Unified data models for aggregate cross-platform search.
+
+These DTOs are used by the aggregate_search layer only. MediaCrawler core
+and store layers continue to use their own native data structures.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+# ── Platform & status enums ────────────────────────────────────────────
+
+PlatformSlug = Literal["xhs", "douyin", "bilibili", "zhihu"]
+
+PLATFORM_SLUGS: List[PlatformSlug] = ["xhs", "douyin", "bilibili", "zhihu"]
+
+# Mapping from aggregate-search slug → MediaCrawler core slug.
+# The core uses "dy" for Douyin and "bili" for Bilibili.
+_AGG_TO_CORE: Dict[str, str] = {
+    "xhs": "xhs",
+    "douyin": "dy",
+    "bilibili": "bili",
+    "zhihu": "zhihu",
+}
+
+# Reverse mapping: core slug → aggregate slug.
+_CORE_TO_AGG: Dict[str, str] = {v: k for k, v in _AGG_TO_CORE.items()}
+
+
+def agg_to_core_platform(agg_slug: str) -> str:
+    """Convert an aggregate-search platform slug to a MediaCrawler core slug.
+
+    >>> agg_to_core_platform("douyin")
+    'dy'
+    >>> agg_to_core_platform("bilibili")
+    'bili'
+    >>> agg_to_core_platform("xhs")
+    'xhs'
+    """
+    return _AGG_TO_CORE.get(agg_slug, agg_slug)
+
+
+def core_to_agg_platform(core_slug: str) -> str:
+    """Convert a MediaCrawler core slug back to an aggregate-search slug.
+
+    >>> core_to_agg_platform("dy")
+    'douyin'
+    >>> core_to_agg_platform("bili")
+    'bilibili'
+    """
+    return _CORE_TO_AGG.get(core_slug, core_slug)
+
+
+def is_valid_platform(platform: str) -> bool:
+    """Check if the given platform slug is valid for aggregate search."""
+    return platform in _AGG_TO_CORE
+
+PlatformStatus = Literal[
+    "pending",
+    "running",
+    "succeeded",
+    "empty",
+    "login_required",
+    "rate_limited",
+    "timed_out",
+    "failed",
+]
+
+OverallStatus = Literal["running", "completed", "partial", "failed", "cancelling", "cancelled"]
+
+
+# ── Unified search result ──────────────────────────────────────────────
+
+class UnifiedSearchResult(BaseModel):
+    """Normalized result from any supported platform."""
+
+    platform: PlatformSlug
+    content_id: str
+    content_type: str = "note"  # "note", "video", "answer", "article", "zvideo"
+    title: str
+    author: Optional[str] = None  # public display name only
+    url: str
+    published_at: Optional[str] = None  # ISO 8601
+    cover_url: Optional[str] = None
+    metrics: Dict[str, int] = Field(default_factory=dict)
+    rank: int = 0  # original platform rank (0-based)
+
+    # Allow extra fields from adapters for internal use
+    model_config = {"extra": "ignore"}
+
+
+# ── Platform-specific search results (aggregate layer internal) ────────
+
+class PlatformResult(BaseModel):
+    """Container for one platform's search outcome."""
+
+    platform: PlatformSlug
+    status: PlatformStatus
+    results: List[UnifiedSearchResult] = Field(default_factory=list)
+    error_summary: Optional[str] = None  # safe, no stack traces or secrets
+
+
+# ── Job-level models ───────────────────────────────────────────────────
+
+class SearchJobRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, description="Search keyword")
+    platforms: List[PlatformSlug] = Field(
+        default_factory=lambda: PLATFORM_SLUGS.copy(),
+        description="Platforms to search",
+    )
+    limit_per_platform: int = Field(default=10, ge=1, le=20)
+
+
+class SearchJobStatus(BaseModel):
+    job_id: str
+    overall: OverallStatus
+    keyword: str
+    created_at: str
+    completed_at: Optional[str] = None
+    platforms: Dict[str, PlatformResult] = Field(default_factory=dict)
+
+
+# ── Worker protocol models ─────────────────────────────────────────────
+
+class WorkerRequest(BaseModel):
+    """Request sent from parent process to worker via stdin."""
+
+    job_id: str
+    mode: Literal["search", "login"]
+    platform: PlatformSlug
+    keyword: str = ""
+    limit: int = 10
+
+
+class WorkerEvent(BaseModel):
+    """Event emitted by worker on stdout (NDJSON with prefix)."""
+
+    event: Literal["status", "result", "done", "error"]
+    job_id: str
+    platform: PlatformSlug
+    data: Any = None
+
+
+# ── De-duplication helpers ─────────────────────────────────────────────
+
+def make_dedup_key(platform: str, content_id: str) -> str:
+    """Composite key for de-duplication across pages or platforms."""
+    return f"{platform}:{content_id}"
+
+
+# ── Interleaved merge ──────────────────────────────────────────────────
+
+def interleave_results(
+    platform_results: Dict[str, List[UnifiedSearchResult]],
+    platform_order: Optional[List[str]] = None,
+) -> List[UnifiedSearchResult]:
+    """Round-robin interleave results from multiple platforms.
+
+    Picks one result from each platform in order until all exhausted.
+    Maintains each platform's internal rank order.
+    """
+    if platform_order is None:
+        platform_order = PLATFORM_SLUGS
+
+    queues: Dict[str, List[UnifiedSearchResult]] = {
+        p: list(platform_results.get(p, [])) for p in platform_order
+    }
+
+    merged: List[UnifiedSearchResult] = []
+    seen: set = set()
+    changed = True
+    while changed:
+        changed = False
+        for p in platform_order:
+            while queues.get(p):
+                item = queues[p].pop(0)
+                key = make_dedup_key(item.platform, item.content_id)
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(item)
+                    changed = True
+                    break
+    return merged
+
+
+# ── Time parsing ───────────────────────────────────────────────────────
+
+def _parse_timestamp(value: Any) -> Optional[str]:
+    """Convert a platform timestamp (int seconds, int ms, or ISO string)
+    to an ISO 8601 string, or return None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        # Try parsing as ISO
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+        except (ValueError, TypeError):
+            pass
+        # Try parsing as int
+        try:
+            value = int(value)
+        except (ValueError, TypeError):
+            return None
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return None
+        # Heuristic: if < 10000000000 assume seconds; else ms
+        if value < 10_000_000_000:
+            ts = value
+        else:
+            ts = value / 1000.0
+        try:
+            return datetime.fromtimestamp(ts, tz=None).isoformat()
+        except (OSError, ValueError, OverflowError):
+            return None
+    return None

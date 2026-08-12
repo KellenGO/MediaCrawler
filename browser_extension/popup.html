@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>MediaCrawler 会话同步</title>
+  <style>
+    body { font-family: system-ui, sans-serif; width: 300px; margin: 0; padding: 12px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .status { font-size: 12px; color: #444; margin-bottom: 10px; }
+    .ok { color: #1a7f37; }
+    .bad { color: #c62828; }
+    ul { list-style: none; margin: 0 0 10px; padding: 0; }
+    li { font-size: 12px; padding: 3px 0; border-bottom: 1px solid #eee; }
+    .sub { font-size: 11px; color: #a33; margin-top: 2px; }
+    button { width: 100%; padding: 8px; margin-bottom: 8px; cursor: pointer; }
+    .note { font-size: 11px; color: #888; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>MediaCrawler 会话同步助手</h1>
+  <div class="status" id="conn">正在检测本地网站…</div>
+  <ul id="platforms"></ul>
+  <button id="open-accounts">打开账号设置页</button>
+  <p class="note">
+    安全说明：仅在你在账号设置页点击"同步"时读取对应平台的登录 Cookie；
+    Cookie 只发送到本机 127.0.0.1:8080 的后端，不会写入扩展存储，
+    不会回传网页，也不会被日志记录。本扩展不读取浏览历史或其他网站。
+  </p>
+  <script src="popup.js"></script>
+</body>
+</html>
