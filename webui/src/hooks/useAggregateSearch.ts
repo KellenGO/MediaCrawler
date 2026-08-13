@@ -120,9 +120,10 @@ export function useAggregateSearch() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: async () => {
-      if (!jobIdRef.current) return;
-      await cancelJob(jobIdRef.current);
+    mutationFn: async (): Promise<void> => {
+      const id = jobIdRef.current;
+      if (!id) return;
+      await cancelJob(id);
     },
   });
 
@@ -159,8 +160,9 @@ export function useAggregateSearch() {
     },
   });
 
+  // 返回 POST 的结果 Promise：调用方 await 成功后才写入历史（Round 12.1）。
   const startSearch = useCallback(
-    (keyword: string, platforms: PlatformSlug[], limitPerPlatform?: number) => {
+    (keyword: string, platforms: PlatformSlug[], limitPerPlatform?: number): Promise<SearchJobResponse> => {
       generationRef.current += 1; // invalidate in-flight recovery responses
       setJobId(null);
       sessionStorage.removeItem(STORAGE_KEY);
@@ -173,13 +175,19 @@ export function useAggregateSearch() {
         platforms,
         limit_per_platform: limitPerPlatform ?? 10,
       };
-      createMutation.mutate(req);
+      return createMutation.mutateAsync(req);
     },
     [createMutation, cancelMutation, queryClient]
   );
 
-  const cancel = useCallback(() => {
-    cancelMutation.mutate();
+  const cancel = useCallback(async (): Promise<void> => {
+    // Round 13: mutateAsync —— 调用方可感知取消请求失败（不裸 500 文案）。
+    await cancelMutation.mutateAsync();
+  }, [cancelMutation]);
+
+  const resetCancel = useCallback(() => {
+    // 清除取消请求错误/挂起状态（新搜索/reset 也会自动调用）。
+    cancelMutation.reset();
   }, [cancelMutation]);
 
   const reset = useCallback(() => {
@@ -192,9 +200,14 @@ export function useAggregateSearch() {
     queryClient.removeQueries({ queryKey: ["search-job"] });
   }, [createMutation, cancelMutation, queryClient]);
 
+  // 有效取消态：取消 POST 挂起，或后端 job 自身处于 cancelling
+  // （Round 13 —— 后端清理期间 UI 必须保持锁定并显示"正在取消"）。
+  const effectiveCancelling =
+    cancelMutation.isPending || pollQuery.data?.overall === "cancelling";
+
   const overall = !jobId
     ? "idle"
-    : cancelMutation.isPending
+    : effectiveCancelling
       ? "cancelling"
       : (pollQuery.data?.overall ?? "running");
 
@@ -202,9 +215,12 @@ export function useAggregateSearch() {
     startSearch,
     cancel,
     reset,
+    resetCancel,
     isCreating: createMutation.isPending,
-    isCancelling: cancelMutation.isPending,
+    isCancelling: effectiveCancelling,
     createError: createMutation.error,
+    // Round 13: 取消请求失败错误（与 createError/pollError 分离，不混用）。
+    cancelError: cancelMutation.error,
     jobResponse: pollQuery.data,
     isPolling: pollQuery.isFetching,
     overall,

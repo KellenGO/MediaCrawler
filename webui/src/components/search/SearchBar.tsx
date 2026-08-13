@@ -1,9 +1,15 @@
-import { useState, useCallback, FormEvent } from "react";
+import { useCallback, FormEvent, Dispatch, SetStateAction } from "react";
 import { Search, Loader2, X } from "lucide-react"; // eslint-disable-line
 import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_ICONS } from "@/types/search";
 
+const ALL_PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
+
 interface SearchBarProps {
+  keyword: string;
+  onKeywordChange: Dispatch<SetStateAction<string>>;
+  selectedPlatforms: Set<PlatformSlug>;
+  onPlatformsChange: (platforms: PlatformSlug[]) => void;
   onSearch: (keyword: string, platforms: PlatformSlug[]) => void;
   isSearching: boolean;
   onCancel?: () => void;
@@ -11,42 +17,46 @@ interface SearchBarProps {
   onReset: () => void;
 }
 
-const ALL_PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
 
-export function SearchBar({ onSearch, isSearching, onCancel, isCancelling, onReset }: SearchBarProps) {
-  const [keyword, setKeyword] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<PlatformSlug>>(
-    new Set(ALL_PLATFORMS)
-  );
-
-  const togglePlatform = useCallback((p: PlatformSlug) => {
-    setSelectedPlatforms((prev) => {
-      const next = new Set(prev);
+export function SearchBar({
+  keyword,
+  onKeywordChange,
+  selectedPlatforms,
+  onPlatformsChange,
+  onSearch,
+  isSearching,
+  onCancel,
+  isCancelling,
+  onReset,
+}: SearchBarProps) {
+  const togglePlatform = useCallback(
+    (p: PlatformSlug) => {
+      const next = new Set(selectedPlatforms);
       if (next.has(p)) {
         if (next.size > 1) next.delete(p);
       } else {
         next.add(p);
       }
-      return next;
-    });
-  }, []);
+      onPlatformsChange(Array.from(next) as PlatformSlug[]);
+    },
+    [selectedPlatforms, onPlatformsChange]
+  );
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
       const trimmed = keyword.trim();
       if (!trimmed) return;
-      const platforms = Array.from(selectedPlatforms) as PlatformSlug[];
-      onSearch(trimmed, platforms);
+      onSearch(trimmed, Array.from(selectedPlatforms) as PlatformSlug[]);
     },
     [keyword, selectedPlatforms, onSearch]
   );
 
+  // reset：只清空关键词与任务；平台选择与偏好保留（不恢复四平台全选）。
   const handleReset = useCallback(() => {
-    setKeyword("");
-    setSelectedPlatforms(new Set(ALL_PLATFORMS));
+    onKeywordChange("");
     onReset();
-  }, [onReset]);
+  }, [onKeywordChange, onReset]);
 
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-2xl mx-auto">
@@ -57,7 +67,7 @@ export function SearchBar({ onSearch, isSearching, onCancel, isCancelling, onRes
           <input
             type="text"
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => onKeywordChange(e.target.value)}
             placeholder="输入关键词搜索..."
             maxLength={200}
             disabled={isSearching}
@@ -67,7 +77,7 @@ export function SearchBar({ onSearch, isSearching, onCancel, isCancelling, onRes
           {keyword && (
             <button
               type="button"
-              onClick={() => setKeyword("")}
+              onClick={() => onKeywordChange("")}
               className="absolute right-14 top-1/2 -translate-y-1/2 text-cyber-text-muted hover:text-cyber-text-primary"
             >
               <X className="w-4 h-4" />

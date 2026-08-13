@@ -87,6 +87,7 @@ PlatformStatus = Literal[
     "rate_limited",
     "timed_out",
     "failed",
+    "cancelled",
 ]
 
 OverallStatus = Literal["running", "completed", "partial", "failed", "cancelling", "cancelled"]

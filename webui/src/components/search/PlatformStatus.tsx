@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, Circle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, Circle, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
 import {
   PLATFORM_LABELS,
@@ -9,9 +9,14 @@ import {
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
+  onRetry?: (platform: PlatformSlug) => void;
+  retryingPlatform?: PlatformSlug | null;
+  retryDisabled?: boolean;
 }
 
 const PLATFORM_ORDER: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
+
+const RETRYABLE_STATUSES: PStatus[] = ["failed", "timed_out", "rate_limited", "login_required"];
 
 function StatusIcon({ status }: { status: PStatus }) {
   switch (status) {
@@ -36,7 +41,12 @@ function StatusIcon({ status }: { status: PStatus }) {
   }
 }
 
-export function PlatformStatus({ response }: PlatformStatusProps) {
+export function PlatformStatus({
+  response,
+  onRetry,
+  retryingPlatform,
+  retryDisabled,
+}: PlatformStatusProps) {
   // Show skeleton when no response yet
   if (!response) {
     return (
@@ -66,6 +76,8 @@ export function PlatformStatus({ response }: PlatformStatusProps) {
         const status: PStatus = info.status;
 
         const cancelled = status === "cancelled";
+        const isRetrying = retryingPlatform === p;
+        const retryable = onRetry ? RETRYABLE_STATUSES.includes(status) : false;
 
         return (
           <div
@@ -94,6 +106,25 @@ export function PlatformStatus({ response }: PlatformStatusProps) {
               <span className="ml-1 px-1.5 py-0.5 rounded bg-cyber-bg-secondary text-[10px]">
                 {info.result_count}
               </span>
+            )}
+            {isRetrying && (
+              <span className="ml-1 flex items-center gap-1 text-cyber-neon-cyan">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="text-[10px]">正在重试</span>
+              </span>
+            )}
+            {retryable && !isRetrying && (
+              <button
+                type="button"
+                disabled={retryDisabled}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry?.(p);
+                }}
+                className="ml-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyber-neon-cyan/40 text-cyber-neon-cyan hover:bg-cyber-neon-cyan/20 text-[10px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <RotateCcw className="w-3 h-3" />重试
+              </button>
             )}
           </div>
         );
