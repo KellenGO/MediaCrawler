@@ -13,12 +13,14 @@ interface ResultTabsProps {
 }
 
 type TabKey = "all" | PlatformSlug;
-const ALL_TABS: { key: TabKey; label: string; icon?: string }[] = [
+
+/** Round 14：平台结果标签固定为五个（全部 / 小红书 / 抖音 / B站 / 知乎）。 */
+const ALL_TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "xhs", label: "小红书", icon: "📕" },
-  { key: "douyin", label: "抖音", icon: "🎵" },
-  { key: "bilibili", label: "B站", icon: "📺" },
-  { key: "zhihu", label: "知乎", icon: "💡" },
+  { key: "xhs", label: "小红书" },
+  { key: "douyin", label: "抖音" },
+  { key: "bilibili", label: "B站" },
+  { key: "zhihu", label: "知乎" },
 ];
 
 const SORT_MODES: { key: SearchSortMode; label: string }[] = [
@@ -30,20 +32,14 @@ const SORT_MODES: { key: SearchSortMode; label: string }[] = [
 export function ResultTabs({
   results,
   overall,
-  platforms,
   sortMode = "default",
   onSortModeChange,
 }: ResultTabsProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("all");
 
-  // Only show tabs for the platforms that were actually searched
-  const visibleTabs = useMemo(() => {
-    const allowed = new Set(platforms);
-    return ALL_TABS.filter(t => t.key === "all" || allowed.has(t.key));
-  }, [platforms]);
-
-  // 当前标签不在可见集合（如重试后目标平台消失）时自动回退到"全部"；
-  // 合法性判断提取为生产纯函数 resolveActiveTab（lib 内已直接测试）。
+  // 五个固定标签始终可见；合法性判断仍走生产纯函数 resolveActiveTab，
+  // 当激活标签不在可见集合时回退到"全部"（lib 内已直接测试）。
+  const visibleTabs = ALL_TABS;
   const effectiveTab = resolveActiveTab<TabKey>(
     activeTab,
     visibleTabs.map(t => t.key),
@@ -77,8 +73,8 @@ export function ResultTabs({
     if (overall === "running") {
       return (
         <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyber-neon-cyan border-t-transparent" />
-          <p className="mt-4 text-sm font-mono text-cyber-text-muted">
+          <div className="inline-block animate-dsh-spin rounded-full h-8 w-8 border-2 border-brand border-t-transparent" />
+          <p className="mt-4 text-sm text-cyber-text-muted">
             正在搜索中...
           </p>
         </div>
@@ -89,43 +85,47 @@ export function ResultTabs({
 
   return (
     <div className="mt-6">
-      {/* Tab Bar + Sort Selector */}
-      <div className="flex items-end justify-between gap-2 flex-wrap border-b border-cyber-border-subtle pb-2 mb-4">
-        <div className="flex gap-1 flex-wrap">
+      {/* 标签栏 + 排序：标签固定五项，宽度不足时自然换行，绝不出现内部滚动条 */}
+      <div className="flex items-end justify-between gap-4 flex-wrap border-b border-cyber-border-subtle pb-[13px] mb-4">
+        <div className="flex gap-5 flex-wrap overflow-visible" role="tablist" aria-label="结果平台">
           {visibleTabs.map((tab) => {
             const count = counts[tab.key] || 0;
+            const active = effectiveTab === tab.key;
             return (
               <button
                 key={tab.key}
+                role="tab"
+                aria-selected={active}
                 onClick={() => setActiveTab(tab.key)}
-                className={`px-3 py-1.5 rounded-t-lg text-xs font-mono transition-all ${
-                  effectiveTab === tab.key
-                    ? "text-cyber-neon-cyan border-b-2 border-cyber-neon-cyan bg-cyber-neon-cyan/5"
+                className={`relative py-1.5 text-[13.5px] whitespace-nowrap transition-colors ${
+                  active
+                    ? "text-cyber-text-primary font-bold"
                     : "text-cyber-text-muted hover:text-cyber-text-primary"
                 }`}
               >
-                {tab.icon && <span className="mr-1">{tab.icon}</span>}
                 {tab.label}
-                {count > 0 && (
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-cyber-bg-tertiary">
-                    {count}
-                  </span>
+                <span className={`ml-1.5 text-[10.5px] ${active ? "text-cyber-text-muted" : "text-cyber-text-muted/70"}`}>
+                  {count}
+                </span>
+                {active && (
+                  <span className="absolute left-0 right-0 -bottom-[15px] h-[2px] rounded-full bg-brand" />
                 )}
               </button>
             );
           })}
         </div>
+
         {onSortModeChange && (
-          <div className="flex gap-1 mb-1" role="group" aria-label="排序方式">
+          <div className="flex gap-0.5 rounded-[10px] border border-cyber-border-subtle bg-cyber-bg-secondary p-1" role="group" aria-label="排序方式">
             {SORT_MODES.map((m) => (
               <button
                 key={m.key}
                 type="button"
                 onClick={() => onSortModeChange(m.key)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-mono border transition-all ${
+                className={`px-2.5 py-1 rounded-[7px] text-[11.5px] transition-colors ${
                   sortMode === m.key
-                    ? "border-cyber-neon-cyan/60 bg-cyber-neon-cyan/10 text-cyber-neon-cyan"
-                    : "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted hover:text-cyber-text-primary"
+                    ? "bg-brand-soft text-brand-strong font-semibold"
+                    : "text-cyber-text-muted hover:text-cyber-text-primary"
                 }`}
               >
                 {m.label}
@@ -135,15 +135,15 @@ export function ResultTabs({
         )}
       </div>
 
-      {/* Result Cards */}
-      <div className="space-y-3">
+      {/* 结果卡片 */}
+      <div className="flex flex-col gap-3">
         {filteredResults.map((result, i) => (
           <ResultCard key={`${result.platform}-${result.content_id}-${i}`} result={result} />
         ))}
       </div>
 
       {filteredResults.length === 0 && (
-        <p className="text-center py-8 text-sm font-mono text-cyber-text-muted">
+        <p className="text-center py-10 text-sm text-cyber-text-muted">
           该平台暂无结果
         </p>
       )}

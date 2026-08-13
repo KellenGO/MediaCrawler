@@ -56,10 +56,10 @@ export const PLATFORM_LABELS: Record<PlatformSlug, string> = {
 };
 
 export const PLATFORM_COLORS: Record<PlatformSlug, string> = {
-  xhs: "#FF2442",
-  douyin: "#000000",
-  bilibili: "#00A1D6",
-  zhihu: "#0066FF",
+  xhs: "#e9545d",
+  douyin: "#2d3436",
+  bilibili: "#3d99bf",
+  zhihu: "#2768d9",
 };
 
 export const PLATFORM_ICONS: Record<PlatformSlug, string> = {

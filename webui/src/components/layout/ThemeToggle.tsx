@@ -24,15 +24,15 @@ export function ThemeToggle() {
 
   return (
     <Select value={theme} onValueChange={(value: Theme) => setTheme(value)}>
-      <SelectTrigger className="w-20 h-7 text-xs font-mono border-cyber-border-subtle bg-cyber-bg-tertiary/50 hover:border-cyber-neon-cyan/50 transition-colors">
-        <Icon className="w-3 h-3 mr-1 text-cyber-text-secondary" />
+      <SelectTrigger className="w-[76px] h-[38px] text-xs border-cyber-border-subtle bg-cyber-bg-secondary hover:border-brand/50 transition-colors">
+        <Icon className="w-3.5 h-3.5 mr-1 text-cyber-text-secondary" />
         <SelectValue>{currentTheme.label}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {themes.map(({ value, label, icon: ItemIcon }) => (
-          <SelectItem key={value} value={value} className="text-xs font-mono">
+          <SelectItem key={value} value={value} className="text-xs">
             <div className="flex items-center gap-2">
-              <ItemIcon className="w-3 h-3" />
+              <ItemIcon className="w-3.5 h-3.5" />
               {label}
             </div>
           </SelectItem>

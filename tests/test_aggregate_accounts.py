@@ -1237,3 +1237,105 @@ def test_concurrent_sync_previous_status_not_mixed(monkeypatch):
     assert dy_res["status"] == "unverified", "douyin 从未 connected → unverified"
     assert acc._state_of("xhs")["status"] == "expired"
     assert acc._state_of("douyin")["status"] == "unverified"
+
+
+# ── Round 14.2: mark_login_required_from_search（搜索反向纠正账号状态）──
+# 账号服务是账号状态的唯一事实来源：搜索 worker 报告 login_required 时，
+# 只写状态、不启动浏览器、不删除 profile、不读取 Cookie、固定安全文案。
+
+def _reset_platform(platform: str) -> None:
+    acc._platform_state.pop(platform, None)
+
+
+def _tmp_profiles(monkeypatch, tmp_path):
+    """把 profile 目录指向临时目录，保证不触碰真实 browser_data。"""
+    monkeypatch.setattr(acc, "BROWSER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        acc, "profile_dir_for",
+        lambda p: tmp_path / acc.PLATFORM_PROFILE_DIRS[p])
+
+
+def test_search_login_required_downgrades_connected_to_expired(monkeypatch, tmp_path):
+    """connected+verified → 搜索 login_required → expired + verified=False；
+    profile、last_verified_at、display_name 保留；文案固定且无敏感信息。"""
+    _tmp_profiles(monkeypatch, tmp_path)
+    _reset_platform("bilibili")
+    acc.profile_dir_for("bilibili").mkdir(parents=True)
+    acc._set_state("bilibili", status="connected", verified=True,
+                   last_verified_at="2026-08-13T00:00:00+00:00",
+                   display_name="某用户", browser_backend="edge")
+    acc.mark_login_required_from_search("bilibili")
+    st = acc._state_of("bilibili")
+    assert st["status"] == "expired"
+    assert st["verified"] is False
+    assert st["safe_error_code"] == "login_required"
+    assert st["safe_message"] == "B站登录状态已失效，请前往账号设置重新同步"
+    assert acc.profile_dir_for("bilibili").is_dir(), "不得删除本地 profile"
+    assert st["last_verified_at"] == "2026-08-13T00:00:00+00:00"
+    assert st["display_name"] == "某用户"
+    assert st["browser_backend"] == "edge"
+    for secret in ("cookie", "set-cookie", "authorization", "traceback",
+                   "worker", "SESSDATA"):
+        assert secret.lower() not in st["safe_message"].lower()
+
+
+def test_search_login_required_unverified_profile_goes_expired(monkeypatch, tmp_path):
+    """profile 存在但 unverified（本地已导入、未确认登录）→ expired，
+    绝不变成 connected，verified 必须为 False。"""
+    _tmp_profiles(monkeypatch, tmp_path)
+    _reset_platform("douyin")
+    acc.profile_dir_for("douyin").mkdir(parents=True)
+    acc._set_state("douyin", status="unverified", verified=False)
+    acc.mark_login_required_from_search("douyin")
+    st = acc._state_of("douyin")
+    assert st["status"] == "expired"
+    assert st["verified"] is False
+    assert st["safe_error_code"] == "login_required"
+
+
+def test_search_login_required_no_profile_goes_disconnected(monkeypatch, tmp_path):
+    """从未存在 profile → disconnected（合理不可用状态）+ verified=False。"""
+    _tmp_profiles(monkeypatch, tmp_path)
+    _reset_platform("zhihu")
+    acc.mark_login_required_from_search("zhihu")
+    st = acc._state_of("zhihu")
+    assert st["status"] == "disconnected"
+    assert st["verified"] is False
+    assert st["safe_error_code"] == "login_required"
+    assert st["safe_message"] == "知乎登录状态已失效，请前往账号设置重新同步"
+
+
+def test_search_login_required_idempotent(monkeypatch, tmp_path):
+    """重复调用幂等：状态、verified、错误码、文案都不变。"""
+    _tmp_profiles(monkeypatch, tmp_path)
+    _reset_platform("xhs")
+    acc.profile_dir_for("xhs").mkdir(parents=True)
+    acc._set_state("xhs", status="connected", verified=True)
+    acc.mark_login_required_from_search("xhs")
+    first = dict(acc._state_of("xhs"))
+    acc.mark_login_required_from_search("xhs")
+    second = acc._state_of("xhs")
+    assert second["status"] == first["status"] == "expired"
+    assert second["verified"] is False
+    assert second["safe_error_code"] == "login_required"
+    assert second["safe_message"] == first["safe_message"]
+
+
+def test_search_login_required_rejects_unknown_platform():
+    with pytest.raises(PlatformError):
+        acc.mark_login_required_from_search("myspace")
+
+
+def test_get_accounts_reflects_search_downgrade(monkeypatch, tmp_path):
+    """降级后 GET /accounts 返回的 verified=False / status=expired /
+    profile_exists 保持 True —— Header 轮询即可看到 3/4。"""
+    _tmp_profiles(monkeypatch, tmp_path)
+    _reset_platform("bilibili")
+    acc.profile_dir_for("bilibili").mkdir(parents=True)
+    acc._set_state("bilibili", status="connected", verified=True)
+    acc.mark_login_required_from_search("bilibili")
+    info = next(i for i in get_accounts() if i["platform"] == "bilibili")
+    assert info["status"] == "expired"
+    assert info["verified"] is False
+    assert info["profile_exists"] is True
+    assert info["safe_error_code"] == "login_required"

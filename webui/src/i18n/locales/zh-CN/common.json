@@ -8,11 +8,71 @@
     "error": "错误"
   },
   "sidebar": {
-    "title": "MediaCrawler",
+    "title": "四野",
     "api": "API",
     "local": "本地",
     "disclaimer": "仅供个人学习研究使用，禁止商业用途",
     "license": "查看协议"
+  },
+  "brand": {
+    "name": "四野",
+    "subtitle": "中文社交平台聚合搜索"
+  },
+  "nav": {
+    "search": "聚合搜索",
+    "accounts": "账号设置",
+    "console": "爬虫控制台"
+  },
+  "header": {
+    "localOk": "本地服务正常",
+    "localDown": "本地服务未连接",
+    "account": "登录状态",
+    "accountChecking": "检查中",
+    "accountUnavailable": "暂不可用",
+    "accountEmpty": "正在检测…",
+    "lastVerified": "上次验证",
+    "staleHint": "账号数据刷新失败，显示上次结果",
+    "goAccounts": "前往账号设置",
+    "help": "帮助",
+    "helpTitle": "使用须知与免责声明",
+    "loginExpiredToast": "{{label}}登录状态已失效，其他平台仍可继续搜索",
+    "unverifiedWarningToast": "有 {{count}} 个平台尚未确认登录，不影响其他平台使用"
+  },
+  "search": {
+    "recent": "最近搜索",
+    "recommended": "推荐搜索",
+    "clear": "清空",
+    "placeholder": "搜索一个话题、人物或产品…",
+    "submit": "开始搜索",
+    "cancel": "取消",
+    "cancelAgain": "再次取消",
+    "scope": "搜索范围",
+    "helper": "Enter 搜索 · 最多 10 条 / 平台",
+    "enterKeyword": "输入关键词，选择平台，开始跨平台搜索",
+    "searching": "正在搜索中...",
+    "cancelling": "正在取消搜索...",
+    "cancelledNotice": "搜索已取消，保留上次结果",
+    "allFailed": "所有平台搜索失败",
+    "partialFailed": "部分平台失败",
+    "updating": "正在更新，暂时显示上次结果",
+    "searchFor": "搜索:",
+    "completedAt": "完成于",
+    "searchingLive": "搜索中...",
+    "retryFailed": "更新失败",
+    "loginNeeded": "以下平台需要先登录：",
+    "goAccounts": "前往账号设置",
+    "noResults": "该平台暂无结果",
+    "retrying": "正在重试"
+  },
+  "footer": {
+    "basedOn": "四野 · 基于 MediaCrawler 的本地聚合检索工作台",
+    "localFirst": "Local first · Open source",
+    "author": "作者：程序员阿江-Relakkes",
+    "github": "GitHub 仓库",
+    "disclaimer": "使用须知与免责声明",
+    "attributionPrefix": "基于 MediaCrawler · 原项目作者：程序员阿江-Relakkes · 本项目维护：",
+    "originalProject": "原项目",
+    "currentProject": "当前项目 GitHub"
   },
   "action": {
     "loading": "加载中...",

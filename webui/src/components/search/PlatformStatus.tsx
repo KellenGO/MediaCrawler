@@ -1,11 +1,6 @@
-import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, Circle, RotateCcw } from "lucide-react";
+import { Loader2, Check, Minus, AlertTriangle, XCircle, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
-import {
-  PLATFORM_LABELS,
-  PLATFORM_ICONS,
-
-  STATUS_LABELS,
-} from "@/types/search";
+import { PLATFORM_LABELS, PLATFORM_COLORS, STATUS_LABELS } from "@/types/search";
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
@@ -16,28 +11,57 @@ interface PlatformStatusProps {
 
 const PLATFORM_ORDER: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
 
+/** 平台字母标记（效果稿：红 / 抖 / 哔 / 知）。 */
+const PLATFORM_LETTERS: Record<PlatformSlug, string> = {
+  xhs: "红",
+  douyin: "抖",
+  bilibili: "哔",
+  zhihu: "知",
+};
+
 const RETRYABLE_STATUSES: PStatus[] = ["failed", "timed_out", "rate_limited", "login_required"];
 
-function StatusIcon({ status }: { status: PStatus }) {
+function statusLine(status: PStatus, info: { result_count: number; error_summary: string | null }): string {
   switch (status) {
     case "running":
-      return <Loader2 className="w-4 h-4 animate-spin text-cyber-neon-cyan" />;
+      return "正在检索…";
     case "succeeded":
-      return <CheckCircle2 className="w-4 h-4 text-cyber-neon-green" />;
+      return `${info.result_count} 条结果`;
     case "empty":
-      return <Circle className="w-4 h-4 text-cyber-text-muted" />;
+      return "无结果";
     case "login_required":
-      return <AlertTriangle className="w-4 h-4 text-cyber-neon-orange" />;
+      return "需要登录";
     case "rate_limited":
-      return <Clock className="w-4 h-4 text-cyber-neon-orange" />;
+      return "请求受限";
     case "timed_out":
-      return <Clock className="w-4 h-4 text-cyber-neon-pink" />;
+      return "超时";
     case "failed":
-      return <XCircle className="w-4 h-4 text-cyber-neon-pink" />;
+      return info.error_summary || "失败";
     case "cancelled":
-      return <Circle className="w-4 h-4 text-cyber-text-muted" />;
+      return "已取消";
     default:
-      return <Circle className="w-4 h-4 text-cyber-text-muted opacity-50" />;
+      return STATUS_LABELS[status];
+  }
+}
+
+function StatusTick({ status }: { status: PStatus }) {
+  switch (status) {
+    case "running":
+      return <span className="w-[15px] h-[15px] rounded-full border-2 border-cyber-border-default border-t-brand animate-dsh-spin flex-shrink-0" />;
+    case "succeeded":
+      return <Check className="w-[16px] h-[16px] text-[#4f9e79] flex-shrink-0" />;
+    case "empty":
+      return <Minus className="w-[16px] h-[16px] text-cyber-text-muted flex-shrink-0" />;
+    case "login_required":
+    case "rate_limited":
+      return <AlertTriangle className="w-[16px] h-[16px] text-warn flex-shrink-0" />;
+    case "timed_out":
+    case "failed":
+      return <XCircle className="w-[16px] h-[16px] text-danger flex-shrink-0" />;
+    case "cancelled":
+      return <Minus className="w-[16px] h-[16px] text-cyber-text-muted flex-shrink-0" />;
+    default:
+      return <Minus className="w-[16px] h-[16px] text-cyber-text-muted/50 flex-shrink-0" />;
   }
 }
 
@@ -47,20 +71,25 @@ export function PlatformStatus({
   retryingPlatform,
   retryDisabled,
 }: PlatformStatusProps) {
-  // Show skeleton when no response yet
+  // 无任务：显示四张浅色骨架卡
   if (!response) {
     return (
-      <div className="flex justify-center gap-4 mt-4">
+      <div className="flex gap-2.5 overflow-x-auto md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible mt-5">
         {PLATFORM_ORDER.map((p) => (
           <div
             key={p}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyber-border-subtle bg-cyber-bg-tertiary opacity-50"
+            className="min-w-[170px] md:min-w-0 flex-1 flex items-center gap-3 rounded-[15px] border border-cyber-border-subtle bg-cyber-bg-secondary px-3.5 py-3 opacity-50"
           >
-            <span className="text-sm">{PLATFORM_ICONS[p]}</span>
-            <span className="text-xs font-mono text-cyber-text-muted">
-              {PLATFORM_LABELS[p]}
+            <span
+              className="w-[34px] h-[34px] rounded-[10px] grid place-items-center font-extrabold text-[14px] flex-shrink-0"
+              style={{ backgroundColor: PLATFORM_COLORS[p] + "1f", color: PLATFORM_COLORS[p] }}
+            >
+              {PLATFORM_LETTERS[p]}
             </span>
-            <Circle className="w-3 h-3 text-cyber-text-muted" />
+            <div className="min-w-0">
+              <strong className="text-[13px] text-cyber-text-primary block">{PLATFORM_LABELS[p]}</strong>
+              <small className="text-[11px] text-cyber-text-muted block truncate">等待中</small>
+            </div>
           </div>
         ))}
       </div>
@@ -68,81 +97,83 @@ export function PlatformStatus({
   }
 
   return (
-    <div className="flex flex-wrap justify-center gap-3 mt-4">
-      {PLATFORM_ORDER.map((p) => {
-        const info = response.platforms[p];
-        if (!info) return null;
+    <div className="mt-5">
+      <div className="flex gap-2.5 overflow-x-auto md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible">
+        {PLATFORM_ORDER.map((p) => {
+          const info = response.platforms[p];
+          if (!info) return null;
 
-        const status: PStatus = info.status;
+          const status: PStatus = info.status;
+          const isRetrying = retryingPlatform === p;
+          const retryable = onRetry ? RETRYABLE_STATUSES.includes(status) : false;
 
-        const cancelled = status === "cancelled";
-        const isRetrying = retryingPlatform === p;
-        const retryable = onRetry ? RETRYABLE_STATUSES.includes(status) : false;
-
-        return (
-          <div
-            key={p}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-mono transition-all ${
-              status === "running"
-                ? "border-cyber-neon-cyan/50 bg-cyber-neon-cyan/5 text-cyber-neon-cyan"
-                : status === "succeeded"
-                  ? "border-cyber-neon-green/50 bg-cyber-neon-green/5 text-cyber-neon-green"
-                  : status === "empty"
-                    ? "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted"
+          return (
+            <div
+              key={p}
+              className={`min-w-[170px] md:min-w-0 flex-1 flex items-center gap-3 rounded-[15px] border bg-cyber-bg-secondary px-3.5 py-3 transition-colors ${
+                status === "running"
+                  ? "border-brand/40"
+                  : status === "succeeded" || status === "empty"
+                    ? "border-cyber-border-subtle"
                     : status === "login_required" || status === "rate_limited"
-                      ? "border-cyber-neon-orange/50 bg-cyber-neon-orange/5 text-cyber-neon-orange"
-                      : cancelled
-                        ? "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted"
-                        : status === "failed" || status === "timed_out"
-                          ? "border-cyber-neon-pink/50 bg-cyber-neon-pink/5 text-cyber-neon-pink"
-                          : "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted"
-            }`}
-          >
-            <span className="text-sm">{PLATFORM_ICONS[p]}</span>
-            <span>{PLATFORM_LABELS[p]}</span>
-            <StatusIcon status={status} />
-            <span>{STATUS_LABELS[status]}</span>
-            {info.result_count > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded bg-cyber-bg-secondary text-[10px]">
-                {info.result_count}
-              </span>
-            )}
-            {isRetrying && (
-              <span className="ml-1 flex items-center gap-1 text-cyber-neon-cyan">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span className="text-[10px]">正在重试</span>
-              </span>
-            )}
-            {retryable && !isRetrying && (
-              <button
-                type="button"
-                disabled={retryDisabled}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRetry?.(p);
-                }}
-                className="ml-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyber-neon-cyan/40 text-cyber-neon-cyan hover:bg-cyber-neon-cyan/20 text-[10px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      ? "border-warn/40"
+                      : status === "failed" || status === "timed_out"
+                        ? "border-danger/40"
+                        : "border-cyber-border-subtle"
+              }`}
+            >
+              <span
+                className="w-[34px] h-[34px] rounded-[10px] grid place-items-center font-extrabold text-[14px] flex-shrink-0"
+                style={{ backgroundColor: PLATFORM_COLORS[p] + "1f", color: PLATFORM_COLORS[p] }}
               >
-                <RotateCcw className="w-3 h-3" />重试
-              </button>
-            )}
-          </div>
-        );
-      })}
+                {PLATFORM_LETTERS[p]}
+              </span>
+              <div className="min-w-0 flex-1">
+                <strong className="text-[13px] text-cyber-text-primary block">{PLATFORM_LABELS[p]}</strong>
+                <small className="text-[11px] text-cyber-text-muted block truncate">
+                  {statusLine(status, info)}
+                </small>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {isRetrying ? (
+                  <span className="flex items-center gap-1 text-[11px] text-brand-strong">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    重试
+                  </span>
+                ) : (
+                  <StatusTick status={status} />
+                )}
+                {retryable && !isRetrying && (
+                  <button
+                    type="button"
+                    disabled={retryDisabled}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetry?.(p);
+                    }}
+                    title={`重试 ${PLATFORM_LABELS[p]}`}
+                    className="flex items-center gap-1 rounded-md border border-brand/40 px-1.5 py-0.5 text-[10.5px] text-brand-strong hover:bg-brand-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RotateCcw className="w-3 h-3" />重试
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-      {/* Overall status badge */}
+      {/* 整体状态（克制浅色） */}
       {response.overall !== "running" && (
         <div
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg border text-xs font-mono ${
+          className={`mt-2.5 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] ${
             response.overall === "completed"
-              ? "border-cyber-neon-green bg-cyber-neon-green/10 text-cyber-neon-green"
-              : response.overall === "partial"
-                ? "border-cyber-neon-orange bg-cyber-neon-orange/10 text-cyber-neon-orange"
-                : response.overall === "cancelling"
-                  ? "border-cyber-neon-orange/60 bg-cyber-neon-orange/10 text-cyber-neon-orange"
-                  : response.overall === "cancelled"
-                    ? "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted"
-                    : "border-cyber-neon-pink bg-cyber-neon-pink/10 text-cyber-neon-pink"
+              ? "border-ok/30 bg-ok-soft text-[#3d7d60]"
+              : response.overall === "partial" || response.overall === "cancelling"
+                ? "border-warn/30 bg-warn-soft text-warn"
+                : response.overall === "cancelled"
+                  ? "border-cyber-border-subtle bg-cyber-bg-tertiary text-cyber-text-muted"
+                  : "border-danger/30 bg-danger-soft text-danger"
           }`}
         >
           {response.overall === "completed"

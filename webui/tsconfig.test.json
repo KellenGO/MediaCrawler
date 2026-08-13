@@ -17,5 +17,12 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/lib/searchExperience.ts", "src/types/search.ts", "tests"]
+  "include": [
+    "src/lib/searchExperience.ts",
+    "src/lib/searchPopover.ts",
+    "src/lib/accounts.ts",
+    "src/lib/accountBulkSync.ts",
+    "src/types/search.ts",
+    "tests"
+  ]
 }

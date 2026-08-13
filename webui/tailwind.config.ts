@@ -9,7 +9,26 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Cyberpunk color scheme using CSS variables
+        // Round 14: 现代浅蓝品牌体系（效果稿 social-search-redesign）
+        brand: {
+          DEFAULT: 'rgb(var(--brand) / <alpha-value>)',
+          strong: 'rgb(var(--brand-2) / <alpha-value>)',
+          soft: 'rgb(var(--brand-soft) / <alpha-value>)',
+          ink: 'rgb(var(--brand-ink) / <alpha-value>)',
+        },
+        ok: {
+          DEFAULT: 'rgb(var(--ok) / <alpha-value>)',
+          soft: 'rgb(var(--ok-soft) / <alpha-value>)',
+        },
+        warn: {
+          DEFAULT: 'rgb(var(--warn) / <alpha-value>)',
+          soft: 'rgb(var(--warn-soft) / <alpha-value>)',
+        },
+        danger: {
+          DEFAULT: 'rgb(var(--danger) / <alpha-value>)',
+          soft: 'rgb(var(--danger-soft) / <alpha-value>)',
+        },
+        // Legacy cyber namespace (values now point at the new palette)
         cyber: {
           // Background colors
           bg: {
@@ -86,20 +105,19 @@ const config: Config = {
         mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        // Neon glow shadows - these use CSS variables for theme support
-        'glow-cyan': '0 0 var(--shadow-glow-spread, 10px) rgb(var(--cyber-neon-cyan) / var(--shadow-glow-opacity, 0.5)), 0 0 calc(var(--shadow-glow-spread, 10px) * 2) rgb(var(--cyber-neon-cyan) / calc(var(--shadow-glow-opacity, 0.5) * 0.6)), 0 0 calc(var(--shadow-glow-spread, 10px) * 3) rgb(var(--cyber-neon-cyan) / calc(var(--shadow-glow-opacity, 0.5) * 0.2))',
-        'glow-cyan-sm': '0 0 5px rgb(var(--cyber-neon-cyan) / 0.4), 0 0 10px rgb(var(--cyber-neon-cyan) / 0.2)',
-        'glow-pink': '0 0 var(--shadow-glow-spread, 10px) rgb(var(--cyber-neon-pink) / var(--shadow-glow-opacity, 0.5)), 0 0 calc(var(--shadow-glow-spread, 10px) * 2) rgb(var(--cyber-neon-pink) / calc(var(--shadow-glow-opacity, 0.5) * 0.6))',
-        'glow-pink-sm': '0 0 5px rgb(var(--cyber-neon-pink) / 0.4), 0 0 10px rgb(var(--cyber-neon-pink) / 0.2)',
-        'glow-green': '0 0 var(--shadow-glow-spread, 10px) rgb(var(--cyber-neon-green) / var(--shadow-glow-opacity, 0.5)), 0 0 calc(var(--shadow-glow-spread, 10px) * 2) rgb(var(--cyber-neon-green) / calc(var(--shadow-glow-opacity, 0.5) * 0.6))',
-        'glow-green-sm': '0 0 5px rgb(var(--cyber-neon-green) / 0.4), 0 0 10px rgb(var(--cyber-neon-green) / 0.2)',
-        'glow-orange': '0 0 var(--shadow-glow-spread, 10px) rgb(var(--cyber-neon-orange) / var(--shadow-glow-opacity, 0.5)), 0 0 calc(var(--shadow-glow-spread, 10px) * 2) rgb(var(--cyber-neon-orange) / calc(var(--shadow-glow-opacity, 0.5) * 0.6))',
-        'cyber-card': '0 0 1px rgb(var(--cyber-neon-cyan) / 0.5), 0 4px 20px rgba(0, 0, 0, 0.3)',
-        'cyber-inset': 'inset 0 0 20px rgba(0, 0, 0, 0.5)',
-        // Soft shadows for glassmorphism
-        'cyber-soft': '0 4px 24px rgba(0, 0, 0, 0.2), 0 0 1px rgb(var(--cyber-neon-cyan) / 0.1)',
-        'cyber-float': '0 8px 32px rgba(0, 0, 0, 0.25), 0 0 1px rgb(var(--cyber-neon-cyan) / 0.15)',
-        'cyber-elevated': '0 12px 40px rgba(0, 0, 0, 0.3)',
+        // Round 14: 柔和阴影（不再有霓虹多层发光）
+        'glow-cyan': '0 10px 30px rgba(50,105,145,0.1)',
+        'glow-cyan-sm': '0 4px 14px rgba(50,105,145,0.12)',
+        'glow-pink': '0 10px 30px rgba(50,105,145,0.1)',
+        'glow-pink-sm': '0 4px 14px rgba(50,105,145,0.12)',
+        'glow-green': '0 10px 30px rgba(50,105,145,0.1)',
+        'glow-green-sm': '0 4px 14px rgba(50,105,145,0.12)',
+        'glow-orange': '0 10px 30px rgba(50,105,145,0.1)',
+        'cyber-card': '0 10px 30px rgba(50,105,145,0.1)',
+        'cyber-inset': 'inset 0 0 20px rgba(0,0,0,0.06)',
+        'cyber-soft': '0 4px 18px rgba(50,105,145,0.08)',
+        'cyber-float': '0 24px 70px rgba(50,105,145,0.1)',
+        'cyber-elevated': '0 24px 70px rgba(50,105,145,0.12)',
       },
       animation: {
         'slide-up': 'slideUp 0.3s ease-out forwards',

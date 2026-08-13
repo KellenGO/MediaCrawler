@@ -65,45 +65,41 @@ export function EnvironmentCheck({ onCheckComplete }: EnvironmentCheckProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-cyber-bg-panel border border-cyber-border-DEFAULT rounded-lg shadow-cyber-card p-6 max-w-md w-full mx-4 relative">
-        {/* Corner decorations */}
-        <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyber-neon-cyan" />
-        <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyber-neon-cyan" />
-        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-cyber-neon-cyan" />
-        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-cyber-neon-cyan" />
-
+    <div className="fixed inset-0 bg-[#172b3d]/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+      <div className="bg-cyber-bg-secondary border border-cyber-border-default rounded-[18px] shadow-[0_24px_70px_rgba(50,105,145,0.16)] p-6 max-w-md w-full">
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
-          <AlertTriangle className="w-6 h-6 text-cyber-neon-orange" />
-          <h2 className="text-lg font-mono font-semibold text-cyber-neon-cyan glow-text-cyan">
+          <span className="w-10 h-10 rounded-[12px] rounded-bl-[4px] bg-brand/15 grid place-items-center">
+            <AlertTriangle className="w-5 h-5 text-warn" />
+          </span>
+          <h2 className="text-lg font-bold text-cyber-text-primary">
             {t('title')}
           </h2>
         </div>
 
         {/* Status Display */}
-        <div className="bg-cyber-bg-tertiary border border-cyber-border-DEFAULT rounded-lg p-4 mb-4">
+        <div className="bg-cyber-bg-tertiary border border-cyber-border-subtle rounded-xl p-4 mb-4">
           <div className="flex items-center gap-3">
             {status === 'checking' && (
               <>
-                <Loader2 className="w-5 h-5 text-cyber-neon-cyan animate-spin" />
-                <span className="text-cyber-text-primary font-mono text-sm">
+                <Loader2 className="w-5 h-5 text-brand-strong animate-spin" />
+                <span className="text-cyber-text-primary text-sm">
                   {t('scanning')}
                 </span>
               </>
             )}
             {status === 'success' && (
               <>
-                <CheckCircle className="w-5 h-5 text-cyber-neon-green" />
-                <span className="text-cyber-neon-green font-mono text-sm">
+                <CheckCircle className="w-5 h-5 text-ok" />
+                <span className="text-[#3d7d60] text-sm">
                   {t('success', { message: result?.message })}
                 </span>
               </>
             )}
             {status === 'error' && (
               <>
-                <XCircle className="w-5 h-5 text-cyber-neon-pink" />
-                <span className="text-cyber-neon-pink font-mono text-sm">
+                <XCircle className="w-5 h-5 text-danger" />
+                <span className="text-danger text-sm">
                   {t('error', { message: result?.message })}
                 </span>
               </>
@@ -115,12 +111,12 @@ export function EnvironmentCheck({ onCheckComplete }: EnvironmentCheckProps) {
             <div className="mt-3">
               <button
                 onClick={() => setShowDetails(!showDetails)}
-                className="text-sm text-cyber-neon-cyan hover:underline font-mono"
+                className="text-sm text-brand-strong hover:underline"
               >
                 {showDetails ? t('hideDetails') : t('showDetails')}
               </button>
               {showDetails && (
-                <pre className="mt-2 p-3 bg-black text-cyber-neon-green rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap border border-cyber-border-DEFAULT">
+                <pre className="mt-2 p-3 bg-[#0d1117] text-[#7ee2a8] rounded text-xs overflow-x-auto whitespace-pre-wrap border border-cyber-border-subtle">
                   {result.error}
                 </pre>
               )}
@@ -130,9 +126,9 @@ export function EnvironmentCheck({ onCheckComplete }: EnvironmentCheckProps) {
 
         {/* Help Text */}
         {status === 'error' && (
-          <div className="text-sm text-cyber-text-secondary mb-4 space-y-2 font-mono">
-            <p className="text-cyber-neon-orange">{t('requirements')}</p>
-            <ol className="list-decimal list-inside space-y-1 pl-2 text-cyber-text-muted">
+          <div className="text-sm text-cyber-text-secondary mb-4 space-y-2">
+            <p className="text-warn font-medium">{t('requirements')}</p>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-cyber-text-muted">
               <li>{t('requirementsList.1')}</li>
               <li>{t('requirementsList.2')}</li>
               <li>{t('requirementsList.3')}</li>
@@ -146,14 +142,14 @@ export function EnvironmentCheck({ onCheckComplete }: EnvironmentCheckProps) {
             <>
               <Button
                 variant="outline"
-                className="flex-1 font-mono"
+                className="flex-1"
                 onClick={handleSkip}
               >
                 {t('skipCheck')}
               </Button>
               <Button
-                variant="glow"
-                className="flex-1 font-mono"
+                variant="outline"
+                className="flex-1 border-brand/40 text-brand-strong hover:bg-brand-soft hover:border-brand/40"
                 onClick={handleRetry}
               >
                 <RefreshCw className="w-4 h-4" />
@@ -164,7 +160,7 @@ export function EnvironmentCheck({ onCheckComplete }: EnvironmentCheckProps) {
           {status === 'checking' && (
             <Button
               variant="outline"
-              className="w-full font-mono"
+              className="w-full"
               onClick={handleSkip}
             >
               {t('skipCheck')}

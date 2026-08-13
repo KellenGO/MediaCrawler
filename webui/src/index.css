@@ -2,123 +2,156 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   四野 · 现代浅蓝视觉系统（Round 14）
+   以 social-search-redesign.html 为唯一视觉基准：
+   - 页面背景纯白（深色为克制炭黑）
+   - 主色清透浅蓝，深蓝灰正文，淡蓝边框
+   - 无荧光、无网格背景、无霓虹阴影、无大面积渐变
+   注意：cyber-* 与 brand/ok/warn/danger 变量被 Tailwind 以
+   rgb(var(--x)) 消费，必须是 0-255 的 RGB 通道三元组；
+   语义色（--background 等）被 hsl(var(--x)) 消费，保持 HSL。
+   ============================================================ */
+
 @layer base {
-  /* Light theme (default) - Clean Cyber */
+  /* Light theme (default) */
   :root {
-    /* Semantic colors for shadcn compatibility */
-    --background: 210 20% 98%;
-    --foreground: 220 20% 15%;
+    /* ── 语义色（shadcn 兼容，hsl 三元组） ── */
+    --background: 210 60% 99%;
+    --foreground: 207 45% 16%;
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 15%;
+    --card-foreground: 207 45% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 15%;
-    --primary: 187 80% 42%;
+    --popover-foreground: 207 45% 16%;
+    --primary: 203 67% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 330 75% 55%;
+    --secondary: 207 45% 16%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 210 20% 95%;
-    --muted-foreground: 215 15% 45%;
-    --accent: 187 80% 42%;
+    --muted: 210 60% 97%;
+    --muted-foreground: 208 27% 50%;
+    --accent: 203 67% 58%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 330 75% 55%;
+    --destructive: 358 37% 49%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 20% 88%;
-    --input: 214 20% 88%;
-    --ring: 187 80% 42%;
-    --radius: 0.375rem;
+    --border: 208 44% 90%;
+    --input: 208 44% 90%;
+    --ring: 203 67% 58%;
+    --radius: 0.625rem;
 
-    /* Cyberpunk color system - Clean Light with Cyan accent */
-    --cyber-bg-primary: 248 250 252;
-    --cyber-bg-secondary: 241 245 249;
-    --cyber-bg-tertiary: 226 232 240;
+    /* ── 品牌色（效果稿：清透浅蓝，RGB 通道） ── */
+    --brand: 76 164 220;            /* #4ca4dc */
+    --brand-2: 41 126 186;          /* #297eba */
+    --brand-soft: 228 243 252;      /* #e4f3fc */
+    --brand-ink: 23 43 61;          /* #172b3d 深蓝灰正文 */
+
+    /* ── 语义状态（克制、非霓虹，RGB 通道） ── */
+    --ok: 79 158 121;               /* #4f9e79 */
+    --ok-soft: 232 245 238;
+    --warn: 183 99 37;              /* #b76325 */
+    --warn-soft: 247 233 219;       /* #f7e9db */
+    --danger: 169 77 80;            /* #a94d50 */
+    --danger-soft: 246 229 229;     /* #f6e5e5 */
+
+    /* ── cyber 命名空间（保持旧类名可用，值换成新体系，RGB 通道） ── */
+    --cyber-bg-primary: 255 255 255;
+    --cyber-bg-secondary: 251 253 255;   /* paper #fbfdff */
+    --cyber-bg-tertiary: 242 248 252;    /* 极浅蓝 */
     --cyber-bg-panel: 255 255 255;
-    --cyber-bg-elevated: 248 250 252;
+    --cyber-bg-elevated: 255 255 255;
 
-    --cyber-neon-cyan: 6 182 212;
-    --cyber-neon-cyan-dim: 8 145 178;
-    --cyber-neon-pink: 236 72 153;
-    --cyber-neon-pink-dim: 219 39 119;
-    --cyber-neon-green: 34 197 94;
-    --cyber-neon-green-dim: 22 163 74;
-    --cyber-neon-orange: 249 115 22;
-    --cyber-neon-yellow: 234 179 8;
-    --cyber-neon-purple: 168 85 247;
+    --cyber-neon-cyan: 76 164 220;
+    --cyber-neon-cyan-dim: 41 126 186;
+    --cyber-neon-pink: 169 77 80;
+    --cyber-neon-pink-dim: 147 61 64;
+    --cyber-neon-green: 79 158 121;
+    --cyber-neon-green-dim: 62 132 100;
+    --cyber-neon-orange: 183 99 37;
+    --cyber-neon-yellow: 214 154 74;
+    --cyber-neon-purple: 106 132 179;
 
-    --cyber-text-primary: 15 23 42;
-    --cyber-text-secondary: 71 85 105;
-    --cyber-text-muted: 148 163 184;
+    --cyber-text-primary: 23 43 61;
+    --cyber-text-secondary: 108 129 147;
+    --cyber-text-muted: 152 170 186;
 
-    --cyber-border-default: 203 213 225;
-    --cyber-border-subtle: 226 232 240;
-    --cyber-border-glow: 6 182 212;
+    --cyber-border-default: 197 215 229; /* line-strong #c5d7e5 */
+    --cyber-border-subtle: 220 232 241;  /* line #dce8f1 */
+    --cyber-border-glow: 76 164 220;
 
-    /* Glass effect */
+    /* 玻璃 */
     --glass-bg: 255 255 255 / 0.85;
-    --glass-border: 203 213 225 / 0.5;
-    --glass-dark-bg: 241 245 249 / 0.9;
-    --glass-dark-border: 203 213 225 / 0.6;
+    --glass-border: 220 232 241 / 0.6;
+    --glass-dark-bg: 251 253 255 / 0.9;
+    --glass-dark-border: 220 232 241 / 0.7;
 
-    /* Shadows - subtle for light mode */
-    --shadow-glow-opacity: 0.2;
-    --shadow-glow-spread: 6px;
+    /* 阴影：柔和、非霓虹 */
+    --shadow-glow-opacity: 0.12;
+    --shadow-glow-spread: 8px;
   }
 
-  /* Dark theme - Full Cyberpunk */
+  /* Dark theme - 克制炭黑 + 浅蓝（无霓虹） */
   .dark {
-    /* Semantic colors */
-    --background: 233 67% 4%;
-    --foreground: 210 20% 93%;
-    --card: 215 21% 11%;
-    --card-foreground: 210 20% 93%;
-    --popover: 213 18% 13%;
-    --popover-foreground: 210 20% 93%;
-    --primary: 180 100% 50%;
-    --primary-foreground: 233 67% 4%;
-    --secondary: 330 100% 50%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 215 14% 17%;
-    --muted-foreground: 215 16% 57%;
-    --accent: 180 100% 50%;
-    --accent-foreground: 233 67% 4%;
-    --destructive: 330 100% 50%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 215 14% 25%;
-    --input: 215 14% 25%;
-    --ring: 180 100% 50%;
+    --background: 160 13% 8%;
+    --foreground: 140 21% 94%;
+    --card: 160 11% 12%;
+    --card-foreground: 140 21% 94%;
+    --popover: 160 11% 13%;
+    --popover-foreground: 140 21% 94%;
+    --primary: 202 84% 71%;
+    --primary-foreground: 160 13% 8%;
+    --secondary: 140 21% 94%;
+    --secondary-foreground: 160 13% 8%;
+    --muted: 155 10% 16%;
+    --muted-foreground: 145 7% 62%;
+    --accent: 202 84% 71%;
+    --accent-foreground: 160 13% 8%;
+    --destructive: 2 56% 71%;
+    --destructive-foreground: 160 13% 8%;
+    --border: 153 8% 21%;
+    --input: 153 8% 21%;
+    --ring: 202 84% 71%;
 
-    /* Cyberpunk color system - Dark variants (original neon) */
-    --cyber-bg-primary: 10 10 15;
-    --cyber-bg-secondary: 13 17 23;
-    --cyber-bg-tertiary: 22 27 34;
-    --cyber-bg-panel: 28 33 40;
-    --cyber-bg-elevated: 33 38 45;
+    --brand: 120 200 243;          /* #78c8f3 */
+    --brand-2: 155 217 248;        /* #9bd9f8 */
+    --brand-soft: 32 56 72;        /* #203848 */
+    --brand-ink: 238 243 239;      /* #eef3ef */
 
-    --cyber-neon-cyan: 0 255 255;
-    --cyber-neon-cyan-dim: 37 177 191;
-    --cyber-neon-pink: 255 0 128;
-    --cyber-neon-pink-dim: 222 40 59;
-    --cyber-neon-green: 0 255 65;
-    --cyber-neon-green-dim: 57 255 20;
-    --cyber-neon-orange: 255 152 0;
-    --cyber-neon-yellow: 255 234 0;
-    --cyber-neon-purple: 191 0 255;
+    --ok: 111 191 156;             /* #6fbf9c */
+    --ok-soft: 28 47 38;
+    --warn: 228 163 110;           /* #e4a36e */
+    --warn-soft: 58 43 32;
+    --danger: 227 139 142;         /* #e38b8e */
+    --danger-soft: 64 39 41;
 
-    --cyber-text-primary: 230 237 243;
-    --cyber-text-secondary: 139 148 158;
-    --cyber-text-muted: 72 79 88;
+    --cyber-bg-primary: 17 22 19;     /* #111613 */
+    --cyber-bg-secondary: 27 34 30;   /* paper #1b221e */
+    --cyber-bg-tertiary: 33 42 37;
+    --cyber-bg-panel: 27 34 30;
+    --cyber-bg-elevated: 34 43 38;
 
-    --cyber-border-default: 48 54 61;
-    --cyber-border-subtle: 33 38 45;
-    --cyber-border-glow: 0 255 255;
+    --cyber-neon-cyan: 120 200 243;
+    --cyber-neon-cyan-dim: 155 217 248;
+    --cyber-neon-pink: 227 139 142;
+    --cyber-neon-pink-dim: 216 126 130;
+    --cyber-neon-green: 111 191 156;
+    --cyber-neon-green-dim: 90 168 132;
+    --cyber-neon-orange: 228 163 110;
+    --cyber-neon-yellow: 233 196 120;
+    --cyber-neon-purple: 150 172 211;
 
-    /* Glass effect */
-    --glass-bg: 22 27 34 / 0.7;
-    --glass-border: 48 54 61 / 0.5;
-    --glass-dark-bg: 13 17 23 / 0.85;
-    --glass-dark-border: 48 54 61 / 0.4;
+    --cyber-text-primary: 238 243 239;
+    --cyber-text-secondary: 160 172 165;
+    --cyber-text-muted: 116 128 120;
 
-    /* Shadows - vibrant for dark mode */
-    --shadow-glow-opacity: 0.5;
+    --cyber-border-default: 66 77 70;
+    --cyber-border-subtle: 48 58 52;
+    --cyber-border-glow: 120 200 243;
+
+    --glass-bg: 27 34 30 / 0.72;
+    --glass-border: 48 58 52 / 0.55;
+    --glass-dark-bg: 17 22 19 / 0.85;
+    --glass-dark-border: 48 58 52 / 0.5;
+
+    --shadow-glow-opacity: 0.16;
     --shadow-glow-spread: 10px;
   }
 
@@ -126,92 +159,81 @@
     border-color: rgb(var(--cyber-border-default));
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     background-color: rgb(var(--cyber-bg-primary));
     color: rgb(var(--cyber-text-primary));
-    font-family: Inter, system-ui, sans-serif;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
     font-size: 15px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  ::selection {
+    background: rgb(var(--brand) / 0.22);
+    color: rgb(var(--cyber-text-primary));
   }
 }
 
 /* ============================
-   Cyberpunk Scrollbar Styles
+   滚动条（克制浅蓝灰；终端保持深色）
    ============================ */
 
-/* Default scrollbar - Light */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
   background: rgb(var(--cyber-bg-secondary));
-  border-left: 1px solid rgb(var(--cyber-neon-cyan) / 0.1);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgb(var(--cyber-neon-cyan) / 0.4), rgb(var(--cyber-neon-pink) / 0.3));
-  border-radius: 0;
+  background: rgb(var(--cyber-border-default) / 0.9);
+  border-radius: 999px;
+  border: 2px solid rgb(var(--cyber-bg-secondary));
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgb(var(--cyber-neon-cyan) / 0.6), rgb(var(--cyber-neon-pink) / 0.5));
+  background: rgb(var(--cyber-text-muted) / 0.9);
 }
 
 ::-webkit-scrollbar-corner {
   background: rgb(var(--cyber-bg-secondary));
 }
 
-/* Terminal scrollbar - always dark */
+/* 终端滚动条：永远深色（终端区域确实需要深色等宽风格） */
 .terminal-scroll::-webkit-scrollbar {
   width: 6px;
 }
 
 .terminal-scroll::-webkit-scrollbar-track {
-  background: #000000;
+  background: #0d1117;
 }
 
 .terminal-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 65, 0.4);
-  border-radius: 0;
+  background: rgba(120, 200, 243, 0.35);
+  border-radius: 999px;
+  border: none;
 }
 
 .terminal-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 255, 65, 0.6);
+  background: rgba(120, 200, 243, 0.55);
 }
 
 /* ============================
-   Cyberpunk Grid Background
-   ============================ */
-
-.cyber-grid {
-  background-color: rgb(var(--cyber-bg-primary));
-  background-image:
-    linear-gradient(rgb(var(--cyber-neon-cyan) / 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--cyber-neon-cyan) / 0.03) 1px, transparent 1px),
-    radial-gradient(ellipse at 50% 0%, rgb(var(--cyber-neon-cyan) / 0.06) 0%, transparent 60%);
-  background-size: 50px 50px, 50px 50px, 100% 100%;
-  background-position: -1px -1px, -1px -1px, center top;
-}
-
-.dark .cyber-grid {
-  background-image:
-    linear-gradient(rgba(0, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 255, 255, 0.02) 1px, transparent 1px),
-    radial-gradient(ellipse at 50% 0%, rgba(0, 255, 255, 0.08) 0%, transparent 60%);
-}
-
-/* ============================
-   Glassmorphism Effects
+   面板与浮层（浅色纸面 + 柔和阴影）
    ============================ */
 
 .glass-panel {
   background: rgb(var(--glass-bg));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgb(var(--glass-border));
 }
 
@@ -223,181 +245,82 @@
 }
 
 .float-panel {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1), 0 0 1px rgb(var(--cyber-neon-cyan) / 0.1);
+  box-shadow: 0 10px 30px rgba(50, 105, 145, 0.09);
 }
 
 .dark .float-panel {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 1px rgba(0, 255, 255, 0.15);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
 .elevated-panel {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 24px 70px rgba(50, 105, 145, 0.1);
 }
 
 .dark .elevated-panel {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
 }
 
-/* ============================
-   Neon Glow Effects
-   ============================ */
-
-/* Text glow - Light mode: subtle shadow, Dark mode: neon glow */
-.glow-text-cyan {
-  text-shadow: 0 1px 3px rgb(var(--cyber-neon-cyan) / 0.3);
+/* 柔和阴影别名（旧类名兼容：不再是霓虹） */
+.glow-cyan,
+.glow-pink,
+.glow-green,
+.glow-orange {
+  box-shadow: 0 10px 30px rgba(50, 105, 145, 0.1);
 }
 
-.dark .glow-text-cyan {
-  text-shadow:
-    0 0 5px rgba(0, 255, 255, 0.8),
-    0 0 10px rgba(0, 255, 255, 0.5),
-    0 0 20px rgba(0, 255, 255, 0.3);
+.glow-cyan-sm,
+.glow-pink-sm,
+.glow-green-sm {
+  box-shadow: 0 4px 14px rgba(50, 105, 145, 0.12);
 }
 
-.glow-text-pink {
-  text-shadow: 0 1px 3px rgb(var(--cyber-neon-pink) / 0.3);
+.dark .glow-cyan,
+.dark .glow-pink,
+.dark .glow-green,
+.dark .glow-orange {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
 }
 
-.dark .glow-text-pink {
-  text-shadow:
-    0 0 5px rgba(255, 0, 128, 0.8),
-    0 0 10px rgba(255, 0, 128, 0.5),
-    0 0 20px rgba(255, 0, 128, 0.3);
+.dark .glow-cyan-sm,
+.dark .glow-pink-sm,
+.dark .glow-green-sm {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
+/* 文本发光旧类名 → 柔和无发光（视觉基准要求不用霓虹） */
+.glow-text-cyan,
+.glow-text-pink,
 .glow-text-green {
-  text-shadow: 0 1px 3px rgb(var(--cyber-neon-green) / 0.3);
-}
-
-.dark .glow-text-green {
-  text-shadow:
-    0 0 5px rgba(0, 255, 65, 0.8),
-    0 0 10px rgba(0, 255, 65, 0.5),
-    0 0 20px rgba(0, 255, 65, 0.3);
-}
-
-/* Box glow - Light mode: subtle shadow, Dark mode: neon glow */
-.glow-cyan {
-  box-shadow: 0 4px 12px rgb(var(--cyber-neon-cyan) / var(--shadow-glow-opacity));
-}
-
-.dark .glow-cyan {
-  box-shadow:
-    0 0 5px rgba(0, 255, 255, 0.5),
-    0 0 10px rgba(0, 255, 255, 0.3),
-    0 0 20px rgba(0, 255, 255, 0.2),
-    inset 0 0 5px rgba(0, 255, 255, 0.1);
-}
-
-.glow-pink {
-  box-shadow: 0 4px 12px rgb(var(--cyber-neon-pink) / var(--shadow-glow-opacity));
-}
-
-.dark .glow-pink {
-  box-shadow:
-    0 0 5px rgba(255, 0, 128, 0.5),
-    0 0 10px rgba(255, 0, 128, 0.3),
-    0 0 20px rgba(255, 0, 128, 0.2);
-}
-
-.glow-green {
-  box-shadow: 0 4px 12px rgb(var(--cyber-neon-green) / var(--shadow-glow-opacity));
-}
-
-.dark .glow-green {
-  box-shadow:
-    0 0 5px rgba(0, 255, 65, 0.5),
-    0 0 10px rgba(0, 255, 65, 0.3),
-    0 0 20px rgba(0, 255, 65, 0.2);
+  text-shadow: none;
 }
 
 /* ============================
-   Corner Decorations
+   背景（去掉 cyber 网格：纯白 / 炭黑）
    ============================ */
 
-.cyber-corner {
-  position: relative;
+.cyber-grid {
+  background-color: rgb(var(--cyber-bg-primary));
+}
+
+/* ============================
+   角落装饰 / 扫描线等旧特效：全部移除（保留类名占位为空）
+   ============================ */
+
+.cyber-corner,
+.cyber-corners,
+.card-scan {
+  position: static;
 }
 
 .cyber-corner::before,
-.cyber-corner::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
-}
-
-.cyber-corner::before {
-  top: -1px;
-  left: -1px;
-  border-top: 2px solid rgb(var(--cyber-neon-cyan) / 0.5);
-  border-left: 2px solid rgb(var(--cyber-neon-cyan) / 0.5);
-}
-
-.cyber-corner::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 2px solid rgb(var(--cyber-neon-cyan) / 0.5);
-  border-right: 2px solid rgb(var(--cyber-neon-cyan) / 0.5);
-}
-
-/* Four corners variant */
-.cyber-corners {
-  position: relative;
-}
-
-.cyber-corners::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(to right, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 0 0,
-    linear-gradient(to right, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 0 100%,
-    linear-gradient(to left, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 100% 0,
-    linear-gradient(to left, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 100% 100%,
-    linear-gradient(to bottom, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 0 0,
-    linear-gradient(to bottom, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 100% 0,
-    linear-gradient(to top, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 0 100%,
-    linear-gradient(to top, rgb(var(--cyber-neon-cyan) / 0.5) 12px, transparent 12px) 100% 100%;
-  background-repeat: no-repeat;
-  background-size: 2px 12px, 2px 12px, 2px 12px, 2px 12px, 12px 2px, 12px 2px, 12px 2px, 12px 2px;
-  pointer-events: none;
-}
-
-/* ============================
-   Card Hover Effects
-   ============================ */
-
-/* Scan effect on hover */
-.card-scan {
-  position: relative;
-  overflow: hidden;
-}
-
+.cyber-corner::after,
+.cyber-corners::before,
 .card-scan::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgb(var(--cyber-neon-cyan) / 0.1),
-    transparent
-  );
-  transition: left 0.6s ease-in-out;
-  pointer-events: none;
-}
-
-.card-scan:hover::after {
-  left: 100%;
+  content: none;
 }
 
 /* ============================
-   Cursor Blink
+   光标闪烁（终端保留）
    ============================ */
 
 .cursor-blink {
@@ -410,7 +333,7 @@
 }
 
 /* ============================
-   Status Indicators
+   状态点（克制，无霓虹光晕）
    ============================ */
 
 .status-dot {
@@ -421,8 +344,6 @@
 
 .status-dot-online {
   background: rgb(var(--cyber-neon-green));
-  box-shadow: 0 0 8px rgb(var(--cyber-neon-green) / 0.6);
-  animation: pulseGlow 2s ease-in-out infinite;
 }
 
 .status-dot-offline {
@@ -431,53 +352,58 @@
 
 .status-dot-warning {
   background: rgb(var(--cyber-neon-orange));
-  box-shadow: 0 0 8px rgb(var(--cyber-neon-orange) / 0.6);
 }
 
 .status-dot-error {
   background: rgb(var(--cyber-neon-pink));
-  box-shadow: 0 0 8px rgb(var(--cyber-neon-pink) / 0.6);
-}
-
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 5px currentColor;
-  }
-  50% {
-    box-shadow: 0 0 15px currentColor, 0 0 25px currentColor;
-  }
 }
 
 /* ============================
-   Input Focus Ring
+   输入聚焦（柔和浅蓝环）
    ============================ */
 
 .cyber-focus {
-  transition: box-shadow 0.2s ease-in-out;
+  transition: box-shadow 0.2s ease-in-out, border-color 0.2s ease-in-out;
 }
 
 .cyber-focus:focus {
   outline: none;
-  box-shadow: 0 0 0 1px rgb(var(--cyber-neon-cyan)), 0 0 10px rgb(var(--cyber-neon-cyan) / 0.3);
-  border-color: rgb(var(--cyber-neon-cyan));
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.16);
+  border-color: rgb(var(--brand) / 0.6);
 }
 
 /* ============================
-   Selection
+   Round 14 动画：下拉 / 卡片浮现 / 状态旋转
    ============================ */
 
-::selection {
-  background: rgb(var(--cyber-neon-cyan) / 0.3);
-  color: rgb(var(--cyber-text-primary));
+@keyframes dshDrop {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-::-moz-selection {
-  background: rgb(var(--cyber-neon-cyan) / 0.3);
-  color: rgb(var(--cyber-text-primary));
+@keyframes dshRise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dshSpin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-dsh-drop {
+  animation: dshDrop 0.18s ease-out;
+}
+
+.animate-dsh-rise {
+  animation: dshRise 0.4s ease-out both;
+}
+
+.animate-dsh-spin {
+  animation: dshSpin 0.8s linear infinite;
 }
 
 /* ============================
-   Performance Optimizations
+   性能优化（保留）
    ============================ */
 
 .will-change-transform {

@@ -21,13 +21,13 @@ type SectionProps = {
 
 function Section({ title, description, icon: Icon, children, className = '' }: SectionProps) {
   return (
-    <section className={`rounded-lg glass-panel float-panel overflow-hidden ${className}`}>
-      <header className="px-4 py-3 border-b border-cyber-border-subtle/50 flex items-center gap-3 bg-cyber-bg-tertiary/30">
-        <div className="h-8 w-8 rounded-md bg-cyber-bg-tertiary border border-cyber-border-subtle flex items-center justify-center flex-shrink-0">
-          <Icon className="h-4 w-4 text-cyber-neon-cyan" />
+    <section className={`rounded-[16px] border border-cyber-border-subtle bg-cyber-bg-secondary shadow-[0_10px_30px_rgba(50,105,145,0.08)] overflow-hidden ${className}`}>
+      <header className="px-4 py-3 border-b border-cyber-border-subtle/60 flex items-center gap-3 bg-cyber-bg-tertiary/40">
+        <div className="h-8 w-8 rounded-[10px] bg-brand-soft border border-brand/20 flex items-center justify-center flex-shrink-0">
+          <Icon className="h-4 w-4 text-brand-strong" />
         </div>
         <div className="min-w-0">
-          <div className="text-xs font-mono font-semibold text-cyber-text-primary tracking-wide">
+          <div className="text-xs font-semibold text-cyber-text-primary tracking-wide">
             {title}
           </div>
           <div className="text-[10px] text-cyber-text-muted leading-snug truncate">

@@ -20,13 +20,13 @@ export function LanguageSwitch() {
 
   return (
     <Select value={i18n.language} onValueChange={(lang) => i18n.changeLanguage(lang)}>
-      <SelectTrigger className="w-20 h-7 text-xs font-mono border-cyber-border-subtle bg-cyber-bg-tertiary/50 hover:border-cyber-neon-cyan/50 transition-colors">
-        <Globe className="w-3 h-3 mr-1 text-cyber-text-secondary" />
+      <SelectTrigger className="w-[76px] h-[38px] text-xs border-cyber-border-subtle bg-cyber-bg-secondary hover:border-brand/50 transition-colors">
+        <Globe className="w-3.5 h-3.5 mr-1 text-cyber-text-secondary" />
         <SelectValue>{currentLang.label}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {languages.map((lang) => (
-          <SelectItem key={lang.code} value={lang.code} className="text-xs font-mono">
+          <SelectItem key={lang.code} value={lang.code} className="text-xs">
             {lang.label}
           </SelectItem>
         ))}

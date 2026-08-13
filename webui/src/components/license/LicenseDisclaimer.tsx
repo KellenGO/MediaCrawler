@@ -64,46 +64,42 @@ export function LicenseDisclaimer({ onAccept }: LicenseDisclaimerProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-[100] overflow-y-auto py-8">
-      <div className="bg-cyber-bg-panel border-2 border-cyber-neon-pink rounded-lg shadow-cyber-card p-6 max-w-2xl w-full mx-4 relative">
-        {/* Corner decorations - Pink/Red theme for seriousness */}
-        <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-cyber-neon-pink" />
-        <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-cyber-neon-pink" />
-        <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-cyber-neon-pink" />
-        <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-cyber-neon-pink" />
-
-        {/* Header with warning icon */}
+    <div className="fixed inset-0 bg-[#172b3d]/60 backdrop-blur-sm flex items-center justify-center z-[100] overflow-y-auto py-8 px-4">
+      <div className="bg-cyber-bg-secondary border border-cyber-border-default rounded-[18px] shadow-[0_24px_70px_rgba(50,105,145,0.16)] p-6 sm:p-8 max-w-2xl w-full relative">
+        {/* Header */}
         <div className="flex items-center justify-center gap-3 mb-4">
-          <ShieldAlert className="w-8 h-8 text-cyber-neon-pink animate-pulse" />
-          <h2 className="text-xl font-mono font-bold text-cyber-neon-pink">
+          <span className="w-11 h-11 rounded-[13px] rounded-bl-[5px] bg-brand/15 grid place-items-center">
+            <ShieldAlert className="w-6 h-6 text-brand-strong" />
+          </span>
+          <h2 className="text-xl font-bold text-cyber-text-primary">
             {t('title')}
           </h2>
         </div>
 
         {/* Warning subtitle */}
-        <div className="text-center mb-4">
-          <span className="text-base font-mono text-cyber-neon-orange">
+        <div className="text-center mb-5">
+          <span className="text-[13.5px] text-warn font-medium">
             {t('warning')}
           </span>
         </div>
 
         {/* Content box */}
-        <div className="bg-black/50 border border-cyber-neon-pink/30 rounded-lg p-4 mb-4">
-          <ul className="space-y-2 text-sm font-mono">
-            <li className="flex items-start gap-2">
-              <span className="text-cyber-neon-pink font-bold">1.</span>
+        <div className="bg-cyber-bg-tertiary border border-cyber-border-subtle rounded-xl p-4 mb-5">
+          <ul className="space-y-2.5 text-[13.5px]">
+            <li className="flex items-start gap-2.5">
+              <span className="text-brand-strong font-bold flex-shrink-0">1.</span>
               <span className="text-cyber-text-primary">{t('content.line1')}</span>
             </li>
-            <li className="flex items-start gap-2">
-              <span className="text-cyber-neon-pink font-bold">2.</span>
+            <li className="flex items-start gap-2.5">
+              <span className="text-brand-strong font-bold flex-shrink-0">2.</span>
               <span className="text-cyber-text-primary">{t('content.line2')}</span>
             </li>
-            <li className="flex items-start gap-2">
-              <span className="text-cyber-neon-pink font-bold">3.</span>
+            <li className="flex items-start gap-2.5">
+              <span className="text-brand-strong font-bold flex-shrink-0">3.</span>
               <span className="text-cyber-text-primary">{t('content.line3')}</span>
             </li>
-            <li className="flex items-start gap-2">
-              <span className="text-cyber-neon-pink font-bold">4.</span>
+            <li className="flex items-start gap-2.5">
+              <span className="text-brand-strong font-bold flex-shrink-0">4.</span>
               <span className="text-cyber-text-primary">{t('content.line4')}</span>
             </li>
           </ul>
@@ -115,7 +111,7 @@ export function LicenseDisclaimer({ onAccept }: LicenseDisclaimerProps) {
             href="https://github.com/NanmiCoder/MediaCrawler/blob/main/LICENSE"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-cyber-neon-cyan hover:underline text-sm font-mono"
+            className="flex items-center gap-1.5 text-brand-strong hover:underline text-sm"
           >
             <ExternalLink className="w-4 h-4" />
             {t('license')}
@@ -123,17 +119,17 @@ export function LicenseDisclaimer({ onAccept }: LicenseDisclaimerProps) {
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-4">
+        <div className="flex gap-3">
           <Button
             onClick={handleDecline}
             variant="outline"
-            className="flex-1 font-mono border-cyber-neon-pink/50 text-cyber-neon-pink hover:bg-cyber-neon-pink/10"
+            className="flex-1 border-danger/50 text-danger hover:bg-danger-soft hover:border-danger/50"
           >
             {t('decline')}
           </Button>
           <Button
             onClick={handleConfirm}
-            className="flex-1 font-mono bg-cyber-neon-green text-black font-bold hover:bg-cyber-neon-green/90"
+            className="flex-1 bg-brand text-white font-bold hover:bg-brand-strong"
           >
             {t('confirm')}
           </Button>

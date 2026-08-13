@@ -1,78 +1,66 @@
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Heart } from 'lucide-react'
+import { Github, ShieldCheck } from 'lucide-react'
 
-export function AuthorFooter() {
-  const { t } = useTranslation('license')
+interface AuthorFooterProps {
+  onShowDisclaimer?: () => void
+}
+
+/** 原项目 GitHub（NanmiCoder/MediaCrawler）。 */
+const ORIGINAL_PROJECT_URL = 'https://github.com/NanmiCoder/MediaCrawler'
+/** 当前项目 GitHub（KellenGong 维护/改造的分支）。 */
+const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/MediaCrawler'
+
+/**
+ * Round 14.3 页脚：普通、低调、随页面内容滚动。
+ * 清楚区分原项目（MediaCrawler / 程序员阿江-Relakkes）与当前项目
+ * （KellenGong 维护/改造），"KellenGong" 与"当前项目 GitHub"都链接到
+ * 当前项目仓库。原项目作者署名保留，不模糊、不误写成官方版本。
+ */
+export function AuthorFooter({ onShowDisclaimer }: AuthorFooterProps) {
+  const { t } = useTranslation()
 
   return (
-    <footer className="h-24 flex-shrink-0 glass-panel border-t border-cyber-border-subtle">
-      <div className="h-full px-6 flex items-center justify-center gap-6">
-        {/* Author Avatar */}
-        <div className="w-14 h-14 rounded-lg overflow-hidden border-2 border-cyber-neon-cyan/60 flex-shrink-0 shadow-glow-cyan-sm">
-          <img
-            src="/logos/my_logo.png"
-            alt="程序员阿江-Relakkes"
-            className="w-full h-full object-cover"
-          />
-        </div>
-
-        {/* Author Info */}
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-cyber-text-primary">
-              {t('author.name')}
-            </span>
-            <Sparkles className="w-5 h-5 text-cyber-neon-cyan animate-pulse" />
-          </div>
-          <span className="text-sm text-cyber-text-muted hidden sm:inline">
-            {t('author.description')}
-          </span>
-          <div className="flex items-center gap-2 text-cyber-neon-cyan">
-            <Heart className="w-4 h-4 fill-current animate-pulse" />
-            <span className="text-sm font-medium">
-              {t('author.slogan')}
-            </span>
-          </div>
-        </div>
-
-        {/* Social Links */}
-        <div className="flex items-center gap-3">
+    <footer className="mt-8 border-t border-cyber-border-subtle">
+      <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[11.5px] text-cyber-text-muted">
+        <span className="flex flex-wrap items-center gap-x-1">
+          {t('footer.attributionPrefix')}
           <a
-            href="https://github.com/NanmiCoder"
+            href={CURRENT_PROJECT_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-11 h-11 rounded-lg flex items-center justify-center border border-cyber-border-subtle hover:border-cyber-neon-cyan hover:shadow-glow-cyan-sm transition-all bg-cyber-bg-tertiary hover:scale-110"
-            title="GitHub"
+            className="font-medium text-cyber-text-secondary hover:text-brand-strong transition-colors"
           >
-            <img src="/logos/github.png" alt="GitHub" className="w-6 h-6 object-contain" />
+            KellenGong
           </a>
+        </span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="hidden sm:inline">{t('footer.localFirst')}</span>
           <a
-            href="https://space.bilibili.com/434377496"
+            href={ORIGINAL_PROJECT_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-11 h-11 rounded-lg flex items-center justify-center border border-cyber-border-subtle hover:border-pink-400 hover:shadow-[0_0_10px_rgba(251,113,133,0.4)] transition-all bg-cyber-bg-tertiary hover:scale-110"
-            title="哔哩哔哩"
+            className="flex items-center gap-1 hover:text-brand-strong transition-colors"
           >
-            <img src="/logos/bilibili_logo.png" alt="Bilibili" className="w-6 h-6 object-contain" />
+            <Github className="w-3.5 h-3.5" />
+            {t('footer.originalProject')}
           </a>
           <a
-            href="https://www.xiaohongshu.com/user/profile/5f58bd990000000001003753"
+            href={CURRENT_PROJECT_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-11 h-11 rounded-lg flex items-center justify-center border border-cyber-border-subtle hover:border-red-400 hover:shadow-[0_0_10px_rgba(248,113,113,0.4)] transition-all bg-cyber-bg-tertiary hover:scale-110"
-            title="小红书"
+            className="flex items-center gap-1 hover:text-brand-strong transition-colors"
           >
-            <img src="/logos/xiaohongshu_logo.png" alt="小红书" className="w-6 h-6 object-contain" />
+            <Github className="w-3.5 h-3.5" />
+            {t('footer.currentProject')}
           </a>
-          <a
-            href="https://www.douyin.com/user/MS4wLjABAAAATJPY7LAlaa5X-c8uNdWkvz0jUGgpw4eeXIwu_8BhvqE"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-11 h-11 rounded-lg flex items-center justify-center border border-cyber-border-subtle hover:border-cyber-text-primary hover:shadow-[0_0_10px_rgba(255,255,255,0.3)] transition-all bg-cyber-bg-tertiary hover:scale-110"
-            title="抖音"
+          <button
+            type="button"
+            onClick={onShowDisclaimer}
+            className="flex items-center gap-1 hover:text-brand-strong transition-colors cursor-pointer"
           >
-            <img src="/logos/douyin.png" alt="抖音" className="w-6 h-6 object-contain" />
-          </a>
+            <ShieldCheck className="w-3.5 h-3.5" />
+            {t('footer.disclaimer')}
+          </button>
         </div>
       </div>
     </footer>

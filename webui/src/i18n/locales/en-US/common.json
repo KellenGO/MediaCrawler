@@ -8,11 +8,71 @@
     "error": "ERROR"
   },
   "sidebar": {
-    "title": "MediaCrawler",
+    "title": "Siyeyu",
     "api": "API",
     "local": "LOCAL",
     "disclaimer": "For personal learning only, commercial use prohibited",
     "license": "License"
+  },
+  "brand": {
+    "name": "四野",
+    "subtitle": "Social media aggregate search"
+  },
+  "nav": {
+    "search": "Search",
+    "accounts": "Accounts",
+    "console": "Crawler Console"
+  },
+  "header": {
+    "localOk": "Local service OK",
+    "localDown": "Local service offline",
+    "account": "Login",
+    "accountChecking": "Checking…",
+    "accountUnavailable": "Unavailable",
+    "accountEmpty": "Checking…",
+    "lastVerified": "Last verified",
+    "staleHint": "Account refresh failed, showing last result",
+    "goAccounts": "Account settings",
+    "help": "Help",
+    "helpTitle": "Terms & Disclaimer",
+    "loginExpiredToast": "{{label}} login expired. Other platforms can still search.",
+    "unverifiedWarningToast": "{{count}} platform(s) not confirmed logged in; others still work."
+  },
+  "search": {
+    "recent": "Recent",
+    "recommended": "Recommended",
+    "clear": "Clear",
+    "placeholder": "Search a topic, person or product…",
+    "submit": "Search",
+    "cancel": "Cancel",
+    "cancelAgain": "Cancel again",
+    "scope": "Scope",
+    "helper": "Enter to search · up to 10 per platform",
+    "enterKeyword": "Type a keyword, pick platforms, start searching",
+    "searching": "Searching…",
+    "cancelling": "Cancelling…",
+    "cancelledNotice": "Search cancelled, previous results kept",
+    "allFailed": "All platforms failed",
+    "partialFailed": "Some platforms failed",
+    "updating": "Updating, showing previous results",
+    "searchFor": "Search:",
+    "completedAt": "finished at",
+    "searchingLive": "Searching…",
+    "retryFailed": "Update failed",
+    "loginNeeded": "Login required on:",
+    "goAccounts": "Account settings",
+    "noResults": "No results on this platform",
+    "retrying": "Retrying"
+  },
+  "footer": {
+    "basedOn": "四野 · Local aggregate search built on MediaCrawler",
+    "localFirst": "Local first · Open source",
+    "author": "Author: Relakkes",
+    "github": "GitHub repository",
+    "disclaimer": "Terms & Disclaimer",
+    "attributionPrefix": "Based on MediaCrawler · Original author: Relakkes · Maintained and adapted by ",
+    "originalProject": "Original project",
+    "currentProject": "Current project GitHub"
   },
   "action": {
     "loading": "Loading...",

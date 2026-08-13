@@ -25,6 +25,7 @@ from aggregate_search.protocol import parse_event_line, WorkerRequest
 from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
 )
+from .accounts import mark_login_required_from_search
 
 WORKER_TIMEOUT_SECONDS = 100
 GRACE_PERIOD_SECONDS = 5.0
@@ -271,8 +272,22 @@ class SearchJobManager:
                         pass
             elif event.event == "error":
                 ed = event.data or {}
-                job.set_platform_status(platform, ed.get("type", "failed"),
-                                       error_summary=_safe_error_summary(ed.get("message", "")))
+                error_type = ed.get("type", "failed")
+                job.set_platform_status(
+                    platform, error_type,
+                    error_summary=_safe_error_summary(ed.get("message", "")))
+                # Round 14.2: worker 明确 login_required → 反向降级 accounts
+                # 服务中的账号状态（accounts 是账号状态的唯一事实来源）。
+                # 账号同步失败绝不能让搜索任务崩溃：try/except 隔离，日志
+                # 只记录平台与异常类型，不记录 worker 原始 body。
+                # rate_limited / failed / timed_out 绝不修改账号状态。
+                if error_type == "login_required":
+                    try:
+                        mark_login_required_from_search(platform)
+                    except Exception as exc:
+                        logger.warning(
+                            "login_required account-state sync failed for "
+                            "platform %s: %s", platform, type(exc).__name__)
             elif event.event == "done":
                 done_received = True
                 break

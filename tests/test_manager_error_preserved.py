@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from aggregate_search.protocol import EVENT_PREFIX, EVENT_SEPARATOR
 from api.schemas.search import SearchJobRequestSchema
 from api.services.search_job_manager import SearchJobManager
+from api.services import accounts as acc
 
 
 class _FakeStdin:
@@ -153,6 +154,162 @@ async def test_rate_limited_not_overwritten(monkeypatch):
     info = job.platforms_state["douyin"]
     assert info.status == "rate_limited"
     assert "no done event" not in (info.error_summary or "")
+
+
+# ── Round 14.2: login_required 反向纠正账号状态 ─────────────────────────
+# SearchJobManager 的真实 _read_worker_output 消费 login_required event 后，
+# accounts 服务的生产状态必须更新；同步失败绝不能崩溃搜索任务；
+# rate_limited/failed 不得误判为登录失效。
+
+def _fake_accounts_profiles(monkeypatch, tmp_path):
+    """把 accounts 的 profile 目录指向临时目录并复位目标平台状态。"""
+    monkeypatch.setattr(acc, "BROWSER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        acc, "profile_dir_for",
+        lambda p: tmp_path / acc.PLATFORM_PROFILE_DIRS[p])
+    acc._platform_state.pop("bilibili", None)
+    acc._platform_state.pop("douyin", None)
+
+
+@pytest.mark.asyncio
+async def test_login_required_event_updates_accounts_state(monkeypatch, tmp_path):
+    """真实 worker error 路径：login_required event → job 平台状态
+    login_required，且 accounts 生产状态 connected → expired / verified=False。
+    worker 消息含 Cookie 字样时，账号 safe_message 仍为固定安全文案。"""
+    _fake_accounts_profiles(monkeypatch, tmp_path)
+    acc.profile_dir_for("bilibili").mkdir(parents=True)
+    acc._set_state("bilibili", status="connected", verified=True,
+                   last_verified_at="2026-08-13T00:00:00+00:00")
+
+    manager = SearchJobManager()
+    resp = await manager.create_job(SearchJobRequestSchema(
+        keyword="k", platforms=["bilibili"], limit_per_platform=1))
+    job_id = resp.job_id
+    out_lines = [
+        _event_line(job_id, "status", {"status": "running"},
+                    platform="bilibili"),
+        _event_line(job_id, "error", {
+            "type": "login_required",
+            "message": "SESSDATA cookie expired, please login",
+        }, platform="bilibili"),
+    ]
+
+    async def fake_exec(*a, **k):
+        return _FakeProc(out_lines, rc=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    job = manager._active_job
+    await asyncio.wait_for(job.task, timeout=10)
+
+    assert job.platforms_state["bilibili"].status == "login_required"
+    st = acc._state_of("bilibili")
+    assert st["status"] == "expired"
+    assert st["verified"] is False
+    assert st["safe_error_code"] == "login_required"
+    assert st["safe_message"] == "B站登录状态已失效，请前往账号设置重新同步"
+    assert "SESSDATA" not in st["safe_message"]
+    assert "cookie" not in st["safe_message"].lower()
+    assert st["last_verified_at"] == "2026-08-13T00:00:00+00:00", \
+        "降级不得清除 last_verified_at"
+
+
+@pytest.mark.asyncio
+async def test_account_sync_failure_does_not_crash_job(monkeypatch, tmp_path):
+    """账号状态同步抛异常 → 搜索任务不崩溃，平台状态仍为 login_required。"""
+    _fake_accounts_profiles(monkeypatch, tmp_path)
+    acc.profile_dir_for("bilibili").mkdir(parents=True)
+    acc._set_state("bilibili", status="connected", verified=True)
+
+    def boom(platform):
+        raise RuntimeError("accounts service down")
+
+    monkeypatch.setattr(
+        "api.services.search_job_manager.mark_login_required_from_search", boom)
+
+    manager = SearchJobManager()
+    resp = await manager.create_job(SearchJobRequestSchema(
+        keyword="k", platforms=["bilibili"], limit_per_platform=1))
+    job_id = resp.job_id
+    out_lines = [
+        _event_line(job_id, "error", {"type": "login_required",
+                                      "message": "need login"},
+                    platform="bilibili"),
+    ]
+
+    async def fake_exec(*a, **k):
+        return _FakeProc(out_lines, rc=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    job = manager._active_job
+    await asyncio.wait_for(job.task, timeout=10)
+
+    assert job.platforms_state["bilibili"].status == "login_required"
+    assert job.platforms_state["bilibili"].error_summary == "need login"
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_does_not_touch_account_state(monkeypatch, tmp_path):
+    """rate_limited / failed 不得误判为登录失效：账号状态保持 connected。"""
+    _fake_accounts_profiles(monkeypatch, tmp_path)
+    acc.profile_dir_for("douyin").mkdir(parents=True)
+    acc._set_state("douyin", status="connected", verified=True)
+
+    manager = SearchJobManager()
+    resp = await manager.create_job(SearchJobRequestSchema(
+        keyword="k", platforms=["douyin"], limit_per_platform=1))
+    job_id = resp.job_id
+    out_lines = [
+        _event_line(job_id, "status", {"status": "running"},
+                    platform="douyin"),
+        _event_line(job_id, "error", {"type": "rate_limited",
+                                      "message": "限流"},
+                    platform="douyin"),
+    ]
+
+    async def fake_exec(*a, **k):
+        return _FakeProc(out_lines, rc=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    job = manager._active_job
+    await asyncio.wait_for(job.task, timeout=10)
+
+    assert job.platforms_state["douyin"].status == "rate_limited"
+    st = acc._state_of("douyin")
+    assert st["status"] == "connected", "rate_limited 不得降级账号状态"
+    assert st["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_does_not_touch_account_state(monkeypatch, tmp_path):
+    """generic failed 同样不得修改账号状态。"""
+    _fake_accounts_profiles(monkeypatch, tmp_path)
+    acc.profile_dir_for("douyin").mkdir(parents=True)
+    acc._set_state("douyin", status="connected", verified=True)
+
+    manager = SearchJobManager()
+    resp = await manager.create_job(SearchJobRequestSchema(
+        keyword="k", platforms=["douyin"], limit_per_platform=1))
+    job_id = resp.job_id
+    out_lines = [
+        _event_line(job_id, "error", {"type": "failed", "message": "boom"},
+                    platform="douyin"),
+    ]
+
+    async def fake_exec(*a, **k):
+        return _FakeProc(out_lines, rc=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    job = manager._active_job
+    await asyncio.wait_for(job.task, timeout=10)
+
+    assert job.platforms_state["douyin"].status == "failed"
+    st = acc._state_of("douyin")
+    assert st["status"] == "connected"
+    assert st["verified"] is True
 
 
 @pytest.mark.asyncio

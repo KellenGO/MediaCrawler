@@ -51,6 +51,14 @@ PLATFORM_PROFILE_DIRS: Dict[str, str] = {
     "zhihu": "zhihu_user_data_dir",
 }
 
+# Platform slug -> 展示名（用于固定安全文案，无任何敏感信息）。
+PLATFORM_DISPLAY_NAMES: Dict[str, str] = {
+    "xhs": "小红书",
+    "douyin": "抖音",
+    "bilibili": "B站",
+    "zhihu": "知乎",
+}
+
 PLATFORM_HOME_URLS: Dict[str, str] = {
     "xhs": "https://www.xiaohongshu.com",
     "douyin": "https://www.douyin.com",
@@ -440,6 +448,39 @@ def _set_state(platform: str, **kw: Any) -> Dict[str, Any]:
     for k, v in kw.items():
         st[k] = v
     return st
+
+
+def mark_login_required_from_search(platform: str) -> None:
+    """Search worker reported ``login_required`` for this platform — downgrade
+    the in-memory account state WITHOUT launching a browser, touching the
+    profile, or reading cookies.
+
+    Round 14.2: this is the ONLY search→account state write, keeping the
+    accounts service the single source of truth for account status.
+
+    Rules:
+    - a local profile exists (previously imported) or the platform was
+      connected → status ``expired``;
+    - no local profile at all → ``disconnected``;
+    - ``verified`` is always False;
+    - fixed ``safe_error_code="login_required"`` and a fixed safe_message
+      (never the worker's raw body — no cookies/headers/tracebacks);
+    - profile dir, display_name, last_verified_at and browser_backend are
+      preserved (never cleared, never read);
+    - idempotent: repeating the call leaves the same state.
+    """
+    if platform not in PLATFORM_PROFILE_DIRS:
+        raise PlatformError(f"不支持的平台: {platform}")
+    st = _state_of(platform)
+    profile_exists = profile_dir_for(platform).is_dir()
+    if profile_exists or st.get("status") == "connected":
+        st["status"] = "expired"
+    else:
+        st["status"] = "disconnected"
+    st["verified"] = False
+    st["safe_error_code"] = "login_required"
+    name = PLATFORM_DISPLAY_NAMES.get(platform, platform)
+    st["safe_message"] = f"{name}登录状态已失效，请前往账号设置重新同步"
 
 
 # ── Browser resolution (server side) ────────────────────────────────────

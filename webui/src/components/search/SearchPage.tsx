@@ -1,12 +1,11 @@
 import { useCallback, useState } from "react";
 import { AlertTriangle, RotateCcw, Loader2, UserCog, RefreshCw } from "lucide-react";
 import { SearchBar } from "./SearchBar";
-import { SearchHistory } from "./SearchHistory";
 import { PlatformStatus } from "./PlatformStatus";
 import { ResultTabs } from "./ResultTabs";
 import { useSearchExperience } from "@/hooks/useSearchExperience";
 import type { PlatformSlug } from "@/types/search";
-import { PLATFORM_LABELS, PLATFORM_ICONS } from "@/types/search";
+import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 
 interface SearchPageProps {
@@ -14,7 +13,12 @@ interface SearchPageProps {
   onNavigateAccounts?: () => void;
 }
 
-export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPageProps) {
+/**
+ * Round 14 搜索页：主体从搜索框开始，下面直接呈现状态与搜索结果。
+ * 业务状态逻辑（Round 12–13）原样保留：快照 / 单平台重试合并 / 取消 /
+ * 历史 / 任务恢复 —— 本组件只改布局与视觉。
+ */
+export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
   const {
     displayJobResponse,
     refreshing,
@@ -79,8 +83,7 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
   // search_start 清除。
   // 【组件接线，人工验收】即使搜索 POST 失败，可见平台选择与 localStorage
   // 偏好也保持历史项的平台（用户已主动切换搜索条件）；只发起一次搜索由
-  // hook 的 busy + taskInFlight 双 guard 保证。此同步逻辑不在 reducer 自动
-  // 测试范围内。
+  // hook 的 busy + taskInFlight 双 guard 保证。
   const handleHistoryClickLocal = useCallback(
     (item: SearchHistoryItem) => {
       setKeyword(item.keyword);
@@ -115,24 +118,8 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
   const showInitialLoading = !displayJobResponse && busy && !hasError;
 
   return (
-    <div className="flex flex-col items-center px-4 py-6 h-full overflow-y-auto">
-      <div className="text-center mb-6">
-        <h1 className="text-2xl font-mono font-bold text-cyber-text-primary">
-          中文社交平台聚合搜索
-        </h1>
-        <p className="mt-2 text-sm font-mono text-cyber-text-muted">
-          同时搜索 小红书 · 抖音 · B站 · 知乎
-        </p>
-        {onNavigateConsole && (
-          <button
-            onClick={onNavigateConsole}
-            className="mt-2 text-xs font-mono text-cyber-text-muted hover:text-cyber-neon-cyan transition-colors underline underline-offset-2"
-          >
-            高级功能 → 原始爬虫控制台
-          </button>
-        )}
-      </div>
-
+    <div className="pt-7 pb-4">
+      {/* 搜索面板（含聚焦浮层：最近搜索 / 推荐搜索） */}
       <SearchBar
         keyword={keyword}
         onKeywordChange={setKeyword}
@@ -143,17 +130,13 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
         onCancel={handleCancelClick}
         isCancelling={isCancellingState}
         onReset={handleResetLocal}
-      />
-
-      {/* 最近搜索（busy 时禁用回放/删除/清空，避免后端 409 与状态不一致） */}
-      <SearchHistory
         history={history}
-        disabled={busy}
-        onItemClick={handleHistoryClickLocal}
-        onRemove={removeHistory}
-        onClear={clearHistory}
+        onHistoryClick={handleHistoryClickLocal}
+        onHistoryRemove={removeHistory}
+        onHistoryClear={clearHistory}
       />
 
+      {/* 平台搜索状态（统一浅色状态卡） */}
       <PlatformStatus
         response={displayJobResponse ?? undefined}
         onRetry={handleRetry}
@@ -163,7 +146,7 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
 
       {/* Cancelling */}
       {isCancellingState && (
-        <div className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg border border-cyber-neon-orange/50 bg-cyber-neon-orange/10 text-cyber-neon-orange font-mono text-sm">
+        <div className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-warn/40 bg-warn-soft text-warn text-sm w-fit">
           <Loader2 className="w-4 h-4 animate-spin" />
           正在取消搜索...
         </div>
@@ -173,13 +156,13 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
           任务仍在运行（轮询继续），提供"再次取消"，不清除旧结果，
           不错误显示"已取消"。 */}
       {cancelError && (
-        <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-lg border border-cyber-neon-orange/60 bg-cyber-neon-orange/10 text-cyber-neon-orange font-mono text-sm max-w-2xl w-full">
+        <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-xl border border-warn/50 bg-warn-soft text-warn text-sm max-w-2xl w-full">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <span className="flex-1">{cancelError}</span>
           <button
             onClick={handleCancelClick}
             disabled={isCancellingState}
-            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded border border-cyber-neon-orange/60 hover:bg-cyber-neon-orange/20 text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg border border-warn/50 hover:bg-warn/10 text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Loader2 className="w-3 h-3" />再次取消
           </button>
@@ -189,7 +172,7 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
       {/* Cancelled（取消保留旧结果，提示由真实终态驱动） */}
       {cancelledNotice && !busy && !createError && !cancelError && (
         <div className="mt-6 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-cyber-neon-orange/50 bg-cyber-neon-orange/10 text-cyber-neon-orange font-mono text-sm">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-warn/40 bg-warn-soft text-warn text-sm">
             ⏹ 搜索已取消，保留上次结果
           </div>
         </div>
@@ -197,10 +180,10 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
 
       {/* Error */}
       {(createError || pollError) && (
-        <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-lg border border-cyber-neon-pink/50 bg-cyber-neon-pink/10 text-cyber-neon-pink font-mono text-sm max-w-2xl w-full">
+        <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-xl border border-danger/40 bg-danger-soft text-danger text-sm max-w-2xl w-full">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <span className="flex-1">{getErrorMessage(createError || pollError)}</span>
-          <button onClick={handleReset} className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded border border-cyber-neon-pink/50 hover:bg-cyber-neon-pink/20 text-xs transition-all">
+          <button onClick={handleReset} className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg border border-danger/40 hover:bg-danger/10 text-xs transition-all">
             <RotateCcw className="w-3 h-3" />重试
           </button>
         </div>
@@ -209,8 +192,7 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
       {/* Initial idle */}
       {showInitialIdle && (
         <div className="mt-16 text-center">
-          <div className="text-5xl mb-4">🔍</div>
-          <p className="text-sm font-mono text-cyber-text-muted">
+          <p className="text-sm text-cyber-text-muted">
             输入关键词，选择平台，开始跨平台搜索
           </p>
         </div>
@@ -219,8 +201,8 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
       {/* Initial loading（首次搜索，无旧结果可展示） */}
       {showInitialLoading && (
         <div className="mt-16 text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyber-neon-cyan border-t-transparent" />
-          <p className="mt-4 text-sm font-mono text-cyber-text-muted">
+          <div className="inline-block animate-dsh-spin rounded-full h-8 w-8 border-2 border-brand border-t-transparent" />
+          <p className="mt-4 text-sm text-cyber-text-muted">
             正在搜索中...
           </p>
         </div>
@@ -229,17 +211,17 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
       {/* Failed (all platforms) */}
       {displayJobResponse && displayJobResponse.overall === "failed" && (
         <div className="mt-6 w-full max-w-2xl">
-          <div className="text-center mb-4 px-4 py-2 rounded-lg border border-cyber-neon-pink/50 bg-cyber-neon-pink/10 text-cyber-neon-pink font-mono text-sm">
+          <div className="text-center mb-3 px-4 py-2 rounded-xl border border-danger/40 bg-danger-soft text-danger text-sm">
             <AlertTriangle className="w-4 h-4 inline mr-2" />所有平台搜索失败
           </div>
           {Object.entries(displayJobResponse.platforms).map(([p, info]) => (
-            <div key={p} className="flex items-center justify-between px-3 py-2 mb-1 rounded bg-cyber-bg-tertiary border border-cyber-border-subtle text-sm font-mono">
-              <span className="text-cyber-text-muted">
-                {PLATFORM_ICONS[p as PlatformSlug]} {PLATFORM_LABELS[p as PlatformSlug] || p}: {info.error_summary || info.status}
+            <div key={p} className="flex items-center justify-between px-3.5 py-2.5 mb-1.5 rounded-lg bg-cyber-bg-secondary border border-cyber-border-subtle text-sm">
+              <span className="text-cyber-text-secondary">
+                {PLATFORM_LABELS[p as PlatformSlug] || p}: {info.error_summary || info.status}
               </span>
               {info.status === "login_required" && (
                 <button onClick={handleGoAccounts}
-                  className="px-3 py-1 rounded bg-cyber-neon-cyan/20 border border-cyber-neon-cyan/50 text-cyber-neon-cyan hover:bg-cyber-neon-cyan/30 text-xs transition-all">
+                  className="px-3 py-1 rounded-lg bg-brand-soft border border-brand/40 text-brand-strong hover:bg-brand/10 text-xs transition-all">
                   <UserCog className="w-3 h-3 inline mr-1" />前往账号设置
                 </button>
               )}
@@ -250,7 +232,7 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
 
       {/* Partial */}
       {displayJobResponse && displayJobResponse.overall === "partial" && (
-        <div className="mt-4 w-full max-w-2xl px-3 py-2 rounded-lg border border-cyber-neon-orange/50 bg-cyber-neon-orange/10 text-cyber-neon-orange font-mono text-xs">
+        <div className="mt-4 w-full max-w-2xl px-3.5 py-2 rounded-xl border border-warn/40 bg-warn-soft text-warn text-xs">
           ⚠ 部分平台失败: {Object.entries(displayJobResponse.platforms)
             .filter(([, i]) => !["succeeded", "empty"].includes(i.status))
             .map(([p, i]) => `${PLATFORM_LABELS[p as PlatformSlug] || p}(${i.error_summary || i.status})`)
@@ -258,41 +240,39 @@ export function SearchPage({ onNavigateConsole, onNavigateAccounts }: SearchPage
         </div>
       )}
 
-      {/* Results */}
+      {/* Results（全宽布局，无右侧栏） */}
       {displayJobResponse && displayJobResponse.overall !== "failed" && (
-        <div className={`w-full max-w-3xl mt-4 transition-opacity ${refreshing ? "opacity-60" : "opacity-100"}`}>
+        <div className={`w-full mt-4 transition-opacity ${refreshing ? "opacity-60" : "opacity-100"}`}>
           {refreshing && (
-            <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-cyber-neon-cyan/50 bg-cyber-neon-cyan/10 text-cyber-neon-cyan font-mono text-xs">
+            <div className="mb-3 flex items-center gap-2 px-3.5 py-2 rounded-xl border border-brand/40 bg-brand-soft text-brand-strong text-xs w-fit">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               正在更新，暂时显示上次结果
             </div>
           )}
 
-          <p className="text-xs font-mono text-cyber-text-muted mb-2">
+          <p className="text-xs text-cyber-text-muted mb-2">
             搜索: <span className="text-cyber-text-primary">{displayJobResponse.keyword}</span>
             {isTerminal && displayJobResponse.completed_at && (
               <span className="ml-3">完成于 {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
             )}
-            {!isTerminal && <span className="ml-3 text-cyber-neon-cyan animate-pulse">搜索中...</span>}
+            {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
           </p>
 
           {/* 单平台重试失败提示（保留旧结果，仅显示安全摘要） */}
           {Object.entries(retryErrors).map(([platform, message]) => (
-            <div key={platform} className="mb-2 px-3 py-2 rounded-lg border border-cyber-neon-pink/40 bg-cyber-neon-pink/5 text-cyber-neon-pink font-mono text-xs">
+            <div key={platform} className="mb-2 px-3.5 py-2 rounded-xl border border-danger/30 bg-danger-soft text-danger text-xs">
               更新失败：{PLATFORM_LABELS[platform as PlatformSlug] || platform} {message}
             </div>
           ))}
 
           {Object.entries(displayJobResponse.platforms).some(([, i]) => i.status === "login_required") && (
-            <div className="mb-3 p-3 rounded-lg border border-cyber-neon-orange/30 bg-cyber-neon-orange/5">
-              <p className="text-xs font-mono text-cyber-neon-orange mb-2">以下平台需要先登录：</p>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={handleGoAccounts}
-                  className="px-3 py-1.5 rounded-lg bg-cyber-neon-orange/10 border border-cyber-neon-orange/40 text-cyber-neon-orange hover:bg-cyber-neon-orange/20 text-xs font-mono transition-all">
-                  <UserCog className="w-3 h-3 inline mr-1" />
-                  前往账号设置
-                </button>
-              </div>
+            <div className="mb-3 p-3 rounded-xl border border-warn/30 bg-warn-soft/60">
+              <p className="text-xs text-warn mb-2">以下平台需要先登录：</p>
+              <button onClick={handleGoAccounts}
+                className="px-3 py-1.5 rounded-lg bg-warn-soft border border-warn/40 text-warn hover:bg-warn/10 text-xs transition-all">
+                <UserCog className="w-3 h-3 inline mr-1" />
+                前往账号设置
+              </button>
             </div>
           )}
 
