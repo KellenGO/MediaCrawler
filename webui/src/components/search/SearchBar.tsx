@@ -4,6 +4,7 @@ import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { INITIAL_POPOVER_STATE, searchPopoverReducer } from "@/lib/searchPopover";
+import type { PlatformLimitMap } from "@/lib/platformLimits";
 import { SearchPopover } from "./SearchPopover";
 
 const ALL_PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
@@ -23,6 +24,8 @@ interface SearchBarProps {
   onHistoryClick: (item: SearchHistoryItem) => void;
   onHistoryRemove: (index: number) => void;
   onHistoryClear: () => void;
+  // Round 15: 每个平台独立搜索数量（仅展示）。
+  limits: PlatformLimitMap;
 }
 
 export function SearchBar({
@@ -39,6 +42,7 @@ export function SearchBar({
   onHistoryClick,
   onHistoryRemove,
   onHistoryClear,
+  limits,
 }: SearchBarProps) {
   // 浮层开/关由生产 reducer 驱动（lib/searchPopover，node:test 已覆盖规则）。
   // 注意：reducer 状态是字符串 "open"/"closed"，两者都 truthy，
@@ -218,10 +222,13 @@ export function SearchBar({
                 style={{ backgroundColor: color, opacity: isSelected ? 1 : 0.45 }}
               />
               {PLATFORM_LABELS[p]}
+              <span className="ml-0.5 text-[10px] leading-none px-1.5 py-1 rounded-full bg-cyber-bg-tertiary text-cyber-text-muted">
+                {limits[p]}
+              </span>
             </button>
           );
         })}
-        <span className="ml-auto hidden sm:inline text-[12px] text-cyber-text-muted pr-1.5">Enter 搜索 · 最多 10 条 / 平台</span>
+        <span className="ml-auto hidden sm:inline text-[12px] text-cyber-text-muted pr-1.5">按平台设置 · 单个平台最多 20 条</span>
       </div>
     </form>
   );

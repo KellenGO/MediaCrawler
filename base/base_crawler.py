@@ -18,8 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from playwright.async_api import BrowserContext, BrowserType, Playwright
 
@@ -138,6 +137,21 @@ class AbstractCrawler(ABC):
         if opts is None:
             return False
         return getattr(opts, "allow_public_search", False)
+
+    def _stream_results(self) -> bool:
+        """Return True if each detail should be pushed to the sink as soon as
+        it is fetched (in original order) instead of after the whole batch."""
+        opts = self.runtime_options
+        if opts is None:
+            return False
+        return getattr(opts, "stream_results", False)
+
+    def _reuse_http_client(self) -> bool:
+        """Return True if the platform client should reuse one httpx client."""
+        opts = self.runtime_options
+        if opts is None:
+            return False
+        return getattr(opts, "reuse_http_client", False)
 
 
 class AbstractLogin(ABC):

@@ -20,6 +20,7 @@
 import asyncio
 import os
 import random
+import time
 from asyncio import Task
 from typing import Dict, List, Optional
 
@@ -155,13 +156,18 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     utils.logger.info(f"[XiaoHongShuCrawler.search] search Xiaohongshu keyword: {keyword}, page: {page}")
                     note_ids: List[str] = []
                     xsec_tokens: List[str] = []
+                    _req_start = time.perf_counter()
                     notes_res = await self.xhs_client.get_note_by_keyword(
                         keyword=keyword,
                         search_id=search_id,
                         page=page,
                         sort=(SearchSortType(config.SORT_TYPE) if config.SORT_TYPE != "" else SearchSortType.GENERAL),
                     )
-                    utils.logger.info(f"[XiaoHongShuCrawler.search] Search notes response: {notes_res}")
+                    item_count = len((notes_res or {}).get("items", {}) or {})
+                    utils.logger.info(
+                        f"[XiaoHongShuCrawler.search] page {page} got {item_count} items "
+                        f"in {(time.perf_counter() - _req_start) * 1000:.0f}ms"
+                    )
                     if not notes_res:
                         utils.logger.info("[XiaoHongShuCrawler.search] No response!")
                         break
@@ -177,21 +183,50 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         if i.get("model_type") not in ("rec_query", "hot_query")
                     ]
                     items_to_fetch = filtered_items[:remaining]
-
                     semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-                    task_list = [
-                        self.get_note_detail_async_task(
-                            note_id=post_item.get("id"),
-                            xsec_source=post_item.get("xsec_source"),
-                            xsec_token=post_item.get("xsec_token"),
-                            semaphore=semaphore,
-                        ) for post_item in items_to_fetch
-                    ]
-                    note_details = await asyncio.gather(*task_list)
-                    # ── aggregate-search hook: push native results to sink ──
-                    valid_details = [d for d in note_details if d]
-                    remaining -= len(valid_details)
-                    self._result_sink_call(valid_details)
+
+                    if self._stream_results():
+                        # Phase 3.1 渐进 sink：先创建 Task 并发运行，再按原始
+                        # 顺序 await，每得到一条合法详情立即发送（不等全部完成）。
+                        task_list = [
+                            asyncio.create_task(self.get_note_detail_async_task(
+                                note_id=post_item.get("id"),
+                                xsec_source=post_item.get("xsec_source"),
+                                xsec_token=post_item.get("xsec_token"),
+                                semaphore=semaphore,
+                            )) for post_item in items_to_fetch
+                        ]
+                        valid_details = []
+                        try:
+                            for task in task_list:
+                                note_detail = await task
+                                if note_detail:
+                                    valid_details.append(note_detail)
+                                    self._result_sink_call([note_detail])
+                        except BaseException:
+                            # strict_errors=True：异常照常上抛；取消并回收
+                            # 剩余任务，绝不遗留后台 task。
+                            for t in task_list:
+                                if not t.done():
+                                    t.cancel()
+                            await asyncio.gather(*task_list, return_exceptions=True)
+                            raise
+                        remaining -= len(valid_details)
+                    else:
+                        # 旧行为：全部 gather 完成后统一发送。
+                        task_list = [
+                            self.get_note_detail_async_task(
+                                note_id=post_item.get("id"),
+                                xsec_source=post_item.get("xsec_source"),
+                                xsec_token=post_item.get("xsec_token"),
+                                semaphore=semaphore,
+                            ) for post_item in items_to_fetch
+                        ]
+                        note_details = await asyncio.gather(*task_list)
+                        # ── aggregate-search hook: push native results to sink ──
+                        valid_details = [d for d in note_details if d]
+                        remaining -= len(valid_details)
+                        self._result_sink_call(valid_details)
                     for note_detail in valid_details:
                         if self._should_persist():
                             await xhs_store.update_xhs_note(note_detail)
@@ -200,13 +235,16 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         note_ids.append(note_detail.get("note_id"))
                         xsec_tokens.append(note_detail.get("xsec_token"))
                     page += 1
-                    utils.logger.info(f"[XiaoHongShuCrawler.search] Note details: {note_details}")
+                    utils.logger.info(
+                        f"[XiaoHongShuCrawler.search] page {page-1}: {len(valid_details)} valid details"
+                    )
                     if self._should_fetch_comments():
                         await self.batch_get_note_comments(note_ids, xsec_tokens)
 
-                    # Sleep after each page navigation
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                    utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                    # Sleep after each page navigation（已达 limit 时无需再等下一页）
+                    if remaining > 0:
+                        await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                        utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                     # Check has_more AFTER processing items (fix: don't discard last page)
                     if not notes_res.get("has_more", False):
@@ -432,6 +470,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
             proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
+            reuse_http_client=self._reuse_http_client(),
         )
         return xhs_client_obj
 

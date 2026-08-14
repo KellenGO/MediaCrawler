@@ -106,21 +106,6 @@ class TieBaExtractor:
             return ""
         return f"{const.TIEBA_URL}/home/main?id={quote(str(portrait))}"
 
-    @staticmethod
-    def _api_user_avatar(user: Dict) -> str:
-        image_data = (
-            (user or {})
-            .get("user_show_info", {})
-            .get("feed_head", {})
-            .get("image_data", {})
-        )
-        return image_data.get("img_url") or (
-            "https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/"
-            f"{user.get('portrait', '')}"
-            if user and user.get("portrait")
-            else ""
-        )
-
     def extract_search_note_list_from_api(self, api_data: Dict) -> List[TiebaNote]:
         """
         Extract Tieba post list from current PC search JSON API.
@@ -518,11 +503,11 @@ class TieBaExtractor:
             f"//div[@id='thread_theme_5']//li[{self._class_contains('l_reply_num')}]"
             f"//span[{self._class_contains('red')}]"
         )
-        # IP location and publish time
+        # IP location and publish time (IP 属地不再落库)
         other_info_content = first_floor_selector.xpath(
             f".//div[{self._class_contains('post-tail-wrap')}]"
         ).get(default="").strip()
-        ip_location, publish_time = self.extract_ip_and_pub_time(other_info_content)
+        _, publish_time = self.extract_ip_and_pub_time(other_info_content)
         tieba_name, tieba_link = self._extract_forum_info(content_selector, page_content)
         first_floor_value = self.extract_data_field_value(first_floor_selector)
         author_value = first_floor_value.get("author", {}) if first_floor_value else {}
@@ -579,7 +564,7 @@ class TieBaExtractor:
             other_info_content = comment_selector.xpath(
                 f".//div[{self._class_contains('post-tail-wrap')}]"
             ).get(default="").strip()
-            ip_location, publish_time = self.extract_ip_and_pub_time(other_info_content)
+            _, publish_time = self.extract_ip_and_pub_time(other_info_content)
             user_selector = comment_selector.xpath(f".//a[{self._class_contains('p_author_name')}][1]")
             user_avatar = comment_selector.xpath(
                 f".//a[{self._class_contains('p_author_face')}]//img/@src"
@@ -740,22 +725,6 @@ class TieBaExtractor:
         return ip
 
     @staticmethod
-    def extract_gender(html_content: str) -> str:
-        """
-        Extract gender from HTML content
-        Args:
-            html_content: HTML string
-
-        Returns:
-            Gender string ('Male', 'Female', or 'Unknown')
-        """
-        if GENDER_MALE in html_content:
-            return 'Male'
-        elif GENDER_FEMALE in html_content:
-            return 'Female'
-        return 'Unknown'
-
-    @staticmethod
     def extract_follow_and_fans(selectors: List[Selector]) -> Tuple[str, str]:
         """
         Extract follow count and fan count from selectors
@@ -810,65 +779,3 @@ class TieBaExtractor:
             print(f"extract_data_field_value, error: {ex}, trying alternative parsing method")
             data_field_dict_value = {}
         return data_field_dict_value
-
-
-def test_extract_search_note_list():
-    with open("test_data/search_keyword_notes.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        result = extractor.extract_search_note_list(content)
-        print(result)
-
-
-def test_extract_note_detail():
-    with open("test_data/note_detail.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        result = extractor.extract_note_detail(content)
-        print(result.model_dump())
-
-
-def test_extract_tieba_note_parment_comments():
-    with open("test_data/note_comments.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        result = extractor.extract_tieba_note_parment_comments(content, "123456")
-        print(result)
-
-
-def test_extract_tieba_note_sub_comments():
-    with open("test_data/note_sub_comments.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        fake_parment_comment = TiebaComment(comment_id="123456", content="content", creator_hash="creator_hash",
-                                            user_nickname="user_nickname",
-                                            publish_time="publish_time", parent_comment_id="parent_comment_id",
-                                            note_id="note_id", note_url="note_url", tieba_id="tieba_id",
-                                            tieba_name="tieba_name", )
-        result = extractor.extract_tieba_note_sub_comments(content, fake_parment_comment)
-        print(result)
-
-
-def test_extract_tieba_note_list():
-    with open("test_data/tieba_note_list.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        result = extractor.extract_tieba_note_list(content)
-        print(result)
-    pass
-
-
-def test_extract_creator_info():
-    with open("test_data/creator_info.html", "r", encoding="utf-8") as f:
-        content = f.read()
-        extractor = TieBaExtractor()
-        result = extractor.extract_creator_info(content)
-        print(result.model_dump_json())
-
-
-if __name__ == '__main__':
-    # test_extract_search_note_list()
-    # test_extract_note_detail()
-    # test_extract_tieba_note_parment_comments()
-    # test_extract_tieba_note_list()
-    test_extract_creator_info()

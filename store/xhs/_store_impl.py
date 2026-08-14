@@ -16,107 +16,37 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-# @Author  : persist1@126.com
-# @Time    : 2025/9/5 19:34
-# @Desc    : Xiaohongshu storage implementation class
-import json
-import os
-from datetime import datetime
-from typing import List, Dict, Any
+"""Xiaohongshu storage implementation."""
 
-from sqlalchemy import select, update, delete
+import json
+from typing import Dict
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from base.base_crawler import AbstractStore
 from database.db_session import get_session
 from database.models import XhsNote, XhsNoteComment
-
-from tools.async_file_writer import AsyncFileWriter
+from store.base_store_impl import (
+    CsvStoreImplement,
+    ExcelStoreImplement,
+    JsonStoreImplement,
+    JsonlStoreImplement,
+    MongoStoreImplement,
+)
 from tools.time_util import get_current_timestamp
-from var import crawler_type_var
-from database.mongodb_store_base import MongoDBStoreBase
-from tools import utils
-from store.excel_store_base import ExcelStoreBase
-
-class XhsCsvStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="xhs", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        """
-        store content data to csv file
-        :param content_item:
-        :return:
-        """
-        await self.writer.write_to_csv(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        store comment data to csv file
-        :param comment_item:
-        :return:
-        """
-        await self.writer.write_to_csv(item_type="comments", item=comment_item)
 
 
-    async def store_creator(self, creator_item: Dict):
-        pass
-
-    def flush(self):
-        pass
+class XhsCsvStoreImplement(CsvStoreImplement):
+    platform = "xhs"
 
 
-class XhsJsonStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="xhs", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        """
-        store content data to json file
-        :param content_item:
-        :return:
-        """
-        await self.writer.write_single_item_to_json(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        store comment data to json file
-        :param comment_item:
-        :return:
-        """
-        await self.writer.write_single_item_to_json(item_type="comments", item=comment_item)
-
-    async def store_creator(self, creator_item: Dict):
-        pass
-
-    def flush(self):
-        """
-        flush data to json file
-        :return:
-        """
-        pass
+class XhsJsonStoreImplement(JsonStoreImplement):
+    platform = "xhs"
 
 
-
-class XhsJsonlStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="xhs", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        await self.writer.write_to_jsonl(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        await self.writer.write_to_jsonl(item_type="comments", item=comment_item)
-
-    async def store_creator(self, creator_item: Dict):
-        pass
-
-    def flush(self):
-        pass
+class XhsJsonlStoreImplement(JsonlStoreImplement):
+    platform = "xhs"
 
 
 class XhsDbStoreImplement(AbstractStore):
@@ -162,9 +92,8 @@ class XhsDbStoreImplement(AbstractStore):
 
     async def update_content(self, session: AsyncSession, content_item: Dict):
         note_id = content_item.get("note_id")
-        last_modify_ts = int(get_current_timestamp())
         update_data = {
-            "last_modify_ts": last_modify_ts,
+            "last_modify_ts": int(get_current_timestamp()),
             "liked_count": str(content_item.get("liked_count")),
             "collected_count": str(content_item.get("collected_count")),
             "comment_count": str(content_item.get("comment_count")),
@@ -192,13 +121,11 @@ class XhsDbStoreImplement(AbstractStore):
                 await self.add_comment(session, comment_item)
 
     async def add_comment(self, session: AsyncSession, comment_item: Dict):
-        add_ts = int(get_current_timestamp())
-        last_modify_ts = int(get_current_timestamp())
         comment = XhsNoteComment(
             creator_hash=comment_item.get("creator_hash"),
             nickname=comment_item.get("nickname"),
-            add_ts=add_ts,
-            last_modify_ts=last_modify_ts,
+            add_ts=int(get_current_timestamp()),
+            last_modify_ts=int(get_current_timestamp()),
             comment_id=comment_item.get("comment_id"),
             create_time=comment_item.get("create_time"),
             note_id=comment_item.get("note_id"),
@@ -212,9 +139,8 @@ class XhsDbStoreImplement(AbstractStore):
 
     async def update_comment(self, session: AsyncSession, comment_item: Dict):
         comment_id = comment_item.get("comment_id")
-        last_modify_ts = int(get_current_timestamp())
         update_data = {
-            "last_modify_ts": last_modify_ts,
+            "last_modify_ts": int(get_current_timestamp()),
             "like_count": str(comment_item.get("like_count")),
             "sub_comment_count": int(comment_item.get("sub_comment_count", 0) or 0),
         }
@@ -230,81 +156,16 @@ class XhsDbStoreImplement(AbstractStore):
         # 教学版：创作者个人资料不再落库
         pass
 
-    async def get_all_content(self) -> List[Dict]:
-        async with get_session() as session:
-            stmt = select(XhsNote)
-            result = await session.execute(stmt)
-            return [item.__dict__ for item in result.scalars().all()]
-
-    async def get_all_comments(self) -> List[Dict]:
-        async with get_session() as session:
-            stmt = select(XhsNoteComment)
-            result = await session.execute(stmt)
-            return [item.__dict__ for item in result.scalars().all()]
-
 
 class XhsSqliteStoreImplement(XhsDbStoreImplement):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    pass
 
 
-class XhsMongoStoreImplement(AbstractStore):
-    """Xiaohongshu MongoDB storage implementation"""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.mongo_store = MongoDBStoreBase(collection_prefix="xhs")
-
-    async def store_content(self, content_item: Dict):
-        """
-        Store note content to MongoDB
-        Args:
-            content_item: Note content data
-        """
-        note_id = content_item.get("note_id")
-        if not note_id:
-            return
-
-        await self.mongo_store.save_or_update(
-            collection_suffix="contents",
-            query={"note_id": note_id},
-            data=content_item
-        )
-        utils.logger.info(f"[XhsMongoStoreImplement.store_content] Saved note {note_id} to MongoDB")
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        Store comment to MongoDB
-        Args:
-            comment_item: Comment data
-        """
-        comment_id = comment_item.get("comment_id")
-        if not comment_id:
-            return
-
-        await self.mongo_store.save_or_update(
-            collection_suffix="comments",
-            query={"comment_id": comment_id},
-            data=comment_item
-        )
-        utils.logger.info(f"[XhsMongoStoreImplement.store_comment] Saved comment {comment_id} to MongoDB")
-
-    async def store_creator(self, creator_item: Dict):
-        """
-        Store creator information to MongoDB
-        Args:
-            creator_item: Creator data
-        """
-        # 教学版：创作者个人资料不再落库
-        pass
+class XhsMongoStoreImplement(MongoStoreImplement):
+    collection_prefix = "xhs"
+    content_id_field = "note_id"
+    content_kind = "note"
 
 
-class XhsExcelStoreImplement:
-    """Xiaohongshu Excel storage implementation - Global singleton"""
-
-    def __new__(cls, *args, **kwargs):
-        from store.excel_store_base import ExcelStoreBase
-        return ExcelStoreBase.get_instance(
-            platform="xhs",
-            crawler_type=crawler_type_var.get()
-        )
+class XhsExcelStoreImplement(ExcelStoreImplement):
+    platform = "xhs"

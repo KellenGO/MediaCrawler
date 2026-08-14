@@ -271,10 +271,6 @@ def base36encode(number, alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'):
     return sign + base36
 
 
-def base36decode(number):
-    return int(number, 36)
-
-
 def get_search_id():
     e = int(time.time() * 1000) << 64
     t = int(random.uniform(0, 2147483646))
@@ -290,10 +286,6 @@ img_cdns = [
 
 def get_img_url_by_trace_id(trace_id: str, format_type: str = "png"):
     return f"{random.choice(img_cdns)}/{trace_id}?imageView2/format/{format_type}"
-
-
-def get_img_urls_by_trace_id(trace_id: str, format_type: str = "png"):
-    return [f"{cdn}/{trace_id}?imageView2/format/{format_type}" for cdn in img_cdns]
 
 
 def get_trace_id(img_url: str):

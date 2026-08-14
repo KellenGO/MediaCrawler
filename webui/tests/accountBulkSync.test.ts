@@ -49,13 +49,13 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-// ── 固定顺序与严格串行 ─────────────────────────────────────────────────
+// ── 固定顺序与最大并发 2（Phase 4.3） ──────────────────────────────────
 
 test("固定平台顺序为 xhs、douyin、bilibili、zhihu", () => {
   assert.deepEqual([...BULK_SYNC_PLATFORM_ORDER], ["xhs", "douyin", "bilibili", "zhihu"]);
 });
 
-test("严格串行：最大同时执行数量恒为 1，且按固定顺序调用", async () => {
+test("worker pool：最大并发恰为 2，启动顺序固定", async () => {
   const calls: PlatformSlug[] = [];
   let active = 0;
   let maxActive = 0;
@@ -65,7 +65,7 @@ test("严格串行：最大同时执行数量恒为 1，且按固定顺序调用
     calls.push(platform);
     active += 1;
     maxActive = Math.max(maxActive, active);
-    // 模拟真实耗时：若并行，active 会超过 1
+    // 模拟真实耗时：若超过 2 个并发，active 会超过 2
     await delay(5);
     active -= 1;
     finished += 1;
@@ -73,11 +73,28 @@ test("严格串行：最大同时执行数量恒为 1，且按固定顺序调用
   }
 
   const result = await runBulkSync({ syncOne });
-  assert.deepEqual(calls, ["xhs", "douyin", "bilibili", "zhihu"]);
-  assert.equal(maxActive, 1, "最大同时执行数量必须为 1");
-  assert.equal(finished, 4);
+  assert.deepEqual(calls, ["xhs", "douyin", "bilibili", "zhihu"], "启动顺序必须固定");
+  assert.equal(maxActive, 2, "最大并发恰为 2（不是 Promise.all 四个）");
+  assert.equal(finished, 4, "四个平台各执行一次");
   assert.equal(result.completedCount, 4);
   assert.equal(result.blocked, false);
+});
+
+test("outcomes 按固定平台顺序排列（不按完成顺序）", async () => {
+  // bilibili 完成最快，但输出顺序仍固定。
+  async function syncOne(platform: PlatformSlug): Promise<SyncAttemptOutcome> {
+    if (platform === "bilibili") {
+      await delay(1);
+      return OK(platform);
+    }
+    await delay(10);
+    return OK(platform);
+  }
+  const result = await runBulkSync({ syncOne });
+  assert.deepEqual(
+    result.outcomes.map((o) => o.platform),
+    ["xhs", "douyin", "bilibili", "zhihu"]
+  );
 });
 
 // ── 单平台失败/异常后继续 ──────────────────────────────────────────────
@@ -136,7 +153,7 @@ test("checkBlock 全局阻断：停止剩余队列并报告原因", async () => 
   assert.equal(result.completedCount, 1);
 });
 
-test("outcome.blockQueue（如 search_in_progress）也停止剩余队列", async () => {
+test("outcome.blockQueue（如 search_in_progress）停止启动后续平台，已开始的平台安全结束", async () => {
   const calls: PlatformSlug[] = [];
   async function syncOne(platform: PlatformSlug): Promise<SyncAttemptOutcome> {
     calls.push(platform);
@@ -145,28 +162,41 @@ test("outcome.blockQueue（如 search_in_progress）也停止剩余队列", asyn
       : OK(platform);
   }
   const result = await runBulkSync({ syncOne });
-  assert.deepEqual(calls, ["xhs"]);
+  // 并发 2：xhs/douyin 已同时启动；xhs 暴露阻断后不再启动 bilibili/zhihu，
+  // 已开始的 douyin 允许安全结束。
+  assert.deepEqual(calls, ["xhs", "douyin"]);
   assert.equal(result.blocked, true);
   assert.equal(result.blockReason, "search_in_progress");
+  assert.equal(result.completedCount, 2);
 });
 
-// ── 进度回调 ───────────────────────────────────────────────────────────
+// ── 进度回调（Phase 4.3：activePlatforms + completedCount） ─────────────
 
-test("进度依次为 1/4、2/4、3/4、4/4（完成事件）", async () => {
-  const progress: Array<{ platform: PlatformSlug | null; completed: number; total: number }> = [];
+test("进度回调：activePlatforms 最多 2 个、保持固定顺序，completedCount 单调到 4", async () => {
+  const activeSnapshots: PlatformSlug[][] = [];
+  const completions: number[] = [];
   async function syncOne(platform: PlatformSlug): Promise<SyncAttemptOutcome> {
     await delay(1);
     return OK(platform);
   }
   await runBulkSync({
     syncOne,
-    onProgress: (p) => progress.push({ platform: p.currentPlatform, completed: p.completedCount, total: p.totalCount }),
+    onProgress: (p) => {
+      if (p.activePlatforms.length > 0) activeSnapshots.push([...p.activePlatforms]);
+      completions.push(p.completedCount);
+    },
   });
-  const completionEvents = progress.filter((p) => p.platform === null).map((p) => p.completed);
-  assert.deepEqual(completionEvents, [1, 2, 3, 4]);
-  // 开始事件：依次 xhs/douyin/bilibili/zhihu
-  const startEvents = progress.filter((p) => p.platform !== null).map((p) => p.platform);
-  assert.deepEqual(startEvents, ["xhs", "douyin", "bilibili", "zhihu"]);
+  // 任意快照：活动平台 ≤ 2 且保持固定顺序。
+  for (const snap of activeSnapshots) {
+    assert.ok(snap.length <= 2, `快照活动平台不得超过 2：${snap.join(",")}`);
+    const idx = snap.map((p) => BULK_SYNC_PLATFORM_ORDER.indexOf(p));
+    assert.deepEqual(idx, [...idx].sort((a, b) => a - b), "activePlatforms 必须保持固定顺序");
+  }
+  assert.ok(
+    activeSnapshots.some((s) => s.length === 2),
+    "出现过两个平台同时同步（并发 2）"
+  );
+  assert.equal(completions[completions.length - 1], 4, "最终完成数必须为 4");
 });
 
 // ── 结果汇总 ───────────────────────────────────────────────────────────

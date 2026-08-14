@@ -27,7 +27,7 @@ import copy
 import json
 import re
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Union
-from urllib.parse import parse_qs, unquote, urlencode
+from urllib.parse import urlencode
 
 import httpx
 from httpx import Response
@@ -304,24 +304,6 @@ class WeiboClient(ProxyRefreshMixin):
             except httpx.HTTPError as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
                 utils.logger.error(f"[DouYinClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}")    # Keep original exception type name for developer debugging
                 return None
-
-    async def get_creator_container_info(self, creator_id: str) -> Dict:
-        """
-        Get user's container ID, container information represents the real API request path
-            fid_container_id: Container ID for user's Weibo detail API
-            lfid_container_id: Container ID for user's Weibo list API
-        Args:
-            creator_id: User ID
-
-        Returns: Dictionary with container IDs
-
-        """
-        response = await self.get(f"/u/{creator_id}", return_response=True)
-        m_weibocn_params = response.cookies.get("M_WEIBOCN_PARAMS")
-        if not m_weibocn_params:
-            raise DataFetchError("get containerid failed")
-        m_weibocn_params_dict = parse_qs(unquote(m_weibocn_params))
-        return {"fid_container_id": m_weibocn_params_dict.get("fid", [""])[0], "lfid_container_id": m_weibocn_params_dict.get("lfid", [""])[0]}
 
     async def get_creator_info_by_id(self, creator_id: str) -> Dict:
         """

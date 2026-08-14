@@ -23,7 +23,6 @@ import json
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
-import httpx
 from httpx import Response
 from playwright.async_api import BrowserContext, Page
 from tools.httpx_util import make_async_client
@@ -436,47 +435,6 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         }
         return await self.get(uri, params)
 
-    async def get_creator_articles(self, url_token: str, offset: int = 0, limit: int = 20) -> Dict:
-        """
-        Get creator's articles
-        Args:
-            url_token:
-            offset:
-            limit:
-
-        Returns:
-
-        """
-        uri = f"/api/v4/members/{url_token}/articles"
-        params = {
-            "include":
-            "data[*].comment_count,suggest_edit,is_normal,thumbnail_extra_info,thumbnail,can_comment,comment_permission,admin_closed_comment,content,voteup_count,created,updated,upvoted_followees,voting,review_info,reaction_instruction,is_labeled,label_info;data[*].vessay_info;data[*].author.badge[?(type=best_answerer)].topics;data[*].author.vip_info;",
-            "offset": offset,
-            "limit": limit,
-            "order_by": "created"
-        }
-        return await self.get(uri, params)
-
-    async def get_creator_videos(self, url_token: str, offset: int = 0, limit: int = 20) -> Dict:
-        """
-        Get creator's videos
-        Args:
-            url_token:
-            offset:
-            limit:
-
-        Returns:
-
-        """
-        uri = f"/api/v4/members/{url_token}/zvideos"
-        params = {
-            "include": "similar_zvideo,creation_relationship,reaction_instruction",
-            "offset": offset,
-            "limit": limit,
-            "similar_aggregation": "true",
-        }
-        return await self.get(uri, params)
-
     async def get_all_anwser_by_creator(self, url_token: str, crawl_interval: float = 1.0, callback: Optional[Callable] = None) -> List[ZhihuContent]:
         """
         Get all answers by creator
@@ -497,74 +455,6 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
             if not res:
                 break
             utils.logger.info(f"[ZhiHuClient.get_all_anwser_by_creator] Get creator {url_token} answers: {res}")
-            paging_info = res.get("paging", {})
-            is_end = paging_info.get("is_end")
-            contents = self._extractor.extract_content_list_from_creator(res.get("data"))
-            if callback:
-                await callback(contents)
-            all_contents.extend(contents)
-            offset += limit
-            await asyncio.sleep(crawl_interval)
-        return all_contents
-
-    async def get_all_articles_by_creator(
-        self,
-        url_token: str,
-        crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
-    ) -> List[ZhihuContent]:
-        """
-        Get all articles by creator
-        Args:
-            url_token: Creator url token (in-memory only, not persisted)
-            crawl_interval:
-            callback:
-
-        Returns:
-
-        """
-        all_contents: List[ZhihuContent] = []
-        is_end: bool = False
-        offset: int = 0
-        limit: int = 20
-        while not is_end:
-            res = await self.get_creator_articles(url_token, offset, limit)
-            if not res:
-                break
-            paging_info = res.get("paging", {})
-            is_end = paging_info.get("is_end")
-            contents = self._extractor.extract_content_list_from_creator(res.get("data"))
-            if callback:
-                await callback(contents)
-            all_contents.extend(contents)
-            offset += limit
-            await asyncio.sleep(crawl_interval)
-        return all_contents
-
-    async def get_all_videos_by_creator(
-        self,
-        url_token: str,
-        crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
-    ) -> List[ZhihuContent]:
-        """
-        Get all videos by creator
-        Args:
-            url_token: Creator url token (in-memory only, not persisted)
-            crawl_interval:
-            callback:
-
-        Returns:
-
-        """
-        all_contents: List[ZhihuContent] = []
-        is_end: bool = False
-        offset: int = 0
-        limit: int = 20
-        while not is_end:
-            res = await self.get_creator_videos(url_token, offset, limit)
-            if not res:
-                break
             paging_info = res.get("paging", {})
             is_end = paging_info.get("is_end")
             contents = self._extractor.extract_content_list_from_creator(res.get("data"))

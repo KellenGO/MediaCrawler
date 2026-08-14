@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020"],
+    "lib": ["ES2020", "DOM"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -22,6 +22,9 @@
     "src/lib/searchPopover.ts",
     "src/lib/accounts.ts",
     "src/lib/accountBulkSync.ts",
+    "src/lib/platformLimits.ts",
+    "src/lib/statusDisplay.ts",
+    "src/hooks/useAccounts.ts",
     "src/types/search.ts",
     "tests"
   ]

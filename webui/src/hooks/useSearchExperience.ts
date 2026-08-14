@@ -14,7 +14,9 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useAggregateSearch } from "./useAggregateSearch";
+import { usePlatformLimits } from "./usePlatformLimits";
 import type { PlatformSlug } from "@/types/search";
+import { selectedPlatformLimits } from "@/lib/platformLimits";
 import {
   applySearchTransition,
   createInitialExperienceState,
@@ -22,6 +24,7 @@ import {
   readHistory,
   readPlatformPref,
   safeErrorSummary,
+  selectSearchPresentation,
   writeHistory,
   writePlatformPref,
   type SearchHistoryItem,
@@ -32,6 +35,9 @@ const TERMINAL_OVERALLS = new Set(["completed", "partial", "failed", "cancelled"
 
 export function useSearchExperience() {
   const base = useAggregateSearch();
+  // Round 15: 每个平台独立搜索数量（localStorage 持久化）。
+  // 全量搜索、历史回放、单平台重试统一使用当前设置；不保存历史搜索时的数量。
+  const { limits } = usePlatformLimits();
 
   // ── 状态机：展示层 + 历史 + 平台偏好全部由生产 reducer 维护 ──────────
   const [state, dispatch] = useReducer(
@@ -83,8 +89,13 @@ export function useSearchExperience() {
       dispatch({ type: "search_start", keyword, platforms });
       try {
         // startSearch 返回 POST 的结果：直接使用返回值的 job_id 派发
-        // 身份事件（不复制 API 调用）。
-        const job = await base.startSearch(keyword, platforms, 10);
+        // 身份事件（不复制 API 调用）。数量使用当前设置（Round 15）。
+        const job = await base.startSearch(
+          keyword,
+          platforms,
+          10,
+          selectedPlatformLimits(limits, platforms)
+        );
         if (taskSeqRef.current !== seq) return; // 已发起更新的任务，本结果作废
         // 只有 POST 被后端接受后才写入身份与历史。
         dispatch({
@@ -102,7 +113,7 @@ export function useSearchExperience() {
         if (taskSeqRef.current === seq) taskInFlightRef.current = false;
       }
     },
-    [busy, base]
+    [busy, base, limits]
   );
 
   // ── 单平台重试（POST 接受后不写历史，与 Round 12 语义一致） ──────────
@@ -117,8 +128,14 @@ export function useSearchExperience() {
       userStartedRef.current = true;
       dispatch({ type: "retry_start", platform });
       try {
-        // 复用现有 POST /api/search/jobs：platforms 只含目标平台。
-        const job = await base.startSearch(keyword, [platform], 10);
+        // 复用现有 POST /api/search/jobs：platforms 只含目标平台；数量用
+        // 该平台当前设置（Round 15，不再写死 10）。
+        const job = await base.startSearch(
+          keyword,
+          [platform],
+          10,
+          selectedPlatformLimits(limits, [platform])
+        );
         if (taskSeqRef.current !== seq) return;
         // 重试被接受：登记身份（不写历史），终态经 job_terminal 提交。
         dispatch({ type: "retry_accepted", jobId: job.job_id });
@@ -129,13 +146,15 @@ export function useSearchExperience() {
         if (taskSeqRef.current === seq) taskInFlightRef.current = false;
       }
     },
-    [busy, base, state.display.jobResponse]
+    [busy, base, state.display.jobResponse, limits]
   );
 
   // ── 任务观察：区分"用户发起"与"页面加载恢复" ────────────────────────
   // - 恢复任务（/jobs/current 或 sessionStorage 恢复）：首次观察到任意状态
   //   即派发 job_recovered 登记身份，之后终态按 job_terminal 正常提交。
   // - 用户发起的任务：终态直接派发 job_terminal（reducer 校验 activeJobId）。
+  // - 非终态轮询响应派发 job_progress（Phase 2 渐进展示；reducer 同样做
+  //   身份校验，旧任务/已应用终态的迟到进度会被拒绝）。
   // - reset 之后：不再登记恢复身份，迟到的终态因无身份被 reducer 拒绝。
   useEffect(() => {
     const resp = base.jobResponse;
@@ -146,6 +165,8 @@ export function useSearchExperience() {
     }
     if (TERMINAL_OVERALLS.has(resp.overall)) {
       dispatch({ type: "job_terminal", job: resp });
+    } else {
+      dispatch({ type: "job_progress", job: resp });
     }
   }, [base.jobResponse]);
 
@@ -201,9 +222,14 @@ export function useSearchExperience() {
     dispatch({ type: "platform_pref_set", platforms });
   }, []);
 
+  // Phase 2：渐进展示 selector —— UI 全部消费 presentation 输出。
+  const presentation = selectSearchPresentation(state);
+
   return {
     // 展示层（UI 全部消费这一层）
-    displayJobResponse: state.display.jobResponse,
+    displayJobResponse: presentation.jobResponse,
+    showingStaleSnapshot: presentation.showingStaleSnapshot,
+    liveHint: presentation.liveHint,
     refreshing: state.display.refreshing,
     retryingPlatform: state.display.retryingPlatform,
     retryErrors: state.display.retryErrors,

@@ -1,6 +1,7 @@
 import { Loader2, Check, Minus, AlertTriangle, XCircle, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
-import { PLATFORM_LABELS, PLATFORM_COLORS, STATUS_LABELS } from "@/types/search";
+import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
+import { statusLine } from "@/lib/statusDisplay";
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
@@ -20,29 +21,6 @@ const PLATFORM_LETTERS: Record<PlatformSlug, string> = {
 };
 
 const RETRYABLE_STATUSES: PStatus[] = ["failed", "timed_out", "rate_limited", "login_required"];
-
-function statusLine(status: PStatus, info: { result_count: number; error_summary: string | null }): string {
-  switch (status) {
-    case "running":
-      return "正在检索…";
-    case "succeeded":
-      return `${info.result_count} 条结果`;
-    case "empty":
-      return "无结果";
-    case "login_required":
-      return "需要登录";
-    case "rate_limited":
-      return "请求受限";
-    case "timed_out":
-      return "超时";
-    case "failed":
-      return info.error_summary || "失败";
-    case "cancelled":
-      return "已取消";
-    default:
-      return STATUS_LABELS[status];
-  }
-}
 
 function StatusTick({ status }: { status: PStatus }) {
   switch (status) {

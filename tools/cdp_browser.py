@@ -421,19 +421,6 @@ class CDPBrowserManager:
             except Exception as e:
                 utils.logger.warning(f"[CDPBrowserManager] Failed to add cookies: {e}")
 
-    async def get_cookies(self) -> list:
-        """
-        Get current cookies
-        """
-        if self.browser_context:
-            try:
-                cookies = await self.browser_context.cookies()
-                return cookies
-            except Exception as e:
-                utils.logger.warning(f"[CDPBrowserManager] Failed to get cookies: {e}")
-                return []
-        return []
-
     async def cleanup(self, force: bool = False):
         """
         Cleanup resources

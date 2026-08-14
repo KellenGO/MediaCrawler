@@ -20,7 +20,7 @@
 import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 import httpx
 from playwright.async_api import BrowserContext, Page
@@ -53,10 +53,15 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Page,
         cookie_dict: Dict[str, str],
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        reuse_http_client: bool = False,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.headers = headers
+        self.reuse_http_client = reuse_http_client
+        # 复用的 httpx client（懒创建；代理变化时安全关闭并重建）。
+        self._http_client = None
+        self._http_client_proxy: Optional[str] = None
         if config.XHS_INTERNATIONAL:
             self._host = "https://webapi.rednote.com"
             self._domain = "https://www.rednote.com"
@@ -67,13 +72,38 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self.IP_ERROR_STR = "Network connection error, please check network settings or restart"
         self.IP_ERROR_CODE = 300012
         self.NOTE_NOT_FOUND_CODE = -510000
-        self.NOTE_ABNORMAL_STR = "Note status abnormal, please check later"
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
         self._extractor = XiaoHongShuExtractor()
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
+
+    async def _get_reused_client(self):
+        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
+        if self._http_client is None or self._http_client_proxy != self.proxy:
+            await self._close_http_client()
+            self._http_client = make_async_client(proxy=self.proxy)
+            self._http_client_proxy = self.proxy
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        client = self._http_client
+        self._http_client = None
+        self._http_client_proxy = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+    async def aclose(self) -> None:
+        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
+        await self._close_http_client()
+
+    async def close(self) -> None:
+        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
+        await self._close_http_client()
 
     async def _pre_headers(self, url: str, params: Optional[Dict] = None, payload: Optional[Dict] = None) -> Dict:
         """请求头参数签名 (使用 xhshow 纯算法)
@@ -129,8 +159,14 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
 
         # return response.text
         return_response = kwargs.pop("return_response", False)
-        async with make_async_client(proxy=self.proxy) as client:
+        if self.reuse_http_client:
+            # Phase 3.2: 复用单个 client（代理变化时内部会关闭并重建）。
+            client = await self._get_reused_client()
             response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        else:
+            # 旧行为：每个请求独立 client 生命周期。
+            async with make_async_client(proxy=self.proxy) as client:
+                response = await client.request(method, url, timeout=self.timeout, **kwargs)
 
         if response.status_code == 471 or response.status_code == 461:
             # someday someone maybe will bypass captcha
@@ -208,24 +244,30 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         # Check if proxy is expired before request
         await self._refresh_proxy_if_expired()
 
-        async with make_async_client(proxy=self.proxy) as client:
-            try:
+        try:
+            if self.reuse_http_client:
+                # Phase 3.2: 复用单个 client（代理变化时内部会关闭并重建）。
+                client = await self._get_reused_client()
                 response = await client.request("GET", url, timeout=self.timeout)
-                response.raise_for_status()
-                if not response.reason_phrase == "OK":
-                    utils.logger.error(
-                        f"[XiaoHongShuClient.get_note_media] request {url} err, res:{response.text}"
-                    )
-                    return None
-                else:
-                    return response.content
-            except (
-                httpx.HTTPError
-            ) as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
+            else:
+                # 旧行为：每个请求独立 client 生命周期。
+                async with make_async_client(proxy=self.proxy) as client:
+                    response = await client.request("GET", url, timeout=self.timeout)
+            response.raise_for_status()
+            if not response.reason_phrase == "OK":
                 utils.logger.error(
-                    f"[XiaoHongShuClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}"
-                )  # Keep original exception type name for developer debugging
+                    f"[XiaoHongShuClient.get_note_media] request {url} err, res:{response.text}"
+                )
                 return None
+            else:
+                return response.content
+        except (
+            httpx.HTTPError
+        ) as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
+            utils.logger.error(
+                f"[XiaoHongShuClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}"
+            )  # Keep original exception type name for developer debugging
+            return None
 
     async def query_self(self) -> Optional[Dict]:
         """
@@ -664,19 +706,6 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             f"[XiaoHongShuClient.get_all_notes_by_creator] Finished getting notes for user {user_id}, total: {len(result)}"
         )
         return result
-
-    async def get_note_short_url(self, note_id: str) -> Dict:
-        """
-        Get note short URL
-        Args:
-            note_id: Note ID
-
-        Returns:
-
-        """
-        uri = f"/api/sns/web/short_url"
-        data = {"original_url": f"{self._domain}/discovery/item/{note_id}"}
-        return await self.post(uri, data=data, return_response=True)
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     async def get_note_by_id_from_html(

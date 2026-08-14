@@ -6,7 +6,6 @@
 # GitHub: https://github.com/NanmiCoder
 # Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 #
-
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -17,289 +16,61 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+"""Weibo storage implementation (parameterized by store.base_store_impl)."""
 
-# -*- coding: utf-8 -*-
-# @Author  : persist1@126.com
-# @Time    : 2025/9/5 19:34
-# @Desc    : Weibo storage implementation class
-import asyncio
-import csv
-import json
-import os
-import pathlib
-from typing import Dict
-
-import aiofiles
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-import config
-from base.base_crawler import AbstractStore
 from database.models import WeiboNote, WeiboNoteComment
-from tools import utils, words
-from tools.async_file_writer import AsyncFileWriter
-from database.db_session import get_session
-from var import crawler_type_var
-from database.mongodb_store_base import MongoDBStoreBase
+from store.base_store_impl import (
+    CsvStoreImplement,
+    DbStoreImplement,
+    ExcelStoreImplement,
+    JsonStoreImplement,
+    JsonlStoreImplement,
+    MongoStoreImplement,
+    filter_model_fields,
+)
 
 
-def calculate_number_of_files(file_store_path: str) -> int:
-    """Calculate the prefix sorting number for data save files, supporting writing to different files for each run
-    Args:
-        file_store_path;
-    Returns:
-        file nums
-    """
-    if not os.path.exists(file_store_path):
-        return 1
-    try:
-        return max([int(file_name.split("_")[0]) for file_name in os.listdir(file_store_path)]) + 1
-    except ValueError:
-        return 1
+def _preprocess_weibo_comment(item):
+    item["create_time"] = int(item.get("create_time", 0) or 0)
+    item["comment_like_count"] = str(item.get("comment_like_count", "0"))
+    item["sub_comment_count"] = str(item.get("sub_comment_count", "0"))
+    item["parent_comment_id"] = str(item.get("parent_comment_id", "0"))
 
 
-def _filter_model_fields(model_cls, item: Dict) -> Dict:
-    """只保留目标 ORM 模型已有的列，避免把已删除/多余字段（如 avatar/gender/
-    profile_url/ip_location/user_id）传给 ORM 构造而报错。教学版兜底保护。"""
-    allowed = {col.name for col in model_cls.__table__.columns}
-    return {k: v for k, v in item.items() if k in allowed}
+class WeiboCsvStoreImplement(CsvStoreImplement):
+    platform = "weibo"
 
 
-class WeiboCsvStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="weibo", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        """
-        Weibo content CSV storage implementation
-        Args:
-            content_item: note item dict
-
-        Returns:
-
-        """
-        await self.writer.write_to_csv(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        Weibo comment CSV storage implementation
-        Args:
-            comment_item: comment item dict
-
-        Returns:
-
-        """
-        await self.writer.write_to_csv(item_type="comments", item=comment_item)
-
-    async def store_creator(self, creator: Dict):
-        """
-        Weibo creator CSV storage implementation
-        教学版：不采集/持久化创作者个人信息，空操作。
-        Args:
-            creator:
-
-        Returns:
-
-        """
-        pass
+class WeiboDbStoreImplement(DbStoreImplement):
+    content_model = WeiboNote
+    comment_model = WeiboNoteComment
+    content_id_field = "note_id"
+    comment_id_field = "comment_id"
+    safe_update = True
+    modify_ts_on_create = True
+    modify_ts_on_update = True
+    content_filter = staticmethod(filter_model_fields)
+    comment_filter = staticmethod(filter_model_fields)
+    comment_preprocess = staticmethod(_preprocess_weibo_comment)
 
 
-class WeiboDbStoreImplement(AbstractStore):
-
-    async def store_content(self, content_item: Dict):
-        """
-        Weibo content DB storage implementation
-        Args:
-            content_item: content item dict
-
-        Returns:
-
-        """
-        # 教学版兜底：过滤掉已删除/多余字段，确保不会把 user_id/avatar 等传给 ORM
-        content_item = _filter_model_fields(WeiboNote, content_item)
-        note_id = content_item.get("note_id")
-        async with get_session() as session:
-            stmt = select(WeiboNote).where(WeiboNote.note_id == note_id)
-            res = await session.execute(stmt)
-            db_note = res.scalar_one_or_none()
-            if db_note:
-                db_note.last_modify_ts = utils.get_current_timestamp()
-                for key, value in content_item.items():
-                    if hasattr(db_note, key):
-                        setattr(db_note, key, value)
-            else:
-                content_item["add_ts"] = utils.get_current_timestamp()
-                content_item["last_modify_ts"] = utils.get_current_timestamp()
-                db_note = WeiboNote(**content_item)
-                session.add(db_note)
-            await session.commit()
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        Weibo content DB storage implementation
-        Args:
-            comment_item: comment item dict
-
-        Returns:
-
-        """
-        # 教学版兜底：过滤掉已删除/多余字段，确保不会把 user_id/avatar 等传给 ORM
-        comment_item = _filter_model_fields(WeiboNoteComment, comment_item)
-        comment_id = comment_item.get("comment_id")
-        comment_item["create_time"] = int(comment_item.get("create_time", 0) or 0)
-        comment_item["comment_like_count"] = str(comment_item.get("comment_like_count", "0"))
-        comment_item["sub_comment_count"] = str(comment_item.get("sub_comment_count", "0"))
-        comment_item["parent_comment_id"] = str(comment_item.get("parent_comment_id", "0"))
-
-        async with get_session() as session:
-            stmt = select(WeiboNoteComment).where(WeiboNoteComment.comment_id == comment_id)
-            res = await session.execute(stmt)
-            db_comment = res.scalar_one_or_none()
-            if db_comment:
-                db_comment.last_modify_ts = utils.get_current_timestamp()
-                for key, value in comment_item.items():
-                    if hasattr(db_comment, key):
-                        setattr(db_comment, key, value)
-            else:
-                comment_item["add_ts"] = utils.get_current_timestamp()
-                comment_item["last_modify_ts"] = utils.get_current_timestamp()
-                db_comment = WeiboNoteComment(**comment_item)
-                session.add(db_comment)
-            await session.commit()
-
-    async def store_creator(self, creator: Dict):
-        """
-        Weibo creator DB storage implementation
-        教学版：不采集/持久化创作者个人信息，空操作（WeiboCreator 表已删除）。
-        Args:
-            creator:
-
-        Returns:
-
-        """
-        pass
+class WeiboJsonStoreImplement(JsonStoreImplement):
+    platform = "weibo"
 
 
-class WeiboJsonStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="weibo", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        """
-        content JSON storage implementation
-        Args:
-            content_item:
-
-        Returns:
-
-        """
-        await self.writer.write_single_item_to_json(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        comment JSON storage implementation
-        Args:
-            comment_item:
-
-        Returns:
-
-        """
-        await self.writer.write_single_item_to_json(item_type="comments", item=comment_item)
-
-    async def store_creator(self, creator: Dict):
-        """
-        creator JSON storage implementation
-        教学版：不采集/持久化创作者个人信息，空操作。
-        Args:
-            creator:
-
-        Returns:
-
-        """
-        pass
-
-
-class WeiboJsonlStoreImplement(AbstractStore):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.writer = AsyncFileWriter(platform="weibo", crawler_type=crawler_type_var.get())
-
-    async def store_content(self, content_item: Dict):
-        await self.writer.write_to_jsonl(item_type="contents", item=content_item)
-
-    async def store_comment(self, comment_item: Dict):
-        await self.writer.write_to_jsonl(item_type="comments", item=comment_item)
-
-    async def store_creator(self, creator: Dict):
-        # 教学版：不采集/持久化创作者个人信息，空操作。
-        pass
+class WeiboJsonlStoreImplement(JsonlStoreImplement):
+    platform = "weibo"
 
 
 class WeiboSqliteStoreImplement(WeiboDbStoreImplement):
-    """
-    Weibo content SQLite storage implementation
-    """
     pass
 
 
-class WeiboMongoStoreImplement(AbstractStore):
-    """Weibo MongoDB storage implementation"""
-
-    def __init__(self):
-        self.mongo_store = MongoDBStoreBase(collection_prefix="weibo")
-
-    async def store_content(self, content_item: Dict):
-        """
-        Store Weibo content to MongoDB
-        Args:
-            content_item: Weibo content data
-        """
-        note_id = content_item.get("note_id")
-        if not note_id:
-            return
-
-        await self.mongo_store.save_or_update(
-            collection_suffix="contents",
-            query={"note_id": note_id},
-            data=content_item
-        )
-        utils.logger.info(f"[WeiboMongoStoreImplement.store_content] Saved note {note_id} to MongoDB")
-
-    async def store_comment(self, comment_item: Dict):
-        """
-        Store comment to MongoDB
-        Args:
-            comment_item: Comment data
-        """
-        comment_id = comment_item.get("comment_id")
-        if not comment_id:
-            return
-
-        await self.mongo_store.save_or_update(
-            collection_suffix="comments",
-            query={"comment_id": comment_id},
-            data=comment_item
-        )
-        utils.logger.info(f"[WeiboMongoStoreImplement.store_comment] Saved comment {comment_id} to MongoDB")
-
-    async def store_creator(self, creator_item: Dict):
-        """
-        Store creator information to MongoDB
-        教学版：不采集/持久化创作者个人信息，空操作。
-        Args:
-            creator_item: Creator data
-        """
-        pass
+class WeiboMongoStoreImplement(MongoStoreImplement):
+    collection_prefix = "weibo"
+    content_id_field = "note_id"
+    content_kind = "note"
 
 
-class WeiboExcelStoreImplement:
-    """Weibo Excel storage implementation - Global singleton"""
-
-    def __new__(cls, *args, **kwargs):
-        from store.excel_store_base import ExcelStoreBase
-        return ExcelStoreBase.get_instance(
-            platform="weibo",
-            crawler_type=crawler_type_var.get()
-        )
+class WeiboExcelStoreImplement(ExcelStoreImplement):
+    platform = "weibo"

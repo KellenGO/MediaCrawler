@@ -1,13 +1,26 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { Toaster } from 'sonner'
 import { Header, type ViewMode } from '@/components/layout/Header'
 import { AuthorFooter } from '@/components/layout/AuthorFooter'
-import { CrawlerConfigPanel } from '@/components/config/CrawlerConfigPanel'
 import { EnvironmentCheck, isEnvChecked } from '@/components/env/EnvironmentCheck'
 import { LicenseDisclaimer, isLicenseAccepted } from '@/components/license/LicenseDisclaimer'
 import { SearchPage } from '@/components/search/SearchPage'
-import { AccountsPage } from '@/components/accounts/AccountsPage'
-import { MainContent } from '@/components/layout/MainContent'
+
+// Phase 5.2: 非搜索页按需加载（页面级 lazy，不手工拆 manualChunks）。
+// 搜索主页面保持同步加载，首屏不引入账号页/控制台 chunk。
+const AccountsPage = lazy(() =>
+  import('@/components/accounts/AccountsPage').then((m) => ({ default: m.AccountsPage }))
+)
+const ConsoleView = lazy(() => import('@/components/console/ConsoleView'))
+
+/** 浅蓝色 Suspense 占位（不闪屏）。 */
+function PageLoading() {
+  return (
+    <div className="pt-16 flex justify-center">
+      <div className="inline-block animate-dsh-spin rounded-full h-8 w-8 border-2 border-sky-300 border-t-transparent" />
+    </div>
+  )
+}
 
 function App() {
   // Initialize by checking localStorage if license has been accepted
@@ -53,21 +66,15 @@ function App() {
       <main className="flex-1 w-full">
         {licenseAccepted && !showDisclaimer && envChecked && (
           <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6">
-            {viewMode === 'search' ? (
-              <SearchPage onNavigateConsole={() => setViewMode('console')} onNavigateAccounts={() => setViewMode('accounts')} />
-            ) : viewMode === 'accounts' ? (
-              <AccountsPage onNavigateSearch={() => setViewMode('search')} />
-            ) : (
-              <div className="flex flex-col gap-3 pt-4">
-                {/* Config Panel - Primary Action Area (Always Expanded) */}
-                <CrawlerConfigPanel />
-
-                {/* Console - Collapsible Terminal（终端保持深色等宽） */}
-                <div className="h-[calc(100dvh-230px)] min-h-[380px] overflow-hidden rounded-[16px] border border-cyber-border-subtle bg-[#0d1117]">
-                  <MainContent />
-                </div>
-              </div>
-            )}
+            <Suspense fallback={<PageLoading />}>
+              {viewMode === 'search' ? (
+                <SearchPage onNavigateConsole={() => setViewMode('console')} onNavigateAccounts={() => setViewMode('accounts')} />
+              ) : viewMode === 'accounts' ? (
+                <AccountsPage onNavigateSearch={() => setViewMode('search')} />
+              ) : (
+                <ConsoleView />
+              )}
+            </Suspense>
           </div>
         )}
       </main>

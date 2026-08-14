@@ -21,7 +21,7 @@ import asyncio
 import os
 import random
 from asyncio import Task
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from playwright.async_api import (
     BrowserContext,
@@ -266,9 +266,10 @@ class DouYinCrawler(AbstractCrawler):
                 if self._should_fetch_comments():
                     await self.batch_get_note_comments(page_aweme_list)
 
-                # Sleep after each page navigation
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                # Sleep after each page navigation（已达 limit 时无需再等下一页）
+                if remaining > 0:
+                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                    utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
 
     async def get_specified_awemes(self):

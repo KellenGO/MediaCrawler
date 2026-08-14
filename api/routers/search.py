@@ -32,9 +32,9 @@ search_router = APIRouter(prefix="/api/search", tags=["aggregate-search"])
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 
-# ── Shared operation lock (search + login mutual exclusion) ─────────────
+# ── Operation coordinator（Phase 4.2：搜索/登录排他，账号操作共享 2 槽）──
 
-_op_lock = asyncio.Lock()
+_operation_coordinator = accounts_service.operation_coordinator
 
 # ── Login state ─────────────────────────────────────────────────────────
 
@@ -256,15 +256,27 @@ async def start_login(req: LoginRequest, background_tasks: BackgroundTasks):
     if req.platform not in valid:
         raise HTTPException(status_code=422, detail=f"Invalid platform: {req.platform}")
 
-    async with _op_lock:
-        # Check active login
+    # Phase 4.2: 排他租约 —— 搜索/账号操作进行中时拒绝登录；租约在登录
+    # 任务完成前一直持有（任务 done 回调释放）。
+    if not await _operation_coordinator.acquire_exclusive("login"):
+        if search_job_manager.is_search_active():
+            raise HTTPException(status_code=409,
+                                detail="A search job is running. Wait for it to complete before logging in.")
+        for info in _login_jobs.values():
+            if info["status"] in ("pending", "running"):
+                raise HTTPException(status_code=409, detail="A login session is already active.")
+        raise HTTPException(status_code=409,
+                            detail="账号操作进行中，请等待完成后再登录。")
+
+    # Check active login（租约内的二次检查，保持消息一致）
+    try:
         for info in _login_jobs.values():
             if info["status"] in ("pending", "running"):
                 raise HTTPException(status_code=409, detail="A login session is already active.")
         # Check active search
         if search_job_manager.is_search_active():
             raise HTTPException(status_code=409,
-                               detail="A search job is running. Wait for it to complete before logging in.")
+                                detail="A search job is running. Wait for it to complete before logging in.")
 
         job_id = uuid.uuid4().hex[:12]
         _login_jobs[job_id] = {
@@ -273,12 +285,22 @@ async def start_login(req: LoginRequest, background_tasks: BackgroundTasks):
         }
         task = asyncio.create_task(_run_login_worker(req.platform, job_id))
         _login_tasks[job_id] = task
+        task.add_done_callback(_release_login_lease)
+    except Exception:
+        # 任务未创建/创建失败：租约不会由 done 回调释放，必须在这里释放。
+        await _operation_coordinator.release_exclusive("login")
+        raise
 
     names = {"xhs": "小红书", "douyin": "抖音", "bilibili": "B站", "zhihu": "知乎"}
     return {
         "job_id": job_id, "platform": req.platform, "status": "pending",
         "message": f"正在启动 {names.get(req.platform, req.platform)} 登录窗口...",
     }
+
+
+def _release_login_lease(_task: asyncio.Task) -> None:
+    """登录任务结束 → 释放排他租约（done 回调不能 await，用 ensure_future）。"""
+    asyncio.ensure_future(_operation_coordinator.release_exclusive("login"))
 
 
 @search_router.get("/login/{job_id}", response_model=LoginStatusResponse)
@@ -295,18 +317,31 @@ async def create_search_job(req: SearchJobRequestSchema):
     if not req.keyword:
         raise HTTPException(status_code=422, detail="Keyword must not be empty.")
 
-    async with _op_lock:
+    # Phase 4.2: 排他租约（创建期）。登录/账号操作进行中时拒绝。
+    if not await _operation_coordinator.acquire_exclusive("search"):
+        for info in _login_jobs.values():
+            if info["status"] in ("pending", "running"):
+                raise HTTPException(status_code=409,
+                                    detail="A login session is active. Wait for it to complete before searching.")
+        raise HTTPException(status_code=409,
+                            detail="账号操作进行中，请等待完成后再搜索。")
+
+    try:
         # Check active login
         for info in _login_jobs.values():
             if info["status"] in ("pending", "running"):
                 raise HTTPException(status_code=409,
-                                   detail="A login session is active. Wait for it to complete before searching.")
+                                    detail="A login session is active. Wait for it to complete before searching.")
         try:
             return await search_job_manager.create_job(req)
         except InvalidPlatformsError as e:
             raise HTTPException(status_code=422, detail=str(e))
         except JobConflictError:
             raise HTTPException(status_code=409, detail="A search job is already running.")
+    finally:
+        # 短租约：搜索任务在后台运行；运行期间的互斥由各端点的
+        # is_search_active() 检查与 job 状态保证（Phase 4.2 语义一致）。
+        await _operation_coordinator.release_exclusive("search")
 
 
 @search_router.get("/jobs/current")
@@ -414,17 +449,22 @@ async def sync_account_cookies(
         return _account_error(400, "sync_ticket_invalid",
                               "缺少一次性同步票据", platform)
 
-    async with _op_lock:
+    # Phase 4.2: 账号操作共享槽位（不同平台最多 2 并发，同平台串行）。
+    reason = await _operation_coordinator.acquire_account(platform, "sync")
+    if reason:
         if search_job_manager.is_search_active():
             return _account_error(409, "search_in_progress",
                                   "正在搜索，暂时不能同步账号，请等待搜索完成", platform)
-        if accounts_service.is_verify_active(platform):
+        if reason == "platform":
             # 有界验证超时后任务在后台继续跑：再次 sync 会与后台任务并发
             # 操作同一 profile —— 409。检查在 ticket 消费之前，新 ticket
             # 不被消费（可重试语义：等验证完成拿新票据再同步）。
             return _account_error(409, "verification_in_progress",
                                   "该平台正在后台验证登录状态，请稍等验证完成后再同步",
                                   platform)
+        return _account_error(409, "account_op_in_progress",
+                              "已有两个账号操作正在进行，请稍后再试", platform)
+    try:
         try:
             await accounts_service.consume_sync_ticket(x_sync_ticket, platform)
         except accounts_service.TicketError as e:
@@ -444,6 +484,11 @@ async def sync_account_cookies(
             return _account_error_from_exc(e, 400, platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
+    finally:
+        # 后台验证仍在跑时槽位不释放（由任务 done 回调释放）；
+        # 任务已完成则这里释放。
+        if not accounts_service.is_verify_active(platform):
+            await _operation_coordinator.release_account(platform)
 
     # No background verify is spawned here: sync_platform_cookies' bounded
     # verify keeps running inside the accounts service (single task per
@@ -455,43 +500,55 @@ async def sync_account_cookies(
 @search_router.post("/accounts/{platform}/verify")
 async def verify_account(platform: str):
     """Re-open the headless profile and verify the session via pong."""
-    async with _op_lock:
+    reason = await _operation_coordinator.acquire_account(platform, "verify")
+    if reason:
         if search_job_manager.is_search_active():
             return _account_error(409, "search_in_progress",
                                   "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
-        if accounts_service.is_verify_active(platform):
+        if reason == "platform":
             # 后台验证进行中：直接再验证会与后台任务并发操作同一 profile
             # 并等待同一 profile 锁（丢失历史状态或重复验证）—— 409。
             return _account_error(409, "verification_in_progress",
                                   "该平台正在后台验证登录状态，请稍等验证完成后再试",
                                   platform)
+        return _account_error(409, "account_op_in_progress",
+                              "已有两个账号操作正在进行，请稍后再试", platform)
+    try:
         try:
             return await accounts_service.verify_platform(platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
         except accounts_service.SessionImportError as e:
             return _account_error_from_exc(e, 400, platform)
+    finally:
+        await _operation_coordinator.release_account(platform)
 
 
 @search_router.delete("/accounts/{platform}/session")
 async def delete_account_session(platform: str):
     """Delete the platform's profile (browser_data only, path-verified)."""
-    async with _op_lock:
+    reason = await _operation_coordinator.acquire_account(platform, "delete")
+    if reason:
         if search_job_manager.is_search_active():
             return _account_error(409, "search_in_progress",
                                   "正在搜索，暂时不能清除账号，请等待搜索完成", platform)
-        if accounts_service.is_verify_active(platform):
+        if reason == "platform":
             # 后台验证进行中：删除 profile 会让验证任务操作已删除的目录 /
             # 验证结果与删除动作竞态 —— 409。
             return _account_error(409, "verification_in_progress",
                                   "该平台正在后台验证登录状态，请稍等验证完成后再清除",
                                   platform)
+        return _account_error(409, "account_op_in_progress",
+                              "已有两个账号操作正在进行，请稍后再试", platform)
+    try:
         try:
             return await accounts_service.delete_platform_session(platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
         except accounts_service.SessionImportError as e:
             return _account_error_from_exc(e, 400, platform)
+    finally:
+        await _operation_coordinator.release_account(platform)
 
 
 # ── Shutdown ────────────────────────────────────────────────────────────

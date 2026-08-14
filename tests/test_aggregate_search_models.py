@@ -132,6 +132,36 @@ class TestSearchJobRequest:
         req = SearchJobRequest(keyword="  露营  ")
         assert req.keyword == "  露营  "  # pydantic doesn't auto-strip — done at API level
 
+    # ── Round 15: platform_limits ────────────────────────────────────────
+
+    def test_platform_limits_default_none(self):
+        req = SearchJobRequest(keyword="k")
+        assert req.platform_limits is None
+
+    def test_platform_limits_full_map(self):
+        req = SearchJobRequest(
+            keyword="k", limit_per_platform=10,
+            platform_limits={"xhs": 5, "douyin": 20, "bilibili": 8, "zhihu": 12})
+        assert req.platform_limits == {
+            "xhs": 5, "douyin": 20, "bilibili": 8, "zhihu": 12}
+
+    def test_platform_limits_bounds_accepted(self):
+        assert SearchJobRequest(
+            keyword="k", platform_limits={"xhs": 1}).platform_limits == {"xhs": 1}
+        assert SearchJobRequest(
+            keyword="k", platform_limits={"xhs": 20}).platform_limits == {"xhs": 20}
+
+    @pytest.mark.parametrize("bad", [0, 21, -1, 5.5, "5", True, None, [5], {"x": 1}])
+    def test_platform_limits_invalid_values_rejected(self, bad):
+        with pytest.raises(Exception):
+            SearchJobRequest(keyword="k", platform_limits={"xhs": bad})
+
+    def test_platform_limits_unknown_platform_rejected(self):
+        with pytest.raises(Exception):
+            SearchJobRequest(keyword="k", platform_limits={"myspace": 5})
+        with pytest.raises(Exception):
+            SearchJobRequest(keyword="k", platform_limits={"xhs": 5, "bogus": 3})
+
 
 class TestDedup:
     def test_make_dedup_key(self):

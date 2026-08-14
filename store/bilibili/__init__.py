@@ -17,18 +17,18 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-# -*- coding: utf-8 -*-
-# @Author  : relakkes@gmail.com
-# @Time    : 2024/1/14 19:34
-# @Desc    :
-
-from typing import List
+from typing import Dict, List
 
 import config
+from base.base_crawler import AbstractStore
+from tools import utils
 from var import source_keyword_var
 from tools.user_hash import anonymize_user_id, mask_nickname
 
-from ._store_impl import *
+from ._store_impl import (BiliCsvStoreImplement, BiliDbStoreImplement,
+                          BiliExcelStoreImplement, BiliJsonStoreImplement,
+                          BiliJsonlStoreImplement, BiliMongoStoreImplement,
+                          BiliSqliteStoreImplement)
 from .bilibilli_store_media import *
 
 
@@ -131,16 +131,6 @@ async def store_video(aid, video_content, extension_file_name):
     })
 
 
-async def batch_update_bilibili_creator_fans(creator_info: Dict, fans_list: List[Dict]):
-    # 教学版：不再采集/存储粉丝列表(其他用户的个人信息)，防骚扰。
-    return
-
-
-async def batch_update_bilibili_creator_followings(creator_info: Dict, followings_list: List[Dict]):
-    # 教学版：不再采集/存储关注列表(其他用户的个人信息)，防骚扰。
-    return
-
-
 async def batch_update_bilibili_creator_dynamics(creator_info: Dict, dynamics_list: List[Dict]):
     if not dynamics_list:
         return
@@ -165,11 +155,6 @@ async def batch_update_bilibili_creator_dynamics(creator_info: Dict, dynamics_li
             "total_liked": dynamic_like,
         }
         await update_bilibili_creator_dynamic(creator_info=creator_info, dynamic_info=dynamic_info)
-
-
-async def update_bilibili_creator_contact(creator_info: Dict, fan_info: Dict):
-    # 教学版：UP-粉丝关系表已移除，不再存储联系人信息。
-    return
 
 
 async def update_bilibili_creator_dynamic(creator_info: Dict, dynamic_info: Dict):

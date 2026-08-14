@@ -344,6 +344,8 @@ export function safeErrorSummary(err: unknown): string {
 export interface SearchDisplayState {
   /** 当前展示给用户的快照（全量任务终态或重试合并产物）。 */
   jobResponse: SearchJobResponse | null;
+  /** 当前 active job 的最新实时（非终态）响应；身份校验后写入。 */
+  liveResponse: SearchJobResponse | null;
   /** 新全量任务运行中、快照为旧结果时为 true（UI 显示"正在更新"）。 */
   refreshing: boolean;
   /** 正在单平台重试的平台；null 表示无重试进行中。 */
@@ -393,6 +395,8 @@ export type ExperienceEvent =
   | { type: "job_recovered"; jobId: string }
   /** 任务终态到达（completed/partial/failed/cancelled）；需与 activeJobId 匹配。 */
   | { type: "job_terminal"; job: SearchJobResponse }
+  /** 任务实时进度（非终态轮询响应）；需与 activeJobId 匹配；仅全量任务使用。 */
+  | { type: "job_progress"; job: SearchJobResponse }
   /** 取消请求已发出（Round 13）：不清快照、不提前显示已取消提示。 */
   | { type: "cancel_requested" }
   /** 取消请求失败（Round 13）：记录安全提示，不改变任务身份、不伪造终态。 */
@@ -413,6 +417,7 @@ export function createInitialExperienceState(
   return {
     display: {
       jobResponse: null,
+      liveResponse: null,
       refreshing: false,
       retryingPlatform: null,
       retryErrors: {},
@@ -464,6 +469,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
           ...d,
           // 新任务开始：快照保留；有旧结果才标记"正在更新"。
           refreshing: d.jobResponse !== null,
+          liveResponse: null, // 上一任务的实时进度作废
           retryingPlatform: null,
           retryErrors: {}, // 新的完整搜索不残留旧重试错误（Round 12.2）。
           cancelledNotice: false,
@@ -503,6 +509,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
         display: {
           ...d,
           refreshing: false,
+          liveResponse: null, // POST 失败：无新任务的实时进度
           awaitingJobAcceptance: false,
           // 重试创建失败：记录失败摘要，退出重试态（快照保留）。
           ...(retrying
@@ -523,6 +530,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
         display: {
           ...d,
           retryingPlatform: event.platform,
+          liveResponse: null, // 重试是新的身份，旧实时进度作废
           cancelledNotice: false,
           cancelRequested: false, // 新任务开始清除旧的取消失败提示（Round 13）
           cancelError: null,
@@ -543,6 +551,29 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
         },
       };
     }
+    case "job_progress": {
+      const job = event.job;
+      // 与 job_terminal 相同的身份保护（Phase 2 渐进展示）：
+      // 1. POST 未接受（无身份）→ 拒绝任何进度。
+      // 2. 无当前任务身份（未恢复/已 reset）→ 拒绝。
+      // 3. 进度 job_id 与当前任务不匹配（旧任务迟到）→ 拒绝。
+      // 4. 已应用终态的 job_id 不接收进度（终态已提交，轮询迟到响应作废）。
+      // 5. 终态 overall 交给 job_terminal，这里不处理。
+      if (d.awaitingJobAcceptance) return state;
+      if (d.activeJobId === null) return state;
+      if (job.job_id !== d.activeJobId) return state;
+      if (d.appliedJobIds.has(job.job_id)) return state;
+      if (TERMINAL_OVERALLS.has(job.overall)) return state;
+      // 单平台重试保持"终态后合并"策略：不做渐进替换（Phase 2 语义）。
+      if (d.retryingPlatform) return state;
+      return {
+        ...state,
+        display: {
+          ...d,
+          liveResponse: job,
+        },
+      };
+    }
     case "job_terminal": {
       const job = event.job;
       // 身份保护（Round 12.2）：
@@ -557,12 +588,15 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
       if (!TERMINAL_OVERALLS.has(job.overall)) return state;
 
       if (job.overall === "cancelled") {
-        // 取消：保留取消前已展示的旧结果；只有真实终态才亮提示；
-        // 真实 cancelled 终态清除取消失败提示/取消请求标记（Round 13）。
+        // 取消：真实终态才亮提示；终态响应自身带回已收集的部分结果 →
+        // 有结果则保留这些部分结果，一条都没有才保留旧快照（Phase 2）。
+        const hasPartialResults = (job.results?.length ?? 0) > 0;
         return {
           ...state,
           display: {
             ...d,
+            jobResponse: hasPartialResults ? job : d.jobResponse,
+            liveResponse: null,
             refreshing: false,
             retryingPlatform: null,
             cancelledNotice: true,
@@ -603,6 +637,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
             display: {
               ...d,
               jobResponse: { ...baseResponse, results: prev?.results ?? [] },
+              liveResponse: null,
               retryErrors: {
                 ...d.retryErrors,
                 [retryTarget]: eventSafeRetrySummary(newInfo?.error_summary),
@@ -628,6 +663,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
           display: {
             ...d,
             jobResponse: { ...baseResponse, results: mergedResults },
+            liveResponse: null,
             retryErrors: omitKey(d.retryErrors, retryTarget),
             retryingPlatform: null,
             refreshing: false,
@@ -645,6 +681,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
         display: {
           ...d,
           jobResponse: job,
+          liveResponse: null,
           refreshing: false,
           retryErrors: {}, // Round 12.2：新全量终态不恢复旧重试错误
           cancelRequested: false,
@@ -684,6 +721,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
         // 之后迟到的旧任务终态因 activeJobId=null 被拒绝）。
         display: {
           jobResponse: null,
+          liveResponse: null,
           refreshing: false,
           retryingPlatform: null,
           retryErrors: {},
@@ -741,4 +779,57 @@ export function resolveActiveTab<T extends string>(
     return activeTab;
   }
   return fallback;
+}
+
+// ── 渐进结果展示（Phase 2 生产 selector，无 React 依赖） ────────────────
+
+export interface SearchPresentation {
+  /** UI 实际渲染的响应（结果 + 平台状态 + overall）。 */
+  jobResponse: SearchJobResponse | null;
+  /** true：结果列表仍是旧快照，新任务在搜索中（live 尚无首条结果）。 */
+  showingStaleSnapshot: boolean;
+  /** 实时提示：`已返回 N 条，仍在搜索 X 个平台` / 旧快照提示；终态为 null。 */
+  liveHint: string | null;
+}
+
+/**
+ * 决定当前展示内容（Phase 2）：
+ * - 无 live 响应（POST 挂起 / 终态已提交）：返回已提交快照。
+ * - 有 live 响应：状态卡片与 overall 始终用 live（当前任务实时状态）；
+ *   结果列表在 live 出现首条结果后立即切换为 live 结果，之前保留旧快照
+ *   并给出"正在搜索，暂时显示上次结果"提示。
+ * - 实时提示在任务终态后自动消失。
+ */
+export function selectSearchPresentation(state: ExperienceState): SearchPresentation {
+  const d = state.display;
+  const live = d.liveResponse;
+  const committed = d.jobResponse;
+  if (!live) {
+    return { jobResponse: committed, showingStaleSnapshot: false, liveHint: null };
+  }
+
+  const liveCount = live.results.length;
+  const terminal = TERMINAL_OVERALLS.has(live.overall);
+  const searching = Object.values(live.platforms).filter(
+    (i) => i.status === "pending" || i.status === "running"
+  ).length;
+
+  let liveHint: string | null = null;
+  if (!terminal) {
+    if (liveCount > 0 && searching > 0) {
+      liveHint = `已返回 ${liveCount} 条，仍在搜索 ${searching} 个平台`;
+    } else if (liveCount === 0 && committed !== null) {
+      liveHint = "正在搜索，暂时显示上次结果";
+    }
+  }
+
+  const showLiveResults = liveCount > 0;
+  return {
+    jobResponse: {
+      ...live,
+      results: showLiveResults ? live.results : (committed?.results ?? []),
+    },
+    showingStaleSnapshot: !terminal && !showLiveResults && committed !== null,
+    liveHint,
+  };
 }

@@ -12,18 +12,20 @@ import asyncio
 import logging
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from aggregate_search.models import (
-    PLATFORM_SLUGS, UnifiedSearchResult, interleave_results, make_dedup_key,
+    UnifiedSearchResult, interleave_results, make_dedup_key,
     is_valid_platform,
 )
 from aggregate_search.protocol import parse_event_line, WorkerRequest
 from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
+    PlatformTimingInfo,
 )
 from .accounts import mark_login_required_from_search
 
@@ -81,6 +83,7 @@ class SearchJobManager:
             job = _ActiveJob(
                 job_id=job_id, keyword=req.keyword.strip(),
                 platforms=platforms, limit_per_platform=req.limit_per_platform,
+                platform_limits=req.platform_limits,
             )
             self._active_job = job
             self._recent_job = job
@@ -118,16 +121,18 @@ class SearchJobManager:
         try:
             env = {**os.environ, "PYTHONUTF8": "1",
                    "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+            job.mark_spawn_start(platform)
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, _WORKER_SCRIPT,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
             )
+            job.mark_spawn_end(platform)
             job.procs.append(proc)
 
             request = WorkerRequest(
                 job_id=job.job_id, mode="search", platform=platform,
-                keyword=job.keyword, limit=job.limit_per_platform,
+                keyword=job.keyword, limit=job.limit_for(platform),
             )
             request_json = request.model_dump_json() + "\n"
             try:
@@ -148,7 +153,6 @@ class SearchJobManager:
             done, pending = await asyncio.wait(
                 [stdout_task, stderr_task], timeout=WORKER_TIMEOUT_SECONDS)
 
-            timed_out = bool(pending)
             if pending:
                 for t in pending:
                     t.cancel()
@@ -470,11 +474,20 @@ class SearchJobManager:
 
 class _ActiveJob:
     def __init__(self, job_id: str, keyword: str, platforms: List[str],
-                 limit_per_platform: int) -> None:
+                 limit_per_platform: int,
+                 platform_limits: Optional[Dict[str, Any]] = None) -> None:
         self.job_id = job_id
         self.keyword = keyword
         self.platforms = platforms
         self.limit_per_platform = limit_per_platform
+        # Round 15: 按平台有效数量。platform_limits 已由 schema 校验（1–20
+        # 严格整数）；只保留本次 platforms 中的平台，缺失平台回退统一值。
+        # 每个平台拿到自己的标量，绝不共享最后一个数字。
+        if platform_limits is None:
+            platform_limits = {}
+        self.platform_limits: Dict[str, int] = {
+            p: int(platform_limits.get(p, limit_per_platform)) for p in platforms
+        }
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.completed_at: Optional[str] = None
         self.platforms_state: Dict[str, PlatformStatusInfo] = {
@@ -486,11 +499,44 @@ class _ActiveJob:
         self.task: Optional[asyncio.Task] = None
         self._cancelling: bool = False
         self._cancelled: bool = False
+        # ── 耗时指标（perf_counter 单调时钟；只记录数字，不含敏感信息）──
+        self._start_ts = time.perf_counter()
+        self._spawn_start: Dict[str, float] = {}
+        self._first_result_ts: Dict[str, float] = {}
+        self._platform_total_ts: Dict[str, float] = {}
+        self.timings: Dict[str, PlatformTimingInfo] = {
+            p: PlatformTimingInfo() for p in platforms}
+        self.total_ms: Optional[int] = None
         # ── Per-job cancel coordination (Round 13) ─────────────────────
         # cancel_lock: 同一 job 只允许一套并发清理。
         # cancel_done: 清理完成信号（重复取消等待它即可，幂等）。
         self.cancel_lock = asyncio.Lock()
         self.cancel_done = asyncio.Event()
+
+    def _ms_since(self, start_ts: float) -> int:
+        return int((time.perf_counter() - start_ts) * 1000)
+
+    def mark_spawn_start(self, platform: str) -> None:
+        self._spawn_start[platform] = time.perf_counter()
+
+    def mark_spawn_end(self, platform: str) -> None:
+        start = self._spawn_start.pop(platform, None)
+        if start is not None:
+            self.timings[platform].spawn_ms = self._ms_since(start)
+
+    def mark_first_result(self, platform: str) -> None:
+        if platform not in self._first_result_ts:
+            self._first_result_ts[platform] = time.perf_counter()
+            self.timings[platform].first_result_ms = self._ms_since(self._start_ts)
+
+    def mark_platform_total(self, platform: str) -> None:
+        if platform not in self._platform_total_ts:
+            self._platform_total_ts[platform] = time.perf_counter()
+            self.timings[platform].total_ms = self._ms_since(self._start_ts)
+
+    def limit_for(self, platform: str) -> int:
+        """该平台本次搜索的有效结果数量（platform_limits 优先，缺失回退统一值）。"""
+        return self.platform_limits.get(platform, self.limit_per_platform)
 
     def set_platform_status(self, platform: str, status: str, result_count: int = 0,
                             error_summary: Optional[str] = None) -> None:
@@ -505,6 +551,8 @@ class _ActiveJob:
         if info.status in terminal and status not in terminal:
             return
         info.status = status
+        if status in terminal:
+            self.mark_platform_total(platform)
         if result_count:
             info.result_count = max(info.result_count, result_count)
         if error_summary:
@@ -516,8 +564,10 @@ class _ActiveJob:
             return
         self._seen_keys.add(key)
         lst = self.platform_results.setdefault(platform, [])
-        if len(lst) < self.limit_per_platform:
+        if len(lst) < self.limit_for(platform):
             lst.append(result)
+            if len(lst) == 1:
+                self.mark_first_result(platform)
             info = self.platforms_state.get(platform)
             if info:
                 info.result_count = len(lst)
@@ -528,11 +578,13 @@ class _ActiveJob:
 
     def finalize(self) -> None:
         self.completed_at = datetime.now(timezone.utc).isoformat()
+        self.total_ms = self._ms_since(self._start_ts)
         for p, results in self.platform_results.items():
             info = self.platforms_state.get(p)
             if info and info.status in ("running", "pending"):
                 info.status = "succeeded" if results else "empty"
                 info.result_count = len(results)
+                self.mark_platform_total(p)
 
     def _compute_overall(self) -> str:
         if self._cancelled:
@@ -561,11 +613,13 @@ class _ActiveJob:
             if info:
                 pdict[p] = PlatformStatusInfo(
                     status=info.status, result_count=info.result_count,
-                    error_summary=info.error_summary)
+                    error_summary=info.error_summary,
+                    timings=self.timings.get(p))
         return SearchJobResponse(
             job_id=self.job_id, overall=self._compute_overall(),
             keyword=self.keyword, created_at=self.created_at,
-            completed_at=self.completed_at, platforms=pdict, results=all_results)
+            completed_at=self.completed_at, total_ms=self.total_ms,
+            platforms=pdict, results=all_results)
 
 
 class JobConflictError(Exception):

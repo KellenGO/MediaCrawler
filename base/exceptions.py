@@ -43,12 +43,3 @@ class RateLimitError(Exception):
         # Safe Chinese message surfaced to the UI via _safe_error_message.
         self.safe_message = self.message
         super().__init__(self.message)
-
-
-class WorkerTimeoutError(Exception):
-    """Raised when a worker exceeds its time budget."""
-
-    def __init__(self, platform: str, timeout_seconds: float):
-        self.platform = platform
-        self.timeout_seconds = timeout_seconds
-        super().__init__(f"Worker for {platform} timed out after {timeout_seconds}s")

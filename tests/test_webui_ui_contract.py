@@ -22,6 +22,7 @@ import pytest
 _ROOT = Path(__file__).parent.parent / "webui" / "src"
 
 _PLATFORM_STATUS = (_ROOT / "components" / "search" / "PlatformStatus.tsx").read_text(encoding="utf-8")
+_STATUS_DISPLAY = (_ROOT / "lib" / "statusDisplay.ts").read_text(encoding="utf-8")
 _TYPES = (_ROOT / "types" / "search.ts").read_text(encoding="utf-8")
 _SEARCH_PAGE = (_ROOT / "components" / "search" / "SearchPage.tsx").read_text(encoding="utf-8")
 _HOOK = (_ROOT / "hooks" / "useAggregateSearch.ts").read_text(encoding="utf-8")
@@ -38,8 +39,10 @@ def test_overall_badge_texts():
 
 
 def test_platform_status_has_cancelled_case():
-    assert '"cancelled"' in _PLATFORM_STATUS
-    assert 'STATUS_LABELS[status]' in _PLATFORM_STATUS
+    """cancelled 分支与 STATUS_LABELS 回退随 statusLine 迁至 statusDisplay.ts。"""
+    assert '"cancelled"' in _STATUS_DISPLAY
+    assert 'STATUS_LABELS[status]' in _STATUS_DISPLAY
+    assert "statusLine" in _PLATFORM_STATUS  # 组件仍接线生产 statusLine
 
 
 def test_status_label_cancelled():

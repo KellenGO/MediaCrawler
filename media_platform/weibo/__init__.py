@@ -17,11 +17,6 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-
-# -*- coding: utf-8 -*-
-# @Author  : relakkes@gmail.com
-# @Time    : 2023/12/23 15:40
-# @Desc    :
 from .client import WeiboClient
 from .core import WeiboCrawler
 from .login import WeiboLogin

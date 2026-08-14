@@ -1,19 +1,28 @@
 /**
- * 账号列表共享 hook（Round 14 抽取，Round 14.2 增加加载/错误状态）。
+ * 账号列表共享 hook（Round 14 / Phase 5.1，基于 TanStack Query）。
  *
- * 供顶部栏登录状态浮层与账号设置页共用 —— 不复制业务逻辑、不改语义：
+ * 供顶部栏登录状态浮层与账号设置页共用 —— 同一固定 queryKey，Header 与
+ * AccountsPage 同时挂载时共享缓存与轮询，不各发一套 3 秒请求：
  * - 仍走 GET /api/health 与 GET /api/search/accounts；
  * - 仍只在 apiRunning === true 时轮询；
- * - 新增 loading / initialLoaded / error：UI 可区分"从未成功加载"与
- *   "曾经加载成功、当前一次刷新失败"（偶发失败保留旧数据）。
+ * - 返回契约不变：accounts / loading / initialLoaded / error / apiRunning；
+ * - 偶发刷新失败保留旧数据（stale），不把旧账号瞬间清空；
+ * - 页面后台时停止高频轮询（纯函数 accountsRefetchInterval 决策）；
+ * - sync/verify/delete 完成后调用 invalidateAccounts 立即刷新。
+ *
+ * 不新建第二个 QueryClient：使用应用已安装的 TanStack Query。
  */
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import type { AccountStatusInfo } from "@/lib/accounts";
 
 const API_BASE = "/api/search/accounts";
 const POLL_INTERVAL_MS = 3000;
+
+export const ACCOUNTS_QUERY_KEY = ["accounts"] as const;
+export const HEALTH_QUERY_KEY = ["api-health"] as const;
 
 export interface UseAccountsResult {
   accounts: AccountStatusInfo[] | null;
@@ -26,52 +35,66 @@ export interface UseAccountsResult {
   apiRunning: boolean | null;
 }
 
+/** 轮询间隔决策（纯函数）：后台页返回 false（停止轮询），否则固定 3s。 */
+export function accountsRefetchInterval(pageVisible: boolean): number | false {
+  return pageVisible ? POLL_INTERVAL_MS : false;
+}
+
+function _pageVisible(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.visibilityState !== "hidden";
+}
+
+/** 账号列表查询选项（纯对象，供测试验证 key/enabled/interval）。 */
+export function accountsQueryOptions(enabled: boolean) {
+  return {
+    queryKey: ACCOUNTS_QUERY_KEY,
+    enabled,
+    refetchInterval: () => accountsRefetchInterval(_pageVisible()),
+    staleTime: 500,
+    retry: 1,
+  };
+}
+
+/** sync/verify/delete 完成后调用：立即刷新共享缓存，不必等下一次轮询。 */
+export function invalidateAccounts(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
+}
+
 export function useAccounts(): UseAccountsResult {
-  const [accounts, setAccounts] = useState<AccountStatusInfo[] | null>(null);
-  const [apiRunning, setApiRunning] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [initialLoaded, setInitialLoaded] = useState(false);
-  const [error, setError] = useState(false);
-
-  // ── API 运行检测 ─────────────────────────────────────────────────────
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => alive && setApiRunning(d?.status === "ok"))
-      .catch(() => alive && setApiRunning(false));
-    return () => { alive = false; };
-  }, []);
-
-  // ── 账号列表轮询（同步/验证期间加速由账号卡片 busy 状态体现） ────────
-  useEffect(() => {
-    if (apiRunning === null) return; // 健康检查未完成：保持 loading（检查中）
-    if (apiRunning !== true) {
-      // 本地 API 不可用：首次请求不可能成功 → 标记失败（UI 显示"暂不可用"）
-      setLoading(false);
-      setError(true);
-      return;
-    }
-    let alive = true;
-    const fetchAccounts = async () => {
+  const healthQuery = useQuery({
+    queryKey: HEALTH_QUERY_KEY,
+    queryFn: async () => {
       try {
-        const { data } = await axios.get(API_BASE);
-        if (!alive) return;
-        setAccounts(data.accounts as AccountStatusInfo[]);
-        setInitialLoaded(true);
-        setError(false);
+        const r = await fetch("/api/health");
+        const d = await r.json();
+        return d?.status === "ok";
       } catch {
-        // 偶发失败：保留旧 accounts（initialLoaded 让 UI 区分新旧数据）
-        if (!alive) return;
-        setError(true);
-      } finally {
-        if (alive) setLoading(false);
+        return false;
       }
-    };
-    fetchAccounts();
-    const id = setInterval(fetchAccounts, POLL_INTERVAL_MS);
-    return () => { alive = false; clearInterval(id); };
-  }, [apiRunning]);
+    },
+    refetchInterval: () => accountsRefetchInterval(_pageVisible()),
+    staleTime: 500,
+    retry: 0,
+  });
 
-  return { accounts, loading, initialLoaded, error, apiRunning };
+  const apiRunning: boolean | null = healthQuery.isPending
+    ? null
+    : healthQuery.data === true;
+
+  const accountsQuery = useQuery({
+    ...accountsQueryOptions(apiRunning === true),
+    queryFn: async () => {
+      const { data } = await axios.get(API_BASE);
+      return data.accounts as AccountStatusInfo[];
+    },
+  });
+
+  return {
+    accounts: accountsQuery.data ?? null,
+    loading: accountsQuery.isPending || healthQuery.isPending,
+    initialLoaded: accountsQuery.data !== undefined,
+    error: accountsQuery.isError || apiRunning === false,
+    apiRunning,
+  };
 }

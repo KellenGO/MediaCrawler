@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { PlatformSlug } from "@/types/search";
-import { useAccounts } from "@/hooks/useAccounts";
+import { invalidateAccounts, useAccounts } from "@/hooks/useAccounts";
+import { usePlatformLimits } from "@/hooks/usePlatformLimits";
 import { accountTone, type AccountTone } from "@/lib/accounts";
+import { MAX_PLATFORM_LIMIT, MIN_PLATFORM_LIMIT, PLATFORM_ORDER, parsePlatformLimitInput } from "@/lib/platformLimits";
 import {
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
@@ -124,12 +127,114 @@ const TONE_BADGE: Record<AccountTone, string> = {
   idle: "bg-cyber-bg-tertiary text-cyber-text-muted border-cyber-border-subtle",
 };
 
+/**
+ * 单个平台的搜索数量设置行（Round 15）：
+ * - 减号/加号不越过 1–20；
+ * - 可直接编辑数字；输入框暂时为空时不立即变成 1；
+ * - blur 或 Enter 校正：小于 1 → 1、大于 20 → 20、小数取整、非法/空 → 恢复上次有效值；
+ * - 修改一个平台不影响其他平台。
+ */
+function LimitRow({
+  platform,
+  value,
+  onChange,
+}: {
+  platform: PlatformSlug;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const lastValidRef = useRef(value);
+
+  useEffect(() => {
+    setDraft(String(value));
+    lastValidRef.current = value;
+  }, [value]);
+
+  const commit = (raw: string) => {
+    const parsed = parsePlatformLimitInput(raw);
+    if (parsed === null) {
+      // 非法或空值 → 恢复该平台上一次有效值
+      setDraft(String(lastValidRef.current));
+      return;
+    }
+    lastValidRef.current = parsed;
+    setDraft(String(parsed));
+    onChange(parsed);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDraft(raw);
+    const parsed = parsePlatformLimitInput(raw);
+    if (parsed !== null) {
+      // 合法输入立即生效（自动保存）；空/非法等待 blur/Enter 校正
+      lastValidRef.current = parsed;
+      onChange(parsed);
+    }
+  };
+
+  const color = PLATFORM_COLORS[platform] || "#4ca4dc";
+
+  return (
+    <div className="flex items-center gap-3 rounded-[14px] border border-cyber-border-subtle bg-cyber-bg-secondary px-3.5 py-3">
+      <span
+        className="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-[13px] font-bold text-white flex-shrink-0"
+        style={{ backgroundColor: color }}
+      >
+        {PLATFORM_LETTERS[platform]}
+      </span>
+      <span className="text-[13.5px] font-semibold text-cyber-text-primary min-w-[3.5rem]">
+        {PLATFORM_LABELS[platform]}
+      </span>
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          aria-label={`减少${PLATFORM_LABELS[platform]}数量`}
+          onClick={() => { const next = value - 1; if (next >= MIN_PLATFORM_LIMIT) onChange(next); }}
+          disabled={value <= MIN_PLATFORM_LIMIT}
+          className="w-8 h-8 grid place-items-center rounded-[9px] border border-cyber-border-subtle text-cyber-text-secondary hover:bg-cyber-bg-tertiary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          onChange={handleChange}
+          onBlur={() => commit(draft)}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          aria-label={`${PLATFORM_LABELS[platform]}搜索数量`}
+          className="w-14 h-9 text-center rounded-[9px] border border-cyber-border-subtle bg-cyber-bg-primary text-[13.5px] text-cyber-text-primary focus:outline-none focus:border-brand transition-colors"
+        />
+        <button
+          type="button"
+          aria-label={`增加${PLATFORM_LABELS[platform]}数量`}
+          onClick={() => { const next = value + 1; if (next <= MAX_PLATFORM_LIMIT) onChange(next); }}
+          disabled={value >= MAX_PLATFORM_LIMIT}
+          className="w-8 h-8 grid place-items-center rounded-[9px] border border-cyber-border-subtle text-cyber-text-secondary hover:bg-cyber-bg-tertiary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+        <span className="text-[12.5px] text-cyber-text-muted w-4 flex-shrink-0">条</span>
+        <span className="text-[11px] text-cyber-text-muted/70 w-9 flex-shrink-0 text-right">
+          {MIN_PLATFORM_LIMIT}–{MAX_PLATFORM_LIMIT}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 interface AccountsPageProps {
   onNavigateSearch?: () => void;
 }
 
 export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   const { accounts, apiRunning } = useAccounts();
+  // Phase 5.1: 账号 sync/verify/delete 完成后立即刷新共享缓存。
+  const queryClient = useQueryClient();
+  // Round 15: 每个平台独立搜索数量（localStorage 持久化，修改即保存）。
+  const { limits, setLimit, resetAll } = usePlatformLimits();
   const [extensionState, setExtensionState] = useState<
     "checking" | "connected" | "outdated" | "not-installed" | "unknown"
   >("checking");
@@ -363,9 +468,12 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
           ...(status === 409 && code === "search_in_progress"
             ? { blockQueue: "search_in_progress" as const } : {}),
         };
+      } finally {
+        // Phase 5.1: 同步完成（成功/失败/后台验证中）后立即刷新账号缓存。
+        invalidateAccounts(queryClient);
       }
     },
-    [extensionState]
+    [extensionState, queryClient]
   );
 
   // ── 重新验证 ─────────────────────────────────────────────────────────
@@ -381,8 +489,11 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       toast.error(msg
         ? `验证请求失败：${msg}`
         : "验证请求失败，请确认本地 API 已启动后刷新页面重试。");
+    } finally {
+      // Phase 5.1: 验证完成（含后台验证进行中）后立即刷新账号缓存。
+      invalidateAccounts(queryClient);
     }
-  }, []);
+  }, [queryClient]);
 
   // ── 清除登录状态（二次确认；破坏性操作保留原生 confirm 双重确认） ──
   const deleteSession = useCallback(async (platform: string) => {
@@ -403,14 +514,16 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       toast.error(msg ? `清除失败：${msg}` : "清除失败，请确认本地 API 已启动。");
     } finally {
       setBusyPlatform(platform, "");
+      // Phase 5.1: 删除完成后立即刷新账号缓存。
+      invalidateAccounts(queryClient);
     }
-  }, []);
+  }, [queryClient]);
 
-  // ── 一键同步四个平台（Round 14.3）────────────────────────────────────
-  // 严格串行（xhs → douyin → bilibili → zhihu，最大并发恒为 1），由生产
-  // 模块 runBulkSync 编排；复用 syncAccount（silent=true，不弹单平台 toast）。
+  // ── 一键同步四个平台（Round 14.3 / Phase 4.3）────────────────────────
+  // 固定顺序 xhs → douyin → bilibili → zhihu，最大并发 2（生产模块
+  // runBulkSync 编排）；复用 syncAccount（silent=true，不弹单平台 toast）。
   const [bulkSyncing, setBulkSyncing] = useState(false);
-  const [bulkCurrent, setBulkCurrent] = useState<PlatformSlug | null>(null);
+  const [bulkActive, setBulkActive] = useState<PlatformSlug[]>([]);
   const [bulkCompleted, setBulkCompleted] = useState(0);
   // 双击 guard：同步 ref（不能只依赖异步 React state）。
   const bulkGuardRef = useRef<ReturnType<typeof createBulkSyncGuard> | null>(null);
@@ -434,7 +547,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       return;
     }
     setBulkSyncing(true);
-    setBulkCurrent(null);
+    setBulkActive([]);
     setBulkCompleted(0);
     try {
       const result = await runBulkSync({
@@ -447,7 +560,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
               : null
         ),
         onProgress: (p) => {
-          setBulkCurrent(p.currentPlatform);
+          setBulkActive(p.activePlatforms);
           setBulkCompleted(p.completedCount);
         },
       });
@@ -466,7 +579,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       }
     } finally {
       setBulkSyncing(false);
-      setBulkCurrent(null);
+      setBulkActive([]);
       guard.finish();
     }
   }, [extensionState, apiRunning, syncAccount]);
@@ -504,15 +617,43 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   // ── 渲染 ─────────────────────────────────────────────────────────────
   return (
     <div className="pt-7 pb-4">
-      <div className="mb-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-[22px] font-bold text-cyber-text-primary">账号设置</h1>
-            <p className="mt-1 text-[13.5px] text-cyber-text-muted">
-              在浏览器官方站点登录后，把登录会话同步到本地后台供无头搜索使用
-            </p>
-          </div>
-          {/* 一键同步四平台：串行 xhs → douyin → bilibili → zhihu */}
+      <div className="mb-6">
+        <h1 className="text-[22px] font-bold text-cyber-text-primary">设置</h1>
+        <p className="mt-1 text-[13.5px] text-cyber-text-muted">
+          统一管理搜索数量与本地账号登录状态
+        </p>
+      </div>
+
+      {/* ── 搜索设置（Round 15） ── */}
+      <section className="mb-8">
+        <h2 className="text-[16px] font-bold text-cyber-text-primary mb-1">搜索设置</h2>
+        <p className="text-[12.5px] text-cyber-text-muted mb-3.5">
+          数量越大，搜索耗时可能越长，也更容易遇到平台请求限制。修改后从下一次搜索开始生效。
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {PLATFORM_ORDER.map((p) => (
+            <LimitRow
+              key={p}
+              platform={p}
+              value={limits[p]}
+              onChange={(v) => setLimit(p, v)}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={resetAll}
+          className="mt-3 px-3.5 py-2 rounded-[10px] border border-cyber-border-subtle text-xs text-cyber-text-secondary hover:bg-cyber-bg-tertiary hover:text-cyber-text-primary transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />恢复默认
+        </button>
+      </section>
+
+      {/* ── 账号与登录 ── */}
+      <section>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h2 className="text-[16px] font-bold text-cyber-text-primary">账号与登录</h2>
+          {/* 一键同步四平台：并发 2，固定顺序 xhs → douyin → bilibili → zhihu */}
           <button
             type="button"
             onClick={handleBulkSync}
@@ -522,8 +663,8 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             {bulkSyncing ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                {bulkCurrent
-                  ? `正在同步 ${PLATFORM_LABELS[bulkCurrent]} · ${Math.min(bulkCompleted + 1, 4)}/4`
+                {bulkActive.length > 0
+                  ? `正在同步：${bulkActive.map((p) => PLATFORM_LABELS[p]).join("、")} · ${Math.min(bulkCompleted + bulkActive.length, 4)}/4`
                   : `${bulkCompleted}/4`}
               </>
             ) : (
@@ -534,7 +675,6 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             )}
           </button>
         </div>
-      </div>
 
       {/* 扩展状态 */}
       <div className={`mb-5 px-4 py-2.5 rounded-xl border text-[12.5px] w-fit ${
@@ -730,6 +870,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
           网页只能收到同步结果状态，拿不到任何 Cookie。本系统不保存平台用户名或密码。
         </p>
       </div>
+      </section>
 
       {onNavigateSearch && (
         <button

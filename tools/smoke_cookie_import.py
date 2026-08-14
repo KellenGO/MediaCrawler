@@ -20,7 +20,6 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from api.services.accounts import (  # noqa: E402  生产函数
-    PLATFORM_COOKIE_DOMAINS,
     PLATFORM_COOKIE_URLS,
     _clear_platform_cookies,
     validate_chrome_v1_cookie_list,

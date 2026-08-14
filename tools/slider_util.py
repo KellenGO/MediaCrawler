@@ -109,7 +109,7 @@ class Slide:
         th, tw = tpl.shape[:2]
         result = cv2.matchTemplate(target, tpl, cv2.TM_CCOEFF_NORMED)
         # Find min and max value positions in matrix
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        _, _, _, max_loc = cv2.minMaxLoc(result)
         tl = max_loc
         br = (tl[0] + tw, tl[1] + th)
         # Draw rectangle border to mark the matched area

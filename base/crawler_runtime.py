@@ -85,6 +85,17 @@ class CrawlerRuntimeOptions:
     #: no media. Default True keeps the original detail-fetching behaviour.
     fetch_details: bool = True
 
+    #: Progressive result sink: when True, each newly fetched detail is
+    #: pushed to ``result_sink`` immediately (in original list order) instead
+    #: of waiting for the whole batch to finish. Default False preserves the
+    #: original gather-then-sink behaviour.
+    stream_results: bool = False
+
+    #: Reuse a single httpx.AsyncClient across requests for this platform
+    #: (created lazily, closed on proxy change / cleanup). Default False
+    #: keeps the original per-request client lifecycle.
+    reuse_http_client: bool = False
+
     #: Public-search mode: when True, the crawler proceeds to search even
     #: when pong did NOT confirm a logged-in session (douyin/zhihu aggregate
     #: search use this — public search APIs can work without login).

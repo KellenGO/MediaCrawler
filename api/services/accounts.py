@@ -102,20 +102,6 @@ EXTENSION_PROTOCOL_VERSION = 2
 #   zhihu     client.py:76 d_c0 required; login.py:68 uses z_c0
 #   xhs       login.py:78  web_session changes on login
 #   douyin    client.py:159 pong checks cookie LOGIN_STATUS == "1"
-REQUIRED_COOKIE_NAMES: Dict[str, tuple] = {
-    "bilibili": ("SESSDATA", "bili_jct", "DedeUserID"),
-    "zhihu": ("z_c0", "d_c0"),
-    "xhs": ("web_session", "a1"),
-    "douyin": ("LOGIN_STATUS", "sessionid", "sessionid_ss"),
-}
-# The critical subset whose presence means "this browser has a login".
-CRITICAL_COOKIE_NAMES: Dict[str, tuple] = {
-    "bilibili": ("SESSDATA", "DedeUserID"),
-    "zhihu": ("z_c0", "d_c0"),
-    "xhs": ("web_session",),
-    "douyin": ("LOGIN_STATUS",),
-}
-
 # Login-marker whitelist for the login_marker_presence diagnostic: marker
 # NAME + presence boolean ONLY — values never leave this module. This is a
 # heuristic (import-time signal), NOT the verification result: import is
@@ -541,6 +527,69 @@ def _profile_lock(platform: str) -> asyncio.Lock:
     return lock
 
 
+# ── Operation coordinator (Phase 4.2) ───────────────────────────────────
+
+class OperationCoordinator:
+    """搜索 / 可见登录 / 账号操作的最小互斥协调（无任务队列框架）。
+
+    - 搜索与可见登录占用"排他"租约（同一时间至多一个）。
+    - 账号同步/验证/删除使用共享槽位：不同平台最多
+      ``max_account_concurrency`` 个同时执行；同一平台严格串行
+      （per-platform key，直到该平台后台验证完成才释放）。
+    - 有界验证超时后后台任务继续运行期间，该平台槽位不提前失效
+      （由任务 done 回调释放），搜索/登录/同平台操作继续被拒绝。
+    - 所有释放幂等；shutdown 调用 ``clear()`` 清空协调状态。
+    """
+
+    def __init__(self, max_account_concurrency: int = 2):
+        self._lock = asyncio.Lock()
+        self._max_accounts = max_account_concurrency
+        self._exclusive: Optional[str] = None
+        self._account_ops: Dict[str, str] = {}
+
+    async def acquire_exclusive(self, kind: str) -> bool:
+        """搜索/登录排他租约；账号操作进行中时拒绝。"""
+        async with self._lock:
+            if self._exclusive is not None:
+                return False
+            if self._account_ops:
+                return False
+            self._exclusive = kind
+            return True
+
+    async def release_exclusive(self, kind: str) -> None:
+        async with self._lock:
+            if self._exclusive == kind:
+                self._exclusive = None
+
+    async def acquire_account(self, platform: str, kind: str) -> str:
+        """账号操作槽位。返回 ""=成功；否则返回拒绝原因字符串：
+        ``search``/``login``（排他占用）、``platform``（同平台进行中）、
+        ``slots``（并发槽位已满）。"""
+        async with self._lock:
+            if self._exclusive is not None:
+                return self._exclusive
+            if platform in self._account_ops:
+                return "platform"
+            if len(self._account_ops) >= self._max_accounts:
+                return "slots"
+            self._account_ops[platform] = kind
+            return ""
+
+    async def release_account(self, platform: str) -> None:
+        async with self._lock:
+            self._account_ops.pop(platform, None)
+
+    async def clear(self) -> None:
+        """shutdown：清空全部协调状态（幂等）。"""
+        async with self._lock:
+            self._exclusive = None
+            self._account_ops.clear()
+
+
+operation_coordinator = OperationCoordinator()
+
+
 # ── Public operations ───────────────────────────────────────────────────
 
 def get_accounts() -> List[Dict[str, Any]]:
@@ -597,9 +646,10 @@ async def sync_platform_cookies(
     # verify 都读不到 "connected"（已被覆盖）。显式传给本次验证，绝不依赖
     # 已被覆盖的全局状态，并发时也不会串用其他平台/上一任务的状态。
     previous_status = _state_of(platform).get("status")
-    await _import_profile_cookies(platform, mapped, diag)
 
-    result = await _bounded_verify(platform, diag, previous_status=previous_status)
+    # Phase 4.1：导入 + 验证合并为单任务/单浏览器上下文。
+    result = await _bounded_verify(
+        platform, diag, previous_status=previous_status, mapped=mapped)
     counts = {k: diag[k] for k in (
         "received_cookie_count", "accepted_cookie_count",
         "skipped_cookie_count", "rejected_cookie_count",
@@ -652,26 +702,31 @@ async def sync_platform_cookies(
     }
 
 
-async def _import_profile_cookies(
+async def _sync_and_verify_platform(
     platform: str, mapped: List[Dict[str, Any]], diag: Dict[str, Any],
-) -> None:
-    """Clear the platform's OWN stale cookies in the profile, then import.
+    previous_status: Optional[str],
+) -> Dict[str, Any]:
+    """Phase 4.1：一次 persistent context 完成 导入 + 验证。
 
-    Never deletes the whole profile dir, never touches other platforms'
-    cookies, and never touches the user's live browser.
+    流程：syncing → launch → 清该平台旧 Cookie → add_cookies → 访问官网 →
+    在同一个 context 上 pong → 写 connected/unverified/expired/unavailable/
+    failed → finally 只关闭一次 context 与 playwright。任何异常都转为
+    failed 结果（绝不抛出导致后台 task 异常未取）。
     """
-    diag["sync_stage"] = "profile_import"
     async with _profile_lock(platform):
         _set_state(platform, status="syncing",
                    safe_error_code=None, safe_message=None)
+        was_connected = previous_status == "connected"
         playwright = None
         context = None
+        verdict = "unavailable"
+        backend = None
         try:
             playwright, context, backend = await _launch_profile_context(platform)
+            diag["sync_stage"] = "profile_import"
             await _clear_platform_cookies(context, platform)
             await context.add_cookies(mapped)
-            # Visit the home page once so the browser persists the cookies
-            # into the profile before we close.
+            # 访问一次官网让浏览器把 Cookie 持久化进 profile。
             try:
                 page = await context.new_page()
                 await page.goto(
@@ -679,11 +734,18 @@ async def _import_profile_cookies(
                     wait_until="domcontentloaded", timeout=15000)
             except Exception:
                 pass
+            # 同一 context 上验证（导入的 Cookie 就在这个 context 里）。
+            diag["sync_stage"] = "verification"
+            verdict = await _pong_with_profile(platform, context)
         except Exception as exc:
-            _set_state(platform, status="failed",
+            _set_state(platform, status="failed", verified=False,
                        safe_error_code="session_import_failed",
                        safe_message="会话导入失败，请重新同步")
-            raise SessionImportError("会话导入失败", diagnostics=diag) from exc
+            return {
+                "success": False, "platform": platform, "verified": False,
+                "status": "failed", "safe_error_code": "session_import_failed",
+                "safe_message": "会话导入失败，请重新同步",
+            }
         finally:
             if context is not None:
                 try:
@@ -696,6 +758,23 @@ async def _import_profile_cookies(
                 except Exception:
                     pass
         _set_state(platform, browser_backend=backend)
+        return _finalize_verdict(platform, verdict, backend, was_connected)
+
+
+async def _run_sync_and_verify(
+    platform: str, mapped: List[Dict[str, Any]], diag: Dict[str, Any],
+    previous_status: Optional[str],
+) -> Dict[str, Any]:
+    """后台任务包装：任何异常都收敛为 failed 结果，task 正常结束。"""
+    try:
+        return await _sync_and_verify_platform(
+            platform, mapped, diag, previous_status)
+    except Exception:
+        return {
+            "success": False, "platform": platform, "verified": False,
+            "status": "failed", "safe_error_code": "session_import_failed",
+            "safe_message": "会话导入失败，请重新同步",
+        }
 
 
 async def _clear_platform_cookies(context, platform: str) -> None:
@@ -705,7 +784,7 @@ async def _clear_platform_cookies(context, platform: str) -> None:
     (clear_cookies(*, name=None, domain=None, path=None)); passing a
     positional list raises TypeError. That error used to be swallowed here,
     so stale cookies were never actually cleared. Now nothing is swallowed:
-    any read/clear failure propagates to _import_profile_cookies and becomes
+    any read/clear failure propagates to _sync_and_verify_platform and becomes
     session_import_failed — a visible, honest failure.
     """
     urls = PLATFORM_COOKIE_URLS.get(platform, [])
@@ -732,22 +811,24 @@ _verify_tasks: Dict[str, asyncio.Task] = {}
 async def _bounded_verify(
     platform: str, diag: Dict[str, Any],
     previous_status: Optional[str] = None,
+    mapped: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Verify the just-imported profile within SYNC_VERIFY_TIMEOUT_SECONDS.
+    """在单一后台任务中完成"导入 + 验证"（单次浏览器上下文，Phase 4.1），
+    有界等待 SYNC_VERIFY_TIMEOUT_SECONDS。
 
-    Returns the full verify_platform result dict; None when the bound
-    expired (the verify task keeps running and the caller reports
-    status=verifying). ``previous_status`` is captured by the sync entry
-    point BEFORE status="syncing" overwrites it — without it, re-syncing a
-    connected account would always see was_connected=False. Exactly one
-    verify task exists per platform: a timeout keeps the original task
-    running and a later call reuses it instead of spawning a duplicate.
+    Returns the full result dict; None when the bound expired (the task keeps
+    running and the caller reports status=verifying). Exactly one task per
+    platform: a timeout keeps the original task running and a later call
+    reuses it instead of spawning a duplicate. 每平台最多一个 sync/verify
+    task —— 并发 sync 会复用/等待同一任务，绝不并发操作同一 profile。
     """
     diag["sync_stage"] = "verification"
     task = _verify_tasks.get(platform)
     if task is None or task.done():
+        if mapped is None:
+            return None  # 无 Cookie 无法创建导入+验证任务（仅复用场景）
         task = asyncio.create_task(
-            verify_platform(platform, previous_status=previous_status))
+            _run_sync_and_verify(platform, mapped, diag, previous_status))
         _verify_tasks[platform] = task
         task.add_done_callback(_make_verify_done_cb(platform))
     try:
@@ -757,7 +838,7 @@ async def _bounded_verify(
     except asyncio.TimeoutError:
         return None
     except Exception:
-        # verify_platform 内部异常路径已把状态写成 failed；这里如实返回，
+        # 后台任务内部异常路径已把状态写成 failed；这里如实返回，
         # 让 sync 报告 login_verification_failed，而不是当作"未登录"。
         return {
             "success": False, "platform": platform,
@@ -771,6 +852,9 @@ def _make_verify_done_cb(platform: str):
     def _on_done(task: asyncio.Task) -> None:
         if _verify_tasks.get(platform) is task:
             _verify_tasks.pop(platform, None)
+        # Phase 4.2: 后台验证结束才释放该平台的账号操作槽位
+        # （bounded verify 超时返回 verifying 后槽位不提前失效）。
+        asyncio.ensure_future(operation_coordinator.release_account(platform))
     return _on_done
 
 
@@ -793,6 +877,8 @@ async def cancel_verify_tasks() -> None:
         t.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
+    # Phase 4.2: shutdown 清理协调状态。
+    await operation_coordinator.clear()
 
 
 async def verify_platform(platform: str, previous_status: Optional[str] = None) -> Dict[str, Any]:
@@ -843,71 +929,79 @@ async def verify_platform(platform: str, previous_status: Optional[str] = None) 
                     await playwright.stop()
                 except Exception:
                     pass
+        return _finalize_verdict(platform, verdict, backend, was_connected)
 
-        # 兼容旧式布尔（True/False monkeypatch 与内部调用点）
-        if verdict is True or verdict == "verified":
-            _set_state(platform, status="connected", verified=True,
-                       display_name=None,
-                       last_verified_at=datetime.now(timezone.utc).isoformat(),
-                       safe_error_code=None, safe_message=None,
-                       browser_backend=backend)
-            return {
-                "success": True,
-                "platform": platform,
-                "verified": True,
-                "status": "connected",
-                "safe_error_code": None,
-                "safe_message": "会话验证通过",
-            }
 
-        # 三态：验证过程不可用（网络/超时/403 风控/导航失败/客户端技术
-        # 错误）→ 无法得出登录结论 —— 不得声称"未登录"或"会话失效"。
-        # Round 11 不变量（推翻 Round 10 的"unavailable 保持 connected"）：
-        # verified=true 只表示"本次真实验证成功"，unavailable 绝不是成功；
-        # 无论此前是否 connected，一律 status=unavailable、verified=False、
-        # 不标记 expired、不清除已导入 profile、保留 last_verified_at。
-        if verdict == "unavailable":
-            msg = "当前无法验证登录状态，仍可尝试搜索或稍后重新验证"
-            _set_state(platform, status="unavailable", verified=False,
-                       safe_error_code="login_verification_unavailable",
-                       safe_message=msg, browser_backend=backend)
-            return {
-                "success": True, "platform": platform,
-                "verified": False, "status": "unavailable",
-                "safe_error_code": "login_verification_unavailable",
-                "safe_message": msg,
-            }
+def _finalize_verdict(
+    platform: str, verdict, backend: Optional[str], was_connected: bool,
+) -> Dict[str, Any]:
+    """三态判定并写状态（sync 与 direct verify 共享的生产逻辑）。
 
-        # 明确未登录（pong=False）：之前曾确认过登录，现在真实验证明确
-        # 失效 → expired；从未确认过 → unverified（会话已导入，只是还没
-        # 确认登录，公开搜索仍可尝试）。
-        if was_connected:
-            _set_state(platform, status="expired", verified=False,
-                       safe_error_code="login_required",
-                       safe_message="会话已失效，请到账号设置重新同步",
-                       browser_backend=backend)
-            return {
-                "success": True,
-                "platform": platform,
-                "verified": False,
-                "status": "expired",
-                "safe_error_code": "login_required",
-                "safe_message": "会话已失效，请到账号设置重新同步",
-            }
-        _set_state(platform, status="unverified", verified=False,
-                   safe_error_code="login_not_verified",
-                   safe_message="会话已导入，但尚未确认账号登录。"
-                               "你仍可以尝试搜索；如搜索需要登录，再重新同步。",
+    - verdict True/"verified" → connected（connected 只能来自真实 pong）；
+    - "unavailable" → 无法验证（网络/超时/403/导航失败），绝不声称未登录；
+    - 明确未登录：之前 connected → expired；从未确认 → unverified。
+    profile_exists 本身绝不被当作已登录。
+    """
+    # 兼容旧式布尔（True/False monkeypatch 与内部调用点）
+    if verdict is True or verdict == "verified":
+        _set_state(platform, status="connected", verified=True,
+                   display_name=None,
+                   last_verified_at=datetime.now(timezone.utc).isoformat(),
+                   safe_error_code=None, safe_message=None,
+                   browser_backend=backend)
+        return {
+            "success": True,
+            "platform": platform,
+            "verified": True,
+            "status": "connected",
+            "safe_error_code": None,
+            "safe_message": "会话验证通过",
+        }
+
+    # 三态：验证过程不可用（网络/超时/403 风控/导航失败/客户端技术
+    # 错误）→ 无法得出登录结论 —— 不得声称"未登录"或"会话失效"。
+    if verdict == "unavailable":
+        msg = "当前无法验证登录状态，仍可尝试搜索或稍后重新验证"
+        _set_state(platform, status="unavailable", verified=False,
+                   safe_error_code="login_verification_unavailable",
+                   safe_message=msg, browser_backend=backend)
+        return {
+            "success": True, "platform": platform,
+            "verified": False, "status": "unavailable",
+            "safe_error_code": "login_verification_unavailable",
+            "safe_message": msg,
+        }
+
+    # 明确未登录（pong=False）：之前曾确认过登录，现在真实验证明确
+    # 失效 → expired；从未确认过 → unverified（会话已导入，只是还没
+    # 确认登录，公开搜索仍可尝试）。
+    if was_connected:
+        _set_state(platform, status="expired", verified=False,
+                   safe_error_code="login_required",
+                   safe_message="会话已失效，请到账号设置重新同步",
                    browser_backend=backend)
         return {
             "success": True,
             "platform": platform,
             "verified": False,
-            "status": "unverified",
-            "safe_error_code": "login_not_verified",
-            "safe_message": "会话已导入，但尚未确认账号登录。"
-                            "你仍可以尝试搜索；如搜索需要登录，再重新同步。",
+            "status": "expired",
+            "safe_error_code": "login_required",
+            "safe_message": "会话已失效，请到账号设置重新同步",
         }
+    _set_state(platform, status="unverified", verified=False,
+               safe_error_code="login_not_verified",
+               safe_message="会话已导入，但尚未确认账号登录。"
+                           "你仍可以尝试搜索；如搜索需要登录，再重新同步。",
+               browser_backend=backend)
+    return {
+        "success": True,
+        "platform": platform,
+        "verified": False,
+        "status": "unverified",
+        "safe_error_code": "login_not_verified",
+        "safe_message": "会话已导入，但尚未确认账号登录。"
+                        "你仍可以尝试搜索；如搜索需要登录，再重新同步。",
+    }
 
 
 async def _pong_with_profile(platform: str, context) -> str:

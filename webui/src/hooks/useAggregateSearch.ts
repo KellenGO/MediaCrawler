@@ -161,8 +161,15 @@ export function useAggregateSearch() {
   });
 
   // 返回 POST 的结果 Promise：调用方 await 成功后才写入历史（Round 12.1）。
+  // Round 15: 支持按平台独立数量 platform_limits（可选）；缺失时后端回退
+  // limit_per_platform（默认 10），旧调用方不受影响。
   const startSearch = useCallback(
-    (keyword: string, platforms: PlatformSlug[], limitPerPlatform?: number): Promise<SearchJobResponse> => {
+    (
+      keyword: string,
+      platforms: PlatformSlug[],
+      limitPerPlatform?: number,
+      platformLimits?: Partial<Record<PlatformSlug, number>>
+    ): Promise<SearchJobResponse> => {
       generationRef.current += 1; // invalidate in-flight recovery responses
       setJobId(null);
       sessionStorage.removeItem(STORAGE_KEY);
@@ -174,6 +181,9 @@ export function useAggregateSearch() {
         keyword,
         platforms,
         limit_per_platform: limitPerPlatform ?? 10,
+        ...(platformLimits && Object.keys(platformLimits).length > 0
+          ? { platform_limits: platformLimits }
+          : {}),
       };
       return createMutation.mutateAsync(req);
     },

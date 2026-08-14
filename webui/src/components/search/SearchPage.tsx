@@ -4,6 +4,7 @@ import { SearchBar } from "./SearchBar";
 import { PlatformStatus } from "./PlatformStatus";
 import { ResultTabs } from "./ResultTabs";
 import { useSearchExperience } from "@/hooks/useSearchExperience";
+import { usePlatformLimits } from "@/hooks/usePlatformLimits";
 import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
@@ -19,8 +20,12 @@ interface SearchPageProps {
  * 历史 / 任务恢复 —— 本组件只改布局与视觉。
  */
 export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
+  // Round 15: 每个平台独立搜索数量（展示用；搜索请求由 useSearchExperience 读取）。
+  const { limits } = usePlatformLimits();
   const {
     displayJobResponse,
+    showingStaleSnapshot,
+    liveHint,
     refreshing,
     retryingPlatform,
     retryErrors,
@@ -117,6 +122,15 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
   const showInitialIdle = !displayJobResponse && !busy && !hasError;
   const showInitialLoading = !displayJobResponse && busy && !hasError;
 
+  // Round 15.1: 本次搜索中真正返回 login_required 的平台。
+  // 只取 displayJobResponse.platforms 的 key 并按 status 筛选，不解析
+  // error_summary、不根据顶部账号状态推断。显隐判断与平台标签共用同一数组。
+  const loginRequiredPlatforms: PlatformSlug[] = displayJobResponse
+    ? (Object.keys(displayJobResponse.platforms) as PlatformSlug[]).filter(
+        (p) => displayJobResponse.platforms[p].status === "login_required"
+      )
+    : [];
+
   return (
     <div className="pt-7 pb-4">
       {/* 搜索面板（含聚焦浮层：最近搜索 / 推荐搜索） */}
@@ -134,6 +148,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         onHistoryClick={handleHistoryClickLocal}
         onHistoryRemove={removeHistory}
         onHistoryClear={clearHistory}
+        limits={limits}
       />
 
       {/* 平台搜索状态（统一浅色状态卡） */}
@@ -242,11 +257,11 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
 
       {/* Results（全宽布局，无右侧栏） */}
       {displayJobResponse && displayJobResponse.overall !== "failed" && (
-        <div className={`w-full mt-4 transition-opacity ${refreshing ? "opacity-60" : "opacity-100"}`}>
-          {refreshing && (
+        <div className={`w-full mt-4 transition-opacity ${refreshing || showingStaleSnapshot ? "opacity-60" : "opacity-100"}`}>
+          {(liveHint || refreshing) && (
             <div className="mb-3 flex items-center gap-2 px-3.5 py-2 rounded-xl border border-brand/40 bg-brand-soft text-brand-strong text-xs w-fit">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              正在更新，暂时显示上次结果
+              {liveHint ?? "正在更新，暂时显示上次结果"}
             </div>
           )}
 
@@ -265,13 +280,23 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             </div>
           ))}
 
-          {Object.entries(displayJobResponse.platforms).some(([, i]) => i.status === "login_required") && (
+          {loginRequiredPlatforms.length > 0 && (
             <div className="mb-3 p-3 rounded-xl border border-warn/30 bg-warn-soft/60">
               <p className="text-xs text-warn mb-2">以下平台需要先登录：</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {loginRequiredPlatforms.map((p) => (
+                  <span
+                    key={p}
+                    className="px-2.5 py-1 rounded-full bg-warn-soft border border-warn/40 text-warn text-[11.5px] font-medium"
+                  >
+                    {PLATFORM_LABELS[p] || p}
+                  </span>
+                ))}
+              </div>
               <button onClick={handleGoAccounts}
                 className="px-3 py-1.5 rounded-lg bg-warn-soft border border-warn/40 text-warn hover:bg-warn/10 text-xs transition-all">
                 <UserCog className="w-3 h-3 inline mr-1" />
-                前往账号设置
+                前往设置
               </button>
             </div>
           )}

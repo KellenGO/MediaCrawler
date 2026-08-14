@@ -29,7 +29,6 @@ if sys.stderr and hasattr(sys.stderr, 'buffer'):
     if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-import asyncio
 from typing import Optional, Type
 
 import cmd_arg
@@ -120,24 +119,22 @@ async def main() -> None:
     await _generate_wordcloud_if_needed()
 
 
+async def _safe_close(coro, label: str) -> None:
+    try:
+        await coro
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "closed" not in error_msg and "disconnected" not in error_msg:
+            print(f"[Main] Error {label}: {e}")
+
+
 async def async_cleanup() -> None:
     global crawler
     if crawler:
         if getattr(crawler, "cdp_manager", None):
-            try:
-                await crawler.cdp_manager.cleanup(force=True)
-            except Exception as e:
-                error_msg = str(e).lower()
-                if "closed" not in error_msg and "disconnected" not in error_msg:
-                    print(f"[Main] Error cleaning up CDP browser: {e}")
-
+            await _safe_close(crawler.cdp_manager.cleanup(force=True), "cleaning up CDP browser")
         elif getattr(crawler, "browser_context", None):
-            try:
-                await crawler.browser_context.close()
-            except Exception as e:
-                error_msg = str(e).lower()
-                if "closed" not in error_msg and "disconnected" not in error_msg:
-                    print(f"[Main] Error closing browser context: {e}")
+            await _safe_close(crawler.browser_context.close(), "closing browser context")
 
     if config.SAVE_DATA_OPTION in ("db", "sqlite"):
         await db.close()

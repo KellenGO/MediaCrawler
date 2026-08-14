@@ -25,7 +25,6 @@ import random
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
-import httpx
 from playwright.async_api import BrowserContext, Page
 
 import config
@@ -286,14 +285,6 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
             "operationName": "visionProfile",
             "variables": {"userId": userId},
             "query": self.graphql.get("vision_profile"),
-        }
-        return await self.post("", post_data)
-
-    async def get_video_by_creater(self, userId: str, pcursor: str = "") -> Dict:
-        post_data = {
-            "operationName": "visionProfilePhotoList",
-            "variables": {"page": "profile", "pcursor": pcursor, "userId": userId},
-            "query": self.graphql.get("vision_profile_photo_list"),
         }
         return await self.post("", post_data)
 

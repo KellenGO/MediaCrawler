@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Platform & status enums ────────────────────────────────────────────
@@ -133,6 +133,25 @@ class SearchJobRequest(BaseModel):
         description="Platforms to search",
     )
     limit_per_platform: int = Field(default=10, ge=1, le=20)
+    # Round 15: 按平台独立数量。优先于 limit_per_platform；缺失平台回退
+    # limit_per_platform（默认 10）。值必须是 1–20 的严格整数。
+    platform_limits: Optional[Dict[str, Any]] = Field(default=None)
+
+    @field_validator("platform_limits")
+    @classmethod
+    def platform_limits_valid(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError("platform_limits 必须是对象")
+        for key, val in v.items():
+            if key not in PLATFORM_SLUGS:
+                raise ValueError(f"未知平台: {key}")
+            if isinstance(val, bool) or not isinstance(val, int):
+                raise ValueError(f"{key} 的数量必须是 1–20 的整数")
+            if val < 1 or val > 20:
+                raise ValueError(f"{key} 的数量必须在 1–20 之间")
+        return v
 
 
 class SearchJobStatus(BaseModel):

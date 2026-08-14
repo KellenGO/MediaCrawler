@@ -29,7 +29,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-from aggregate_search.models import UnifiedSearchResult, _parse_timestamp
+from aggregate_search.models import UnifiedSearchResult
 
 
 class BasePlatformAdapter(ABC):
@@ -67,27 +67,6 @@ class BasePlatformAdapter(ABC):
         except (ValueError, TypeError):
             return default
 
-    @staticmethod
-    def _get_nested(data: Dict, *keys: str, default: Any = None) -> Any:
-        """Walk nested dict keys safely."""
-        for key in keys:
-            if isinstance(data, dict):
-                data = data.get(key, default)
-            else:
-                return default
-        return data
-
-    def _extract_author_name(self, raw_item: Dict) -> Optional[str]:
-        """Extract public display name from a platform-native item.
-
-        Subclasses should override this or use a consistent key path.
-        Default: look for ``author.nickname`` or ``author.name``.
-        """
-        author = raw_item.get("author") or raw_item.get("user") or raw_item.get("owner")
-        if isinstance(author, dict):
-            return author.get("nickname") or author.get("name") or author.get("uname")
-        return None
-
     def _extract_cover_url(self, raw_item: Dict) -> Optional[str]:
         """Extract cover image URL with platform-specific fallbacks."""
         return None
@@ -99,7 +78,3 @@ class BasePlatformAdapter(ABC):
     def _build_url(self, raw_item: Dict) -> str:
         """Build the public-facing URL for the content."""
         return ""
-
-    def _parse_time(self, raw_item: Dict) -> Optional[str]:
-        """Parse published time from platform-native item."""
-        return None

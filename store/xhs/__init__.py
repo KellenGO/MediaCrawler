@@ -17,18 +17,19 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-# -*- coding: utf-8 -*-
-# @Author  : relakkes@gmail.com
-# @Time    : 2024/1/14 17:34
-# @Desc    :
-from typing import List
+from typing import Dict, List
 
 import config
+from base.base_crawler import AbstractStore
+from tools import utils
 from var import source_keyword_var
 from tools.user_hash import anonymize_user_id, mask_nickname
 
 from .xhs_store_media import *
-from ._store_impl import *
+from ._store_impl import (XhsCsvStoreImplement, XhsDbStoreImplement,
+                          XhsExcelStoreImplement, XhsJsonStoreImplement,
+                          XhsJsonlStoreImplement, XhsMongoStoreImplement,
+                          XhsSqliteStoreImplement)
 
 
 class XhsStoreFactory:

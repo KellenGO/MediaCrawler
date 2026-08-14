@@ -1,12 +1,14 @@
 /**
- * 批量同步四平台（Round 14.3，无 React 依赖）。
+ * 批量同步四平台（Round 14.3 / Phase 4.3，无 React 依赖）。
  *
  * 职责：
- * - 固定平台顺序：xhs → douyin → bilibili → zhihu；
- * - 严格串行：await 上一个平台完成才启动下一个（最大同时执行数量恒为 1）；
+ * - 固定平台顺序：xhs → douyin → bilibili → zhihu（启动顺序恒定）；
+ * - worker-pool 最大并发 2（Phase 4.3：不同平台可重叠，但不 Promise.all 四个）；
  * - 单个平台失败/异常 → 记录结构化结果，继续后续平台；
- * - 全局阻断（扩展未连接/过旧、API 不可用、搜索进行中）→ 停止剩余队列；
- * - 进度回调（1/4、2/4、3/4、4/4）；
+ * - 全局阻断（扩展未连接/过旧、API 不可用、搜索进行中）→ 停止启动新平台，
+ *   已开始的平台允许安全结束；
+ * - outcomes 最终按固定平台顺序排列（不按完成顺序乱序）；
+ * - 进度回调（activePlatforms + completedCount）；
  * - 结果汇总（不含 Cookie/ticket/header/响应体/traceback）。
  *
  * AccountsPage 必须调用本模块的 runBulkSync；测试也必须直接 import 本模块，
@@ -15,13 +17,16 @@
 
 import type { PlatformSlug } from "../types/search.js";
 
-/** 固定平台顺序（一键同步与测试共用，禁止并行）。 */
+/** 固定平台顺序（一键同步与测试共用）。 */
 export const BULK_SYNC_PLATFORM_ORDER: readonly PlatformSlug[] = [
   "xhs",
   "douyin",
   "bilibili",
   "zhihu",
 ];
+
+/** 一键同步最大并发（Phase 4.3：两个账号操作可同时执行）。 */
+export const BULK_SYNC_MAX_CONCURRENCY = 2;
 
 /** 单平台同步结果（安全字段：不含 Cookie/ticket/header/响应体/traceback）。 */
 export interface SyncAttemptOutcome {
@@ -43,8 +48,8 @@ export type BulkSyncBlockReason =
   | "search_in_progress";
 
 export interface BulkSyncProgress {
-  /** 正在同步的平台；null 表示刚完成一个平台。 */
-  currentPlatform: PlatformSlug | null;
+  /** 正在同步的平台（最多 2 个，保持固定启动顺序）。 */
+  activePlatforms: PlatformSlug[];
   /** 已完成的平台数（0..4）。 */
   completedCount: number;
   totalCount: number;
@@ -71,28 +76,32 @@ export interface BulkSyncOptions {
 }
 
 /**
- * 串行批量同步：固定顺序、一次一个、单平台失败继续、全局阻断停止。
+ * 批量同步（Phase 4.3）：worker-pool 最大并发 2，固定启动顺序。
+ * 单平台失败继续；全局阻断出现后不再启动新平台，已开始的平台安全结束。
+ * outcomes 按固定平台顺序返回。
  */
 export async function runBulkSync(options: BulkSyncOptions): Promise<BulkSyncResult> {
   const { syncOne, checkBlock, onProgress } = options;
-  const outcomes: SyncAttemptOutcome[] = [];
+  const totalCount = BULK_SYNC_PLATFORM_ORDER.length;
+  const results = new Map<PlatformSlug, SyncAttemptOutcome>();
+  const active = new Set<PlatformSlug>();
   let blocked = false;
   let blockReason: BulkSyncBlockReason | undefined;
-  const totalCount = BULK_SYNC_PLATFORM_ORDER.length;
 
-  for (const platform of BULK_SYNC_PLATFORM_ORDER) {
-    // 平台开始前：全局阻断检查（扩展/API 状态可能中途变化）。
+  const runOne = async (platform: PlatformSlug): Promise<void> => {
+    // 全局阻断（检查可能因并发在 runOne 内发生变化）。
     const blocker = checkBlock ? checkBlock() : null;
     if (blocker) {
       blocked = true;
       blockReason = blocker;
-      break;
+      return;
     }
-    onProgress?.({ currentPlatform: platform, completedCount: outcomes.length, totalCount });
+    active.add(platform);
+    onProgress?.({ activePlatforms: [...active], completedCount: results.size, totalCount });
 
     let outcome: SyncAttemptOutcome;
     try {
-      outcome = await syncOne(platform); // 严格串行：await 完成才进下一轮
+      outcome = await syncOne(platform);
     } catch (err) {
       // 单平台异常：记录安全失败，绝不透出原始错误细节。
       outcome = {
@@ -104,16 +113,34 @@ export async function runBulkSync(options: BulkSyncOptions): Promise<BulkSyncRes
         safeMessage: "同步失败，请查看该平台卡片诊断",
       };
     }
-    outcomes.push(outcome);
-    onProgress?.({ currentPlatform: null, completedCount: outcomes.length, totalCount });
+    active.delete(platform);
+    results.set(platform, outcome);
+    onProgress?.({ activePlatforms: [...active], completedCount: results.size, totalCount });
 
     // 该平台暴露了全局阻断（例如同步票据返回 search_in_progress）→ 停止。
     if (outcome.blockQueue) {
       blocked = true;
       blockReason = outcome.blockQueue;
-      break;
     }
+  };
+
+  const workers = new Set<Promise<void>>();
+  const queue = [...BULK_SYNC_PLATFORM_ORDER];
+  while (queue.length > 0) {
+    // 填满空位（最多并发 2）；已阻断则不再启动新平台。
+    while (queue.length > 0 && workers.size < BULK_SYNC_MAX_CONCURRENCY && !blocked) {
+      const platform = queue.shift()!;
+      const task = runOne(platform).finally(() => workers.delete(task));
+      workers.add(task);
+    }
+    if (workers.size === 0) break; // 已阻断且无在途任务
+    await Promise.race(workers); // 等任一完成腾出空位
   }
+  await Promise.all(workers); // 已开始的平台允许安全结束
+
+  const outcomes = BULK_SYNC_PLATFORM_ORDER
+    .map((p) => results.get(p))
+    .filter((o): o is SyncAttemptOutcome => o !== undefined);
 
   return {
     outcomes,

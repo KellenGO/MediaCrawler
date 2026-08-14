@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import signal
 import sys
+import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Ensure project root is on sys.path
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -34,10 +34,9 @@ from base.crawler_runtime import CrawlerRuntimeOptions
 from base.exceptions import LoginRequiredError, RateLimitError
 from tools import utils
 from aggregate_search.protocol import (
-    read_request, emit_event, emit_status, emit_result, emit_done, emit_error,
-    WorkerEvent,
+    read_request, emit_status, emit_result, emit_done, emit_error,
 )
-from aggregate_search.models import UnifiedSearchResult, agg_to_core_platform
+from aggregate_search.models import agg_to_core_platform
 from aggregate_search.adapters import (
     XhsAdapter, DouyinAdapter, BilibiliAdapter, ZhihuAdapter,
 )
@@ -168,7 +167,9 @@ async def _run_standard_search(
     config.SAVE_LOGIN_STATE = True
     config.LOGIN_TYPE = "qrcode"
     config.ENABLE_IP_PROXY = False
-    config.MAX_CONCURRENCY_NUM = 1
+    # 小红书有限并发（其余平台保持 1，禁止无限并发）；四平台仍是独立 worker
+    # 进程并行，各 crawler 修改全局 config 互不影响。
+    config.MAX_CONCURRENCY_NUM = 2 if core_platform == "xhs" else 1
     # Force normal search mode for Bilibili
     if core_platform == "bili":
         config.BILI_SEARCH_MODE = "normal"
@@ -190,6 +191,9 @@ async def _run_standard_search(
             fetch_details=(core_platform != "bili"),
             # douyin: pong 未确认登录时仍尝试公开搜索（登录门禁不适用公开 API）
             allow_public_search=(core_platform == "dy"),
+            # xhs: 详情按原始顺序逐条 sink + 复用单个 httpx client（Phase 3）
+            stream_results=(core_platform == "xhs"),
+            reuse_http_client=(core_platform == "xhs"),
         )
 
         emit_status(job_id, platform, "running")
@@ -224,7 +228,6 @@ async def _run_zhihu_search(
     Zhihu search reusing the core's persistent-context + search-page flow.
     Uses raw API response to get PUBLIC nicknames (bypassing the extractor).
     """
-    import asyncio as _asyncio
     from playwright.async_api import async_playwright
     from media_platform.zhihu.client import ZhiHuClient
     from tools.browser_launcher import (
@@ -292,7 +295,8 @@ async def _run_zhihu_search(
                 "https://www.zhihu.com/search?q=python&search_source=Guess"
                 "&utm_content=search_hot&type=content"
             )
-            await _asyncio.sleep(3)
+            # Phase 3.4: 有界条件等待 d_c0（最迟 3s），不再固定 sleep(3)。
+            await _wait_for_zhihu_dc0(browser_context)
 
             # Build client with cookies REFRESHED after the search-page
             # navigation (must contain d_c0 when the page generated it).
@@ -562,9 +566,51 @@ async def _run_login(job_id: str, platform: str) -> None:
 
 # ── Cleanup helpers ─────────────────────────────────────────────────────
 
+async def _has_zhihu_dc0(browser_context: Any) -> bool:
+    """读取 zhihu.com 域下 Cookie，返回是否存在非空 d_c0（不打印 Cookie 值）。"""
+    try:
+        cookies = await browser_context.cookies(["https://www.zhihu.com"])
+    except Exception:
+        return False
+    for c in cookies or []:
+        if c.get("name") == "d_c0" and c.get("value"):
+            return True
+    return False
+
+
+async def _wait_for_zhihu_dc0(
+    browser_context: Any,
+    timeout_seconds: float = 3.0,
+    interval_seconds: float = 0.2,
+    monotonic=time.monotonic,
+    sleep=asyncio.sleep,
+) -> bool:
+    """有界条件等待（Phase 3.4）：每约 interval_seconds 轮询 zhihu.com
+    域下 d_c0 Cookie，一旦非空立即继续；超时按现有逻辑继续，不打印 Cookie 值。
+
+    monotonic/sleep 可注入，便于确定性测试（不依赖墙钟）。
+    """
+    deadline = monotonic() + timeout_seconds
+    while True:
+        if await _has_zhihu_dc0(browser_context):
+            return True
+        if monotonic() >= deadline:
+            return False
+        await sleep(interval_seconds)
+
+
 async def _cleanup_crawler(crawler: Any) -> None:
     if crawler is None:
         return
+    # Phase 3.2: 先关闭复用的 API client（幂等 aclose/close），再关闭浏览器。
+    api_client = getattr(crawler, "xhs_client", None)
+    if api_client is not None:
+        closer = getattr(api_client, "aclose", None) or getattr(api_client, "close", None)
+        if closer is not None:
+            try:
+                await closer()
+            except Exception:
+                pass
     cdp = getattr(crawler, "cdp_manager", None)
     if cdp is not None:
         try:
