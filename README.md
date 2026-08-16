@@ -44,8 +44,91 @@
 >
 > 点击查看更为详细的免责声明。[点击跳转](#disclaimer)
 
+---
 
+## 🚀 本项目：中文社交平台聚合搜索（Fork 增强）
 
+> 本仓库 fork 自 [NanmiCoder/MediaCrawler](https://github.com/NanmiCoder/MediaCrawler)，
+> **完整保留**原项目的单平台爬虫能力（CLI 与 WebUI 均可继续使用），并在此基础上新增了一套
+> **四平台聚合搜索系统**。以下为本 fork 独有内容；上游原始功能介绍见文末原作者章节。
+
+### ✨ 核心特性
+
+| 特性 | 说明 |
+| ---- | ---- |
+| 一次输入、四平台并行搜索 | 小红书 / 抖音 / B站 / 知乎 同时搜索，结果按平台分组、支持多平台综合排序与去重展示 |
+| 平台级隔离的子进程 worker | 每个平台独立子进程，通过事件协议（`MC_AGG_EVENT`）实时上报状态与结果；单平台失败/超时不影响其他平台，部分成功即返回 |
+| 账号状态三态管理 | 每平台账号实时标记 `verified` / `not_logged_in` / `unavailable`，登录失效自动降级为公开搜索，一键重新同步 |
+| 安全的取消生命周期 | 搜索中途可随时取消：重复点击幂等（只执行一次清理）、子进程清理有界且异常隔离、已返回的部分结果保留、取消后立即发起新搜索 |
+| 每平台独立搜索数量 | 每个平台可单独设置 1–20 条（默认 10），设置持久化在浏览器本地 |
+| 短内存结果缓存 | 按「关键词 + 平台 + 账号代数」缓存成功结果，LRU/TTL 有界；账号变动自动失效；显式重新搜索可跳过缓存 |
+| 聚合性能优化 | 轻量页面加载（不等待图片/字体、拦截媒体与 analytics）、HTTP client 复用、结果流式返回、worker 快速路径与常驻监督 |
+| 账号协调器 | 跨平台账号操作确定性协调：并发有界（同时 2 个）、同平台串行、异常不泄漏槽位，浏览器上下文单次完成导入+验证 |
+
+### 🧩 技术架构（聚合搜索部分）
+
+```
+webui/  React + Vite + TypeScript   搜索页 / 账号页 / 控制台页
+  │      TanStack Query 轮询 · 生产 reducer 状态机 · node:test 无依赖测试
+  ▼
+api/    FastAPI
+  │      /api/search/jobs（创建/轮询/取消）、/login、/accounts
+  │      search_job_manager：任务生命周期、幂等取消、有界进程清理
+  │      result_cache：内存缓存 · accounts：三态管理与 OperationCoordinator
+  ▼
+aggregate_search/   每平台一个 worker 子进程（事件协议 MC_AGG_EVENT）
+  │      protocol.py 协议层 · adapters/ 平台适配器 · models.py 状态模型
+  ▼
+media_platform/   上游 Playwright 爬虫 + tools/light_page.py 轻量加载优化
+```
+
+### 🚀 快速启动（聚合搜索）
+
+```shell
+# 终端 1：启动 API 服务（默认端口 8080）
+uv run uvicorn api.main:app --port 8080
+
+# 终端 2：前端开发模式（默认 5173，/api 代理到 8080）
+cd webui
+npm install
+npm run dev        # http://localhost:5173
+
+# 生产模式：先构建，再直接访问 http://localhost:8080
+npm run build      # 产物输出到 api/webui/
+```
+
+- **搜索页**：输入关键词、选择平台（可分别设置每平台数量）、一键搜索；运行中可随时取消，取消后保留已返回结果
+- **账号页**：查看各平台登录状态（已验证 / 未登录 / 不可用），批量同步本地浏览器会话，失效平台一键重新同步
+- **高级功能 → 原始爬虫控制台**：使用上游原生的单平台爬虫能力
+
+### 🧪 测试
+
+```shell
+# 后端（pytest + pytest-asyncio；测试全部使用虚构 Cookie 与临时 profile）
+python -m pytest -q tests/
+
+# 前端（node:test 直接测试生产模块，无测试框架依赖）
+cd webui && npm run test:search && npm run build
+```
+
+### 📦 本 fork 新增的目录与关键文件
+
+```
+aggregate_search/         聚合搜索协议、worker、平台适配器、状态模型
+api/                      FastAPI 服务（jobs/login/accounts 路由与服务层）
+webui/                    React 前端（搜索 / 账号 / 控制台）
+store/base_store_impl.py  平台通用存储基类（CSV/JSON/JSONL/Excel/SQLite/MySQL）
+tools/light_page.py       轻量页面加载（聚合模式专用）
+tools/benchmark_aggregate.py  聚合搜索性能基准
+```
+
+### 🔄 与上游的关系
+
+- 原项目全部功能保持不变（单平台 CLI 爬虫、WebUI 爬虫控制、多格式数据存储、词云等），可继续按文末原作者章节使用；
+- 本 fork 新增内容与上游功能相互独立，互不干扰；
+- 上游更新可通过 rebase / merge 持续接入。
+
+---
 
 ## 📖 项目简介
 
