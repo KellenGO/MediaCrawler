@@ -115,7 +115,7 @@ def test_sync_launches_exactly_one_context(monkeypatch):
     calls, ctx, pw = _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
 
     result = _run_sync(monkeypatch)
     assert result["success"] is True
@@ -130,7 +130,7 @@ def test_sync_import_and_pong_share_same_context(monkeypatch):
     calls, ctx, pw = _patch_launch(monkeypatch)
     pong_ctxs = []
 
-    async def fake_pong(platform, context):
+    async def fake_pong(platform, context, metrics=None):
         pong_ctxs.append(context)
         return True
 
@@ -163,7 +163,7 @@ def test_sync_timeout_background_continues_and_releases(monkeypatch):
     calls, ctx, pw = _patch_launch(monkeypatch)
     gate = asyncio.Event()
 
-    async def gated_pong(platform, context):
+    async def gated_pong(platform, context, metrics=None):
         await gate.wait()
         return True
 
@@ -199,7 +199,7 @@ def test_shutdown_cancels_task_and_releases(monkeypatch):
     calls, ctx, pw = _patch_launch(monkeypatch)
     gate = asyncio.Event()
 
-    async def stuck_pong(platform, context):
+    async def stuck_pong(platform, context, metrics=None):
         await gate.wait()
         return True
 
@@ -226,7 +226,7 @@ def test_sync_response_never_leaks_cookie_values(monkeypatch):
     calls, ctx, pw = _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
     result = _run_sync(monkeypatch)
     dump = json.dumps(result, ensure_ascii=False)
     assert "fake-xhs-session" not in dump

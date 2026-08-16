@@ -44,7 +44,9 @@ def _is_secret_key(key: str) -> bool:
 
     Matches exact canonical forms AND suffix-based patterns:
     anything ending in _token, _secret, _cookie, _password, _key,
-    or the hyphenated equivalents.
+    or the hyphenated equivalents. Round 16: also treats keys that
+    contain ``snapshot`` / ``localstorage`` / ``storage`` as secret so a
+    whole session-snapshot subtree (cookie name→value pairs) is redacted.
     """
     c = key.lower().replace("_", "").replace("-", "")
     # Exact canonical matches
@@ -62,6 +64,9 @@ def _is_secret_key(key: str) -> bool:
     for suffix in ("token", "secret", "cookie", "password", "key"):
         if c.endswith(suffix):
             return True
+    # Round 16: session_snapshot / localStorage 整棵子树整体脱敏。
+    if "snapshot" in c or "localstorage" in c or "storage" in c:
+        return True
     return False
 
 
@@ -137,6 +142,18 @@ def emit_error(
             job_id=job_id,
             platform=platform,
             data={"type": error_type, "message": message},
+        )
+    )
+
+
+def emit_metrics(job_id: str, platform: str, metrics: Dict[str, Any]) -> None:
+    """Emit internal performance metrics (numbers + safe enums only)."""
+    emit_event(
+        WorkerEvent(
+            event="metrics",
+            job_id=job_id,
+            platform=platform,
+            data=metrics,
         )
     )
 

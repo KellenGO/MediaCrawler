@@ -20,9 +20,11 @@ import asyncio
 import os
 import sys
 import time
-import traceback
 from pathlib import Path
 from typing import Any, Dict, List
+
+# Round 16.1: 进程启动时刻必须在任何重型 import 之前记录（只依赖 stdlib）。
+_PROCESS_START = time.perf_counter()
 
 # Ensure project root is on sys.path
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -35,11 +37,31 @@ from base.exceptions import LoginRequiredError, RateLimitError
 from tools import utils
 from aggregate_search.protocol import (
     read_request, emit_status, emit_result, emit_done, emit_error,
+    emit_metrics,
 )
 from aggregate_search.models import agg_to_core_platform
 from aggregate_search.adapters import (
     XhsAdapter, DouyinAdapter, BilibiliAdapter, ZhihuAdapter,
 )
+
+# Round 16.1: 模块加载完成即固定 worker 就绪耗时（进程启动→就绪），
+# 是进程生命周期内的常量 —— 绝不随 resident 空闲时间增长。
+_PROCESS_READY_MS = int((time.perf_counter() - _PROCESS_START) * 1000)
+
+# 知乎 worker 使用的 UA（浏览器路径与 fast path 共用，避免重复字面量）。
+_ZHIHU_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36"
+)
+
+
+def _snapshot_has_dc0(snapshot: Optional[Dict[str, str]]) -> bool:
+    """快照中是否存在有效 d_c0（知乎签名必需；不打印 Cookie 值）。"""
+    if not snapshot:
+        return False
+    value = snapshot.get("d_c0")
+    return isinstance(value, str) and bool(value)
 
 WORKER_TIMEOUT_SECONDS = 90
 
@@ -117,6 +139,7 @@ def _safe_error_message(exc: Exception) -> str:
 
 async def _run_standard_search(
     job_id: str, platform: str, keyword: str, limit: int,
+    session_snapshot: Optional[Dict[str, str]] = None,
 ) -> None:
     core_platform = agg_to_core_platform(platform)
     adapter = _ADAPTERS[platform]
@@ -147,8 +170,14 @@ async def _run_standard_search(
                 break
             seen_ids.add(dedup_key)
             total_emitted += 1
-            r.rank = next_rank
-            next_rank += 1
+            if platform == "xhs":
+                # Round 16.1: xhs 流式 sink 的详情按完成顺序到达，rank 已由
+                # crawler 盖章为原始搜索列表序号 —— 不按到达顺序覆盖。
+                pass
+            else:
+                # 其余平台批次即源顺序（分页/整页 sink），rank 保持到达顺序。
+                r.rank = next_rank
+                next_rank += 1
             r_data = r.model_dump()
             r_data.pop("event", None)
             r_data.pop("job_id", None)
@@ -177,6 +206,47 @@ async def _run_standard_search(
     crawler = None
     try:
         from main import CrawlerFactory
+
+        # Round 16.1: worker 就绪耗时 = 进程启动→模块加载完成（固定常量，
+        # 不随 resident 空闲时间增长）。
+        emit_metrics(job_id, platform, {
+            "worker_ready_ms": _PROCESS_READY_MS,
+        })
+
+        def _phase_metric(phase: str, elapsed_ms: int) -> None:
+            # 只上报数字；manager 端白名单字段合并进 timings。
+            emit_metrics(job_id, platform, {f"{phase}_ms": elapsed_ms})
+
+        # Round 16: 无浏览器快速路径（xhs 需快照；bilibili 轻量列表可无登录
+        # 直搜；douyin 无 fast path）。首条结果 emit 前失败 → 安全回退浏览器
+        # 路径；已 emit 结果后失败 → 不重跑（避免重复）。
+        if core_platform in ("xhs", "bili") and \
+                (session_snapshot or core_platform == "bili"):
+            try:
+                await _run_fast_standard_search(
+                    job_id, platform, core_platform, keyword, limit,
+                    handle_results, session_snapshot or {}, _phase_metric,
+                )
+                if total_emitted == 0:
+                    emit_status(job_id, platform, "empty",
+                                {"message": "No results found."})
+                else:
+                    emit_status(job_id, platform, "succeeded")
+                emit_done(job_id, platform)
+                return
+            except Exception as exc:
+                if total_emitted > 0:
+                    # 已有结果：不完整重跑（防重复），按错误上报。
+                    error_type = _classify_error(exc)
+                    safe_msg = _safe_error_message(exc)
+                    emit_error(job_id, platform, error_type, safe_msg)
+                    emit_done(job_id, platform)
+                    return
+                # 尚无结果 → 记录回退原因并走浏览器路径。
+                emit_metrics(job_id, platform, {
+                    "fast_path_used": False,
+                    "fallback_reason": "fast_path_failed"})
+
         crawler = CrawlerFactory.create_crawler(platform=core_platform)
         crawler.runtime_options = CrawlerRuntimeOptions(
             result_sink=handle_results,
@@ -193,7 +263,9 @@ async def _run_standard_search(
             allow_public_search=(core_platform == "dy"),
             # xhs: 详情按原始顺序逐条 sink + 复用单个 httpx client（Phase 3）
             stream_results=(core_platform == "xhs"),
-            reuse_http_client=(core_platform == "xhs"),
+            reuse_http_client=True,
+            light_page=True,
+            metrics_cb=_phase_metric,
         )
 
         emit_status(job_id, platform, "running")
@@ -219,14 +291,64 @@ async def _run_standard_search(
     emit_done(job_id, platform)
 
 
+# ── Fast path (no-browser, Round 16) ────────────────────────────────────
+
+async def _run_fast_standard_search(
+    job_id: str, platform: str, core_platform: str, keyword: str, limit: int,
+    handle_results, session_snapshot: Dict[str, str], phase_metric,
+) -> None:
+    """无浏览器快速路径：从内存会话快照构造 client，直接跑搜索（不启动
+    浏览器）。只在 aggregate 模式调用；任何异常向上传播，由调用方决定
+    回退（首条结果前）或按错误上报（已有结果不重跑）。
+
+    返回时结果已通过 ``handle_results`` emit（或合法 empty）。
+    """
+    from main import CrawlerFactory
+
+    emit_metrics(job_id, platform, {"fast_path_used": True})
+    crawler = CrawlerFactory.create_crawler(platform=core_platform)
+    crawler.runtime_options = CrawlerRuntimeOptions(
+        result_sink=handle_results,
+        persist_results=False,
+        login_policy="fail_fast",
+        enable_comments=False,
+        enable_media=False,
+        result_limit=limit,
+        strict_errors=True,
+        headless=True,
+        fetch_details=(core_platform != "bili"),
+        stream_results=(core_platform == "xhs"),
+        reuse_http_client=True,
+        metrics_cb=phase_metric,
+    )
+    try:
+        if core_platform == "xhs":
+            crawler.xhs_client = await crawler.create_xhs_client_from_snapshot(
+                session_snapshot)
+            await crawler.search()
+        elif core_platform == "bili":
+            crawler.bili_client = await crawler.create_bilibili_client_from_snapshot(
+                session_snapshot)
+            await crawler.search_by_keywords()
+        else:  # pragma: no cover — douyin 不走 fast path
+            raise RuntimeError("fast path not supported")
+    finally:
+        try:
+            await _cleanup_crawler(crawler)
+        except Exception:
+            pass
+
+
 # ── Zhihu search ────────────────────────────────────────────────────────
 
 async def _run_zhihu_search(
     job_id: str, platform: str, keyword: str, limit: int,
+    session_snapshot: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     Zhihu search reusing the core's persistent-context + search-page flow.
     Uses raw API response to get PUBLIC nicknames (bypassing the extractor).
+    Round 16: 快照中存在有效 d_c0 时走无浏览器快速路径（零页面导航）。
     """
     from playwright.async_api import async_playwright
     from media_platform.zhihu.client import ZhiHuClient
@@ -249,19 +371,111 @@ async def _run_zhihu_search(
     config.CDP_CONNECT_EXISTING = False
     config.ENABLE_IP_PROXY = False
 
+    def _zh_emit(search_res) -> None:
+        """从知乎搜索响应适配并 emit 结果（fast path 与浏览器路径共用）。"""
+        nonlocal total_emitted, next_rank
+        if not isinstance(search_res, dict):
+            return
+        data_items = search_res.get("data", [])
+        raw_objects = [
+            item.get("object")
+            for item in data_items
+            if item.get("type") in ("search_result", "zvideo")
+               and item.get("object")
+        ]
+        if not raw_objects:
+            return
+        results = adapter.adapt(raw_objects, keyword)
+        for r in results:
+            dedup_key = f"{platform}:{r.content_id}"
+            if dedup_key in seen_ids:
+                continue
+            if total_emitted >= limit:
+                break
+            seen_ids.add(dedup_key)
+            r.rank = next_rank
+            next_rank += 1
+            total_emitted += 1
+            r_data = r.model_dump()
+            r_data.pop("event", None)
+            r_data.pop("job_id", None)
+            emit_result(job_id, platform, r_data)
+
     try:
         emit_status(job_id, platform, "running")
+        emit_metrics(job_id, platform, {
+            "worker_ready_ms": _PROCESS_READY_MS,
+        })
+        _zh_phase = time.perf_counter()
+
+        # ── Round 16 fast path：快照含有效 d_c0 → 无浏览器直搜 ──────────
+        # 零页面导航、不做 pong 门禁（搜索响应本身能分类错误）；失败且
+        # 尚无结果 → 安全回退下方浏览器路径；已有结果 → 不重跑。
+        if session_snapshot and _snapshot_has_dc0(session_snapshot):
+            emit_metrics(job_id, platform, {"fast_path_used": True})
+            _fp_cookie_str = "; ".join(
+                f"{k}={v}" for k, v in session_snapshot.items())
+            fp_client = ZhiHuClient(
+                proxy=None,
+                headers={
+                    "accept": "*/*",
+                    "accept-language": "zh-CN,zh;q=0.9",
+                    "cookie": _fp_cookie_str,  # lowercase, matching _pre_headers
+                    "priority": "u=1, i",
+                    "referer": "https://www.zhihu.com/search?q=python&time_interval=a_year&type=content",
+                    "user-agent": _ZHIHU_USER_AGENT,
+                    "x-api-version": "3.0.91",
+                    "x-app-za": "OS=Web",
+                    "x-requested-with": "fetch",
+                    "x-zse-93": "101_3_3.0",
+                },
+                playwright_page=None,
+                cookie_dict=dict(session_snapshot),
+                reuse_http_client=True,
+            )
+            try:
+                search_res = await fp_client.get("/api/v4/search_v3", {
+                    "gk_version": "gz-gaokao",
+                    "t": "general",
+                    "q": keyword,
+                    "correction": 1,
+                    "offset": 0,
+                    "limit": min(limit + 5, 20),
+                    "filter_fields": "",
+                    "lc_idx": 0,
+                    "show_all_topics": 0,
+                    "search_source": "Filter",
+                })
+                emit_metrics(job_id, platform, {
+                    "search_api_ms": int(
+                        (time.perf_counter() - _zh_phase) * 1000)})
+                _zh_emit(search_res)
+                if total_emitted == 0:
+                    emit_status(job_id, platform, "empty",
+                                {"message": "No results found."})
+                else:
+                    emit_status(job_id, platform, "succeeded")
+                emit_done(job_id, platform)
+                return
+            except Exception as exc:
+                if total_emitted > 0:
+                    # 已有结果：不完整重跑（防重复），按错误上报。
+                    error_type = _classify_error(exc)
+                    safe_msg = _safe_error_message(exc)
+                    emit_error(job_id, platform, error_type, safe_msg)
+                    emit_done(job_id, platform)
+                    return
+                emit_metrics(job_id, platform, {
+                    "fast_path_used": False,
+                    "fallback_reason": "fast_path_failed"})
+                # 无结果 → 回退浏览器路径（继续执行下方代码）。
 
         async with async_playwright() as playwright:
             user_data_dir = os.path.join(
                 os.getcwd(), "browser_data",
                 config.USER_DATA_DIR % core_platform
             )
-            user_agent = (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/128.0.0.0 Safari/537.36"
-            )
+            user_agent = _ZHIHU_USER_AGENT
             # Resolve browser: CUSTOM_BROWSER_PATH > Chrome > Edge > bundled Chromium
             executable_path, channel, backend = resolve_playwright_browser()
             if backend == "playwright-chromium":
@@ -285,18 +499,27 @@ async def _run_zhihu_search(
                 **launch_kwargs,
             )
             await browser_context.add_init_script(path="libs/stealth.min.js")
+            # Round 16 轻量页面：拦截 image/media/font/analytics，导航用
+            # domcontentloaded；route 随 context 关闭自动清理。
+            from tools.light_page import install_light_page_routes, light_goto_kwargs
+            await install_light_page_routes(browser_context)
+            emit_metrics(job_id, platform, {
+                "browser_launch_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
             page = await browser_context.new_page()
-            await page.goto("https://www.zhihu.com", wait_until="domcontentloaded")
+            await page.goto("https://www.zhihu.com", **light_goto_kwargs())
 
             # 先访问搜索页 —— 知乎的 d_c0 等会话 Cookie 往往只在真实访问
             # 搜索页后由浏览器生成/刷新；pong 与搜索 API 都必须用它签名。
             await page.goto(
                 "https://www.zhihu.com/search?q=python&search_source=Guess"
-                "&utm_content=search_hot&type=content"
+                "&utm_content=search_hot&type=content",
+                **light_goto_kwargs(),
             )
             # Phase 3.4: 有界条件等待 d_c0（最迟 3s），不再固定 sleep(3)。
             await _wait_for_zhihu_dc0(browser_context)
+            emit_metrics(job_id, platform, {
+                "navigation_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
             # Build client with cookies REFRESHED after the search-page
             # navigation (must contain d_c0 when the page generated it).
@@ -320,6 +543,7 @@ async def _run_zhihu_search(
                 },
                 playwright_page=page,
                 cookie_dict=cookie_dict,
+                reuse_http_client=True,
             )
 
             # pong 只是诊断，不是门禁：公开搜索 API 不确认登录也可能返回
@@ -328,6 +552,8 @@ async def _run_zhihu_search(
             utils.logger.info(
                 f"[worker._run_zhihu_search] zhihu pong logged_in={logged_in}, "
                 f"d_c0_present={'d_c0' in cookie_dict}")
+            emit_metrics(job_id, platform, {
+                "preflight_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
             # Direct search API call (bypass extractor for public nicknames)
             page_size = min(limit + 5, 20)
@@ -359,36 +585,10 @@ async def _run_zhihu_search(
                            {"message": "No results found."})
                 emit_done(job_id, platform)
                 return
+            emit_metrics(job_id, platform, {
+                "search_api_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
-            data_items = search_res.get("data", [])
-            raw_objects = [
-                item.get("object")
-                for item in data_items
-                if item.get("type") in ("search_result", "zvideo")
-                   and item.get("object")
-            ]
-
-            if not raw_objects:
-                emit_status(job_id, platform, "empty",
-                           {"message": "No results found."})
-                emit_done(job_id, platform)
-                return
-
-            results = adapter.adapt(raw_objects, keyword)
-            for r in results:
-                dedup_key = f"{platform}:{r.content_id}"
-                if dedup_key in seen_ids:
-                    continue
-                if total_emitted >= limit:
-                    break
-                seen_ids.add(dedup_key)
-                r.rank = next_rank
-                next_rank += 1
-                total_emitted += 1
-                r_data = r.model_dump()
-                r_data.pop("event", None)
-                r_data.pop("job_id", None)
-                emit_result(job_id, platform, r_data)
+            _zh_emit(search_res)
 
             if total_emitted == 0:
                 emit_status(job_id, platform, "empty")
@@ -602,15 +802,16 @@ async def _wait_for_zhihu_dc0(
 async def _cleanup_crawler(crawler: Any) -> None:
     if crawler is None:
         return
-    # Phase 3.2: 先关闭复用的 API client（幂等 aclose/close），再关闭浏览器。
-    api_client = getattr(crawler, "xhs_client", None)
-    if api_client is not None:
-        closer = getattr(api_client, "aclose", None) or getattr(api_client, "close", None)
-        if closer is not None:
-            try:
-                await closer()
-            except Exception:
-                pass
+    # Round 16: 关闭所有平台的复用 API client（幂等 aclose/close），再关浏览器。
+    for attr in ("xhs_client", "dy_client", "bili_client", "zhihu_client"):
+        api_client = getattr(crawler, attr, None)
+        if api_client is not None:
+            closer = getattr(api_client, "aclose", None) or getattr(api_client, "close", None)
+            if closer is not None:
+                try:
+                    await closer()
+                except Exception:
+                    pass
     cdp = getattr(crawler, "cdp_manager", None)
     if cdp is not None:
         try:
@@ -638,6 +839,8 @@ async def _get_browser_cookies(browser_context, urls: List[str]):
 
 async def run_worker(
     job_id: str, mode: str, platform: str, keyword: str, limit: int,
+    session_snapshot: Optional[Dict[str, str]] = None,
+    fast_path: bool = False,
 ) -> None:
     if mode == "login":
         await _run_login(job_id, platform)
@@ -648,9 +851,13 @@ async def run_worker(
         return
 
     if platform == "zhihu":
-        await _run_zhihu_search(job_id, platform, keyword, limit)
+        await _run_zhihu_search(
+            job_id, platform, keyword, limit,
+            session_snapshot=session_snapshot if fast_path else None)
     else:
-        await _run_standard_search(job_id, platform, keyword, limit)
+        await _run_standard_search(
+            job_id, platform, keyword, limit,
+            session_snapshot=session_snapshot if fast_path else None)
 
 
 class _WorkerExit(Exception):
@@ -659,14 +866,20 @@ class _WorkerExit(Exception):
 
 
 def main() -> None:
-    try:
-        request = read_request()
-    except (EOFError, Exception) as e:
-        sys.stderr.buffer.write(
-            f"Worker failed to read request: {e}\n".encode("utf-8")
-        )
-        sys.stderr.buffer.flush()
-        sys.exit(1)
+    """Worker entry: one-shot (default) or resident loop (--resident).
+
+    Resident mode (Round 16 supervisor): reads NDJSON requests from stdin in a
+    loop — one request per line — until stdin closes (graceful stop) or the
+    request cap is reached (max-requests restart). Cookies/URLs never enter
+    argv; only the ``--resident`` flag does.
+    """
+    resident = "--resident" in sys.argv
+    max_requests = 1
+    if resident:
+        try:
+            max_requests = max(1, int(os.environ.get("MC_WORKER_MAX_REQUESTS", "20")))
+        except (TypeError, ValueError):
+            max_requests = 20
 
     # Monkey-patch sys.exit so platform login modules don't kill us silently.
     # They call sys.exit() on login failure — we convert that to an exception
@@ -678,28 +891,59 @@ def main() -> None:
 
     sys.exit = _safe_exit  # type: ignore
 
-    exit_code = 1
+    exit_code = 0
+    processed = 0
     try:
-        asyncio.run(
-            run_worker(
-                job_id=request.job_id,
-                mode=request.mode,
-                platform=request.platform,
-                keyword=request.keyword,
-                limit=request.limit,
-            )
-        )
-        exit_code = 0
-    except _WorkerExit:
-        # Platform login module called sys.exit() — worker main() catches it.
-        # The worker's exception handlers already emitted error events.
-        # A login-failure exit must NOT become a normal exit 0.
-        exit_code = 0 if request.mode != "login" else 1
-    except KeyboardInterrupt:
-        exit_code = 130
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        exit_code = 1
+        while True:
+            try:
+                request = read_request()
+            except EOFError:
+                break  # stdin closed → 优雅退出
+            except Exception as exc:
+                # Round 16.1: 只输出异常类型 —— str(exc) 可能包含请求行内容
+                # （如 JSONDecodeError 回显输入，可能含 Cookie/快照）。
+                sys.stderr.buffer.write(
+                    ("Worker failed to read request: "
+                     f"{type(exc).__name__}\n").encode("utf-8"))
+                sys.stderr.buffer.flush()
+                exit_code = 1
+                break
+            processed += 1
+            request_exit = 0
+            try:
+                asyncio.run(
+                    run_worker(
+                        job_id=request.job_id,
+                        mode=request.mode,
+                        platform=request.platform,
+                        keyword=request.keyword,
+                        limit=request.limit,
+                        session_snapshot=request.session_snapshot,
+                        fast_path=request.fast_path,
+                    )
+                )
+            except _WorkerExit:
+                # Platform login module called sys.exit() — the worker's
+                # exception handlers already emitted error events. A
+                # login-failure exit must NOT become a normal exit 0.
+                request_exit = 0 if request.mode != "login" else 1
+            except KeyboardInterrupt:
+                request_exit = 130
+            except Exception as exc:
+                # Round 16.1: 未捕获异常 → 记录安全错误码后立即结束进程。
+                # 绝不打印 traceback（帧/异常消息可能含请求、Cookie 或快照），
+                # 也绝不继续 resident 循环读取下一请求 —— 否则 manager 收
+                # 不到 done/EOF，只能等完整 WORKER_TIMEOUT_SECONDS。
+                sys.stderr.buffer.write(
+                    ("Worker aborted by uncaught exception "
+                     f"({type(exc).__name__}); exiting\n").encode("utf-8"))
+                sys.stderr.buffer.flush()
+                request_exit = 1
+            if request_exit != 0:
+                exit_code = request_exit
+            # 未捕获异常/键盘中断后立即退出，不再处理下一请求。
+            if not resident or processed >= max_requests or request_exit != 0:
+                break
     finally:
         sys.exit = _original_exit  # type: ignore
 

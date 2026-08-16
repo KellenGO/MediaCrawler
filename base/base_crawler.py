@@ -18,6 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 from abc import ABC, abstractmethod
+import time
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import BrowserContext, BrowserType, Playwright
@@ -33,6 +34,20 @@ class AbstractCrawler(ABC):
 
     def __init__(self) -> None:
         self.runtime_options: Optional[Any] = None  # CrawlerRuntimeOptions | None
+        self._crawler_start_ts: Optional[float] = None
+
+    def _begin_phase_timing(self) -> None:
+        """Record the crawler start timestamp for aggregate-only metrics."""
+        self._crawler_start_ts = time.perf_counter()
+
+    def _report_metric(self, phase: str) -> None:
+        """Report an aggregate-only phase metric (numbers only)."""
+        opts = self.runtime_options
+        if opts is None or self._crawler_start_ts is None:
+            return
+        cb = getattr(opts, "metrics_cb", None)
+        if cb is not None:
+            cb(phase, int((time.perf_counter() - self._crawler_start_ts) * 1000))
 
     @abstractmethod
     async def start(self):
@@ -152,6 +167,25 @@ class AbstractCrawler(ABC):
         if opts is None:
             return False
         return getattr(opts, "reuse_http_client", False)
+
+    def _light_page(self) -> bool:
+        """Return True if light page loading (domcontentloaded + resource
+        interception) is enabled (aggregate-only)."""
+        opts = self.runtime_options
+        if opts is None:
+            return False
+        return getattr(opts, "light_page", False)
+
+    async def _apply_light_page(self) -> None:
+        """Install light page routes on the current browser context (aggregate
+        only; console mode is a no-op)."""
+        if not self._light_page():
+            return
+        ctx = getattr(self, "browser_context", None)
+        if ctx is None:
+            return
+        from tools.light_page import install_light_page_routes
+        await install_light_page_routes(ctx)
 
 
 class AbstractLogin(ABC):

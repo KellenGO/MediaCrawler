@@ -99,10 +99,14 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Page,
         cookie_dict: Dict[str, str],
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        reuse_http_client: bool = False,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.headers = headers
+        self.reuse_http_client = reuse_http_client
+        self._http_client = None
+        self._http_client_proxy: Optional[str] = None
         self._host = "https://api.bilibili.com"
         self.cookie_urls = ["https://www.bilibili.com"]
         self.playwright_page = playwright_page
@@ -110,13 +114,45 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
 
+    async def _get_reused_client(self):
+        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
+        if self._http_client is None or self._http_client_proxy != self.proxy:
+            await self._close_http_client()
+            self._http_client = make_async_client(proxy=self.proxy)
+            self._http_client_proxy = self.proxy
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        client = self._http_client
+        self._http_client = None
+        self._http_client_proxy = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+    async def aclose(self) -> None:
+        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
+        await self._close_http_client()
+
+    async def close(self) -> None:
+        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
+        await self._close_http_client()
+
+    async def _send(self, method, url, **kwargs):
+        if self.reuse_http_client:
+            client = await self._get_reused_client()
+            return await client.request(method, url, timeout=self.timeout, **kwargs)
+        async with make_async_client(proxy=self.proxy) as client:
+            return await client.request(method, url, timeout=self.timeout, **kwargs)
+
     async def request(self, method, url, **kwargs) -> Any:
         # Check if proxy has expired before each request
         await self._refresh_proxy_if_expired()
 
         stage = _stage_for_uri(url)
-        async with make_async_client(proxy=self.proxy) as client:
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        response = await self._send(method, url, **kwargs)
         # HTTP 5xx / transient failures: exactly ONE bounded retry, then a
         # safe "temporarily unavailable" error — never unlimited retries,
         # never fast retry loops that bypass platform limits.
@@ -125,8 +161,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 f"[BilibiliClient.request] HTTP {response.status_code} for "
                 f"{url} (stage={stage}), retrying once after 1.5s")
             await asyncio.sleep(1.5)
-            async with make_async_client(proxy=self.proxy) as client:
-                response = await client.request(method, url, timeout=self.timeout, **kwargs)
+            response = await self._send(method, url, **kwargs)
         try:
             data: Dict = response.json()
         except json.JSONDecodeError:
@@ -165,19 +200,27 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         Get the latest img_key and sub_key
         :return:
         """
-        local_storage = await self.playwright_page.evaluate("() => window.localStorage")
-        wbi_img_urls = local_storage.get("wbi_img_urls", "")
-        if not wbi_img_urls:
-            img_url_from_storage = local_storage.get("wbi_img_url")
-            sub_url_from_storage = local_storage.get("wbi_sub_url")
-            if img_url_from_storage and sub_url_from_storage:
-                wbi_img_urls = f"{img_url_from_storage}-{sub_url_from_storage}"
-        if wbi_img_urls and "-" in wbi_img_urls:
-            img_url, sub_url = wbi_img_urls.split("-")
-        else:
-            resp = await self.request(method="GET", url=self._host + "/x/web-interface/nav")
-            img_url: str = resp['wbi_img']['img_url']
-            sub_url: str = resp['wbi_img']['sub_url']
+        # Round 16 fast path：page=None 时跳过 localStorage，直接走 HTTP
+        # /x/web-interface/nav（与浏览器路径的 HTTP fallback 同一实现）。
+        if self.playwright_page is not None:
+            try:
+                local_storage = await self.playwright_page.evaluate("() => window.localStorage")
+                wbi_img_urls = local_storage.get("wbi_img_urls", "")
+                if not wbi_img_urls:
+                    img_url_from_storage = local_storage.get("wbi_img_url")
+                    sub_url_from_storage = local_storage.get("wbi_sub_url")
+                    if img_url_from_storage and sub_url_from_storage:
+                        wbi_img_urls = f"{img_url_from_storage}-{sub_url_from_storage}"
+                if wbi_img_urls and "-" in wbi_img_urls:
+                    img_url, sub_url = wbi_img_urls.split("-")
+                    img_key = img_url.rsplit('/', 1)[1].split('.')[0]
+                    sub_key = sub_url.rsplit('/', 1)[1].split('.')[0]
+                    return img_key, sub_key
+            except Exception:
+                pass
+        resp = await self.request(method="GET", url=self._host + "/x/web-interface/nav")
+        img_url: str = resp['wbi_img']['img_url']
+        sub_url: str = resp['wbi_img']['sub_url']
         img_key = img_url.rsplit('/', 1)[1].split('.')[0]
         sub_key = sub_url.rsplit('/', 1)[1].split('.')[0]
         return img_key, sub_key

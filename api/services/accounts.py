@@ -436,6 +436,71 @@ def _set_state(platform: str, **kw: Any) -> Dict[str, Any]:
     return st
 
 
+# ── In-memory session snapshot (Round 16) ───────────────────────────────
+# 同步/验证成功后在 API 进程内存中保存该平台的 Cookie 会话快照，供聚合搜索
+# worker 通过 stdin 使用。约束：
+# - 只存在内存，绝不写入磁盘/数据库；
+# - 不进入命令行参数、环境变量、日志、traceback、API 响应、stdout/stderr；
+# - 清除账号、重新同步、登录失效、应用 shutdown 时清除；
+# - 后端重启后没有快照属于正常情况，自动回退原 profile 浏览器路径。
+
+_session_snapshots: Dict[str, Dict[str, str]] = {}
+
+# Round 16：账号代数 —— 会话快照每次变更（同步/失效/清除/shutdown）自增，
+# 聚合搜索结果缓存以它为 key 组成部分，实现"账号操作后缓存自动失效"。
+_account_generation: Dict[str, int] = {}
+
+
+def get_account_generation(platform: str) -> int:
+    """当前账号代数（无任何变更时 0）。缓存 key 的一部分。"""
+    return _account_generation.get(platform, 0)
+
+
+def _clear_snapshot_sync(platform: str) -> None:
+    """清除快照并推进账号代数（同步调用点也走这里，保证代数一致）。"""
+    _session_snapshots.pop(platform, None)
+    _account_generation[platform] = _account_generation.get(platform, 0) + 1
+
+
+def _capture_cookie_dict(cookies: List[Dict[str, Any]]) -> Dict[str, str]:
+    """把 Playwright cookie 列表转成 name→value 快照（不落任何日志）。"""
+    out: Dict[str, str] = {}
+    for c in cookies or []:
+        name = c.get("name")
+        value = c.get("value")
+        if name and value is not None:
+            out[str(name)] = str(value)
+    return out
+
+
+async def set_session_snapshot(platform: str, cookie_dict: Dict[str, str]) -> None:
+    if platform not in PLATFORM_PROFILE_DIRS:
+        return
+    if not cookie_dict:
+        _clear_snapshot_sync(platform)
+        return
+    _session_snapshots[platform] = dict(cookie_dict)
+    _account_generation[platform] = _account_generation.get(platform, 0) + 1
+
+
+async def clear_session_snapshot(platform: str) -> None:
+    _clear_snapshot_sync(platform)
+
+
+async def clear_all_session_snapshots() -> None:
+    for platform in PLATFORM_PROFILE_DIRS:
+        _clear_snapshot_sync(platform)
+
+
+def get_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
+    """返回该平台的会话快照（None=无快照，worker 回退浏览器路径）。
+
+    返回值仅供通过 stdin 请求体传输；调用方绝不打印/序列化到响应。
+    """
+    snap = _session_snapshots.get(platform)
+    return dict(snap) if snap else None
+
+
 def mark_login_required_from_search(platform: str) -> None:
     """Search worker reported ``login_required`` for this platform — downgrade
     the in-memory account state WITHOUT launching a browser, touching the
@@ -467,6 +532,9 @@ def mark_login_required_from_search(platform: str) -> None:
     st["safe_error_code"] = "login_required"
     name = PLATFORM_DISPLAY_NAMES.get(platform, platform)
     st["safe_message"] = f"{name}登录状态已失效，请前往账号设置重新同步"
+    # Round 16：登录失效 → 内存会话快照一并清除（绝不残留旧 Cookie 快照），
+    # 账号代数推进 → 结果缓存自动失效。
+    _clear_snapshot_sync(platform)
 
 
 # ── Browser resolution (server side) ────────────────────────────────────
@@ -646,6 +714,10 @@ async def sync_platform_cookies(
     # verify 都读不到 "connected"（已被覆盖）。显式传给本次验证，绝不依赖
     # 已被覆盖的全局状态，并发时也不会串用其他平台/上一任务的状态。
     previous_status = _state_of(platform).get("status")
+    # Round 16：重新同步前清除旧的内存会话快照（导入失败/验证不通过时
+    # 不残留旧 Cookie 快照；验证通过后再重新写入）；账号代数推进 →
+    # 结果缓存自动失效。
+    _clear_snapshot_sync(platform)
 
     # Phase 4.1：导入 + 验证合并为单任务/单浏览器上下文。
     result = await _bounded_verify(
@@ -655,6 +727,10 @@ async def sync_platform_cookies(
         "skipped_cookie_count", "rejected_cookie_count",
         "required_cookie_present", "login_marker_presence",
         "browser_cookie_store_count", "sync_stage")}
+    # Round 16.1: 阶段耗时（只含整数毫秒，无任何敏感信息）。
+    sync_timings = result.get("sync_timings_ms") if result else None
+    _timings = ({"sync_timings_ms": sync_timings}
+                if sync_timings else {})
     if result is None:  # bound expired — verification continues in background
         return {
             "success": True, "platform": platform, "verified": False,
@@ -669,7 +745,7 @@ async def sync_platform_cookies(
             "success": True, "platform": platform, "verified": True,
             "status": status, "safe_error_code": safe_error_code,
             "safe_message": safe_message or "会话导入成功且验证通过",
-            **counts, "sync_stage": "completed",
+            **counts, "sync_stage": "completed", **_timings,
         }
     if status == "failed":
         # Real technical failure during verification (browser launch etc.):
@@ -677,7 +753,8 @@ async def sync_platform_cookies(
         return {
             "success": False, "platform": platform, "verified": False,
             "status": "failed", "safe_error_code": safe_error_code or "login_verification_failed",
-            "safe_message": safe_message or "会话验证失败，请重新同步", **counts,
+            "safe_message": safe_message or "会话验证失败，请重新同步",
+            **counts, **_timings,
         }
     if status == "unavailable":
         # 验证过程不可用（网络/超时/403 风控/导航失败）：不得声称未登录或
@@ -687,7 +764,7 @@ async def sync_platform_cookies(
             "status": "unavailable",
             "safe_error_code": safe_error_code or "login_verification_unavailable",
             "safe_message": safe_message or "当前无法验证登录状态，仍可尝试搜索或稍后重新验证",
-            **counts,
+            **counts, **_timings,
         }
     # 明确未登录（expired / unverified）——会话已导入，公开搜索仍可尝试；
     # 只有真实验证决定 connected vs unverified vs expired。
@@ -698,7 +775,7 @@ async def sync_platform_cookies(
         "safe_message": safe_message or (
             "会话已导入，但尚未确认账号登录。"
             "你仍可以尝试搜索；如搜索需要登录，再重新同步。"),
-        **counts,
+        **counts, **_timings,
     }
 
 
@@ -708,10 +785,17 @@ async def _sync_and_verify_platform(
 ) -> Dict[str, Any]:
     """Phase 4.1：一次 persistent context 完成 导入 + 验证。
 
-    流程：syncing → launch → 清该平台旧 Cookie → add_cookies → 访问官网 →
-    在同一个 context 上 pong → 写 connected/unverified/expired/unavailable/
-    failed → finally 只关闭一次 context 与 playwright。任何异常都转为
-    failed 结果（绝不抛出导致后台 task 异常未取）。
+    流程：syncing → launch → 清该平台旧 Cookie → add_cookies → 在同一
+    context 上 pong → 写 connected/unverified/expired/unavailable/failed →
+    finally 只关闭一次 context 与 playwright。任何异常都转为 failed 结果。
+
+    Round 16.1：不再无条件预访问官网 —— 页面只在验证真正需要时创建
+    （douyin 需页面读 localStorage；zhihu 缺 d_c0 时才导航）。纯 HTTP
+    平台（xhs/bilibili）零页面、零导航。同步全程最多一个验证页面。
+
+    计时（sync_timings_ms，阶段耗时，各自起止，只含整数毫秒）：
+    browser_launch_ms / cookie_import_ms / navigation_ms / verification_ms /
+    total_ms。
     """
     async with _profile_lock(platform):
         _set_state(platform, status="syncing",
@@ -721,30 +805,44 @@ async def _sync_and_verify_platform(
         context = None
         verdict = "unavailable"
         backend = None
+        snapshot_cookies: Optional[Dict[str, str]] = None
+        sync_t: Dict[str, int] = {}
+        _t0 = time.perf_counter()
         try:
+            _t = time.perf_counter()
             playwright, context, backend = await _launch_profile_context(platform)
+            sync_t["browser_launch_ms"] = int((time.perf_counter() - _t) * 1000)
+
+            _t = time.perf_counter()
             diag["sync_stage"] = "profile_import"
             await _clear_platform_cookies(context, platform)
             await context.add_cookies(mapped)
-            # 访问一次官网让浏览器把 Cookie 持久化进 profile。
-            try:
-                page = await context.new_page()
-                await page.goto(
-                    PLATFORM_HOME_URLS[platform],
-                    wait_until="domcontentloaded", timeout=15000)
-            except Exception:
-                pass
+            sync_t["cookie_import_ms"] = int((time.perf_counter() - _t) * 1000)
+
             # 同一 context 上验证（导入的 Cookie 就在这个 context 里）。
+            # 页面/navigation 由 _pong_with_profile 按平台需要创建，最多一个。
             diag["sync_stage"] = "verification"
-            verdict = await _pong_with_profile(platform, context)
+            _t = time.perf_counter()
+            verdict = await _pong_with_profile(platform, context, metrics=sync_t)
+            sync_t["verification_ms"] = int((time.perf_counter() - _t) * 1000)
+            if verdict is True or verdict == "verified":
+                # 会话确认有效 → 捕获内存快照（绝不落日志/响应）。
+                try:
+                    urls = PLATFORM_COOKIE_URLS.get(platform, [])
+                    snapshot_cookies = _capture_cookie_dict(
+                        await context.cookies(urls) if urls else [])
+                except Exception:
+                    snapshot_cookies = None
         except Exception as exc:
             _set_state(platform, status="failed", verified=False,
                        safe_error_code="session_import_failed",
                        safe_message="会话导入失败，请重新同步")
+            sync_t["total_ms"] = int((time.perf_counter() - _t0) * 1000)
             return {
                 "success": False, "platform": platform, "verified": False,
                 "status": "failed", "safe_error_code": "session_import_failed",
                 "safe_message": "会话导入失败，请重新同步",
+                "sync_timings_ms": sync_t,
             }
         finally:
             if context is not None:
@@ -758,7 +856,15 @@ async def _sync_and_verify_platform(
                 except Exception:
                     pass
         _set_state(platform, browser_backend=backend)
-        return _finalize_verdict(platform, verdict, backend, was_connected)
+        # Round 16：只有真实验证通过才保留内存快照；其余情况清除旧快照。
+        if verdict is True or verdict == "verified":
+            await set_session_snapshot(platform, snapshot_cookies or {})
+        else:
+            await clear_session_snapshot(platform)
+        sync_t["total_ms"] = int((time.perf_counter() - _t0) * 1000)
+        result = _finalize_verdict(platform, verdict, backend, was_connected)
+        result["sync_timings_ms"] = sync_t
+        return result
 
 
 async def _run_sync_and_verify(
@@ -879,6 +985,8 @@ async def cancel_verify_tasks() -> None:
         await asyncio.gather(*pending, return_exceptions=True)
     # Phase 4.2: shutdown 清理协调状态。
     await operation_coordinator.clear()
+    # Round 16: shutdown 清除全部内存会话快照。
+    await clear_all_session_snapshots()
 
 
 async def verify_platform(platform: str, previous_status: Optional[str] = None) -> Dict[str, Any]:
@@ -908,10 +1016,27 @@ async def verify_platform(platform: str, previous_status: Optional[str] = None) 
         context = None
         verdict = "unavailable"
         backend = None
+        snapshot_cookies: Optional[Dict[str, str]] = None
+        verify_t: Dict[str, int] = {}
+        _t0 = time.perf_counter()
         try:
+            _t = time.perf_counter()
             playwright, context, backend = await _launch_profile_context(platform)
+            verify_t["browser_launch_ms"] = int(
+                (time.perf_counter() - _t) * 1000)
             # Platform client for pong — production function, not test logic.
-            verdict = await _pong_with_profile(platform, context)
+            _t = time.perf_counter()
+            verdict = await _pong_with_profile(platform, context,
+                                               metrics=verify_t)
+            verify_t["verification_ms"] = int(
+                (time.perf_counter() - _t) * 1000)
+            if verdict is True or verdict == "verified":
+                try:
+                    urls = PLATFORM_COOKIE_URLS.get(platform, [])
+                    snapshot_cookies = _capture_cookie_dict(
+                        await context.cookies(urls) if urls else [])
+                except Exception:
+                    snapshot_cookies = None
         except Exception as exc:
             # 真实验证阶段的技术失败（浏览器启动等）→ failed，不是 unverified。
             _set_state(platform, status="failed", verified=False,
@@ -929,7 +1054,15 @@ async def verify_platform(platform: str, previous_status: Optional[str] = None) 
                     await playwright.stop()
                 except Exception:
                     pass
-        return _finalize_verdict(platform, verdict, backend, was_connected)
+        # Round 16：验证通过才保留内存快照；否则清除旧快照。
+        if verdict is True or verdict == "verified":
+            await set_session_snapshot(platform, snapshot_cookies or {})
+        else:
+            await clear_session_snapshot(platform)
+        verify_t["total_ms"] = int((time.perf_counter() - _t0) * 1000)
+        result = _finalize_verdict(platform, verdict, backend, was_connected)
+        result["sync_timings_ms"] = verify_t
+        return result
 
 
 def _finalize_verdict(
@@ -1004,7 +1137,9 @@ def _finalize_verdict(
     }
 
 
-async def _pong_with_profile(platform: str, context) -> str:
+async def _pong_with_profile(
+    platform: str, context, metrics: Optional[Dict[str, int]] = None,
+) -> str:
     """Verify the profile session with the platform's own client.
 
     Three-state verdict (Round 10): "verified" = 真实确认登录；
@@ -1012,6 +1147,15 @@ async def _pong_with_profile(platform: str, context) -> str:
     超时、403 风控、导航失败或客户端技术错误 —— 无法得出登录结论，
     绝不能当作"明确未登录"。返回 False/True 的旧式布尔调用点由
     verify_platform 兼容处理。
+
+    Round 16.1（页面策略）：
+    - xhs / bilibili 纯 HTTP pong，零页面、零导航；
+    - douyin 需要页面读 localStorage：只创建并导航一次（同一页面）；
+    - zhihu 已有非空 d_c0 → 零页面直接 HTTP pong；缺 d_c0 → 创建同一
+      页面，官网 + 搜索页各导航一次刷新 Cookie。
+    - 页面导航统一使用轻量加载（domcontentloaded + image/media/font/
+      analytics 拦截）；同步全程最多一个验证页面。
+    - metrics（可选）：记录 navigation_ms（导航阶段耗时，整数毫秒）。
     """
     urls = PLATFORM_COOKIE_URLS.get(platform)
     if not urls:
@@ -1025,6 +1169,18 @@ async def _pong_with_profile(platform: str, context) -> str:
         return "not_logged_in"
     cookie_dict = {c["name"]: c["value"] for c in cookies}
     cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+    light_routes_installed = False
+
+    async def _install_light_routes() -> None:
+        nonlocal light_routes_installed
+        if not light_routes_installed:
+            from tools.light_page import install_light_page_routes
+            await install_light_page_routes(context)
+            light_routes_installed = True
+
+    async def _goto_light(page, url: str) -> None:
+        from tools.light_page import light_goto_kwargs
+        await page.goto(url, **light_goto_kwargs())
 
     if platform == "xhs":
         try:
@@ -1044,17 +1200,22 @@ async def _pong_with_profile(platform: str, context) -> str:
         # DouYinClient.pong 依赖 playwright_page 读 localStorage（快路径），
         # 绝不能传 None —— 从该 profile context 创建真实页面并打开官网，
         # 让页面带上刚导入的 Cookie；导航失败 = 无法访问官方站点确认登录
-        # → unavailable（不是"明确未登录"）。
+        # → unavailable（不是"明确未登录"）。Round 16.1：全程只创建/导航
+        # 这一个页面，使用轻量加载。
+        page = None
         try:
             from media_platform.douyin.client import DouYinClient
+            await _install_light_routes()
             page = await context.new_page()
         except Exception:
             return "unavailable"
         try:
             try:
-                await page.goto(
-                    PLATFORM_HOME_URLS[platform],
-                    wait_until="domcontentloaded", timeout=15000)
+                _t_nav = time.perf_counter()
+                await _goto_light(page, PLATFORM_HOME_URLS[platform])
+                if metrics is not None:
+                    metrics["navigation_ms"] = int(
+                        (time.perf_counter() - _t_nav) * 1000)
             except Exception:
                 return "unavailable"
             client = DouYinClient(
@@ -1086,56 +1247,64 @@ async def _pong_with_profile(platform: str, context) -> str:
         except Exception:
             return "unavailable"
     if platform == "zhihu":
-        # 知乎时序（联调结论）：d_c0 往往只在真实访问知乎页面后由浏览器
-        # 生成 —— 初始只有 z_c0 时不能直接 pong（_pre_headers 会抛
-        # "d_c0 not found in cookies"）。顺序必须是：
-        #   1) 创建真实 page；2) 访问官网；3) 访问搜索页；
-        #   4) 从 context 重新读取 Cookie；5) 用刷新后的 cookie 构建
-        #   client；6) 现在再检查 d_c0 并调用 pong；
-        #   7) page 在 finally 中关闭。
-        # 官网导航失败 → unavailable（无法访问官方站点确认登录）；
-        # 搜索页导航失败 → 继续（官网已访问，d_c0 可能已生成）；
-        # 导航后仍无 d_c0 → pong 返回 False → not_logged_in，
-        # 绝不抛出内部异常。
+        # 分级验证（Round 16/16.1）：
+        #   - 平台登录标记检查：profile Cookie 中已有非空 d_c0 → 纯 HTTP
+        #     pong 直接验证，零页面、零导航；
+        #   - 缺少 d_c0（往往只在真实访问知乎页面后由浏览器生成）→ 才创建
+        #     一个页面，官网 + 搜索页导航刷新 Cookie（顺序保持联调结论）。
+        # 官网导航失败 → unavailable；搜索页导航失败 → 继续；导航后仍无
+        # d_c0 → pong 返回 False → not_logged_in；绝不抛出内部异常。
+        page = None
         try:
             from media_platform.zhihu.client import ZhiHuClient
-            page = await context.new_page()
+            has_dc0 = any(
+                c.get("name") == "d_c0" and c.get("value") for c in cookies)
+            use_dict, use_str = cookie_dict, cookie_str
+            if not has_dc0:
+                try:
+                    await _install_light_routes()
+                    page = await context.new_page()
+                except Exception:
+                    return "unavailable"
+                try:
+                    _t_nav = time.perf_counter()
+                    try:
+                        await _goto_light(page, PLATFORM_HOME_URLS[platform])
+                    except Exception:
+                        return "unavailable"
+                    try:
+                        await _goto_light(
+                            page,
+                            "https://www.zhihu.com/search?q=python"
+                            "&search_source=Guess&utm_content=search_hot"
+                            "&type=content")
+                    except Exception:
+                        pass
+                    if metrics is not None:
+                        metrics["navigation_ms"] = int(
+                            (time.perf_counter() - _t_nav) * 1000)
+                    refreshed = await context.cookies(urls)
+                    use_dict = {c["name"]: c["value"] for c in refreshed}
+                    use_str = "; ".join(
+                        f"{c['name']}={c['value']}" for c in refreshed)
+                except Exception:
+                    return "unavailable"
+            client = ZhiHuClient(
+                proxy=None, headers={
+                    "User-Agent": _UA, "cookie": use_str,
+                }, playwright_page=page, cookie_dict=use_dict)
+            # raise_on_error=True：ForbiddenError（403 风控/验证码）、
+            # DataFetchError、超时等传播 → unavailable；200 响应但无
+            # uid/name（明确无用户）→ not_logged_in。
+            return "verified" if bool(await client.pong(raise_on_error=True)) else "not_logged_in"
         except Exception:
             return "unavailable"
-        try:
-            try:
-                await page.goto(
-                    PLATFORM_HOME_URLS[platform],
-                    wait_until="domcontentloaded", timeout=15000)
-            except Exception:
-                return "unavailable"
-            try:
-                await page.goto(
-                    "https://www.zhihu.com/search?q=python&search_source=Guess"
-                    "&utm_content=search_hot&type=content",
-                    wait_until="domcontentloaded", timeout=15000)
-            except Exception:
-                pass
-            try:
-                refreshed = await context.cookies(urls)
-                refreshed_dict = {c["name"]: c["value"] for c in refreshed}
-                refreshed_str = "; ".join(
-                    f"{c['name']}={c['value']}" for c in refreshed)
-                client = ZhiHuClient(
-                    proxy=None, headers={
-                        "User-Agent": _UA, "cookie": refreshed_str,
-                    }, playwright_page=page, cookie_dict=refreshed_dict)
-                # raise_on_error=True：ForbiddenError（403 风控/验证码）、
-                # DataFetchError、超时等传播 → unavailable；200 响应但无
-                # uid/name（明确无用户）→ not_logged_in。
-                return "verified" if bool(await client.pong(raise_on_error=True)) else "not_logged_in"
-            except Exception:
-                return "unavailable"
         finally:
-            try:
-                await page.close()
-            except Exception:
-                pass
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
     return "unavailable"
 
 
@@ -1158,6 +1327,8 @@ async def delete_platform_session(platform: str) -> Dict[str, Any]:
         _set_state(platform, status="disconnected", verified=False,
                    display_name=None, last_verified_at=None,
                    safe_error_code=None, safe_message=None)
+        # Round 16：清除账号 → 内存会话快照一并清除。
+        await clear_session_snapshot(platform)
         return {
             "success": True,
             "platform": platform,

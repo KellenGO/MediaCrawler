@@ -387,7 +387,7 @@ def test_profile_lock_blocks_concurrent_use(monkeypatch):
 
     _patch_launch(monkeypatch)
     monkeypatch.setattr(accounts_mod, "_pong_with_profile",
-                        lambda p, c: asyncio.sleep(0, result=True))
+                        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
     # Real production lock: hold it, then sync must wait.
     lock = accounts_mod._profile_lock("xhs")
 
@@ -437,7 +437,7 @@ def test_sync_import_clears_only_platform_cookies(monkeypatch):
     ]
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
 
     result = asyncio.run(sync_platform_cookies(
         "xhs", _XHS_COOKIES, cookie_format=COOKIE_FORMAT_CHROME_V1, extension_protocol_version=2,
@@ -461,7 +461,7 @@ def test_sync_verify_failure_reports_unverified_not_failure(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=False))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=False))
 
     result = asyncio.run(sync_platform_cookies(
         "xhs", _XHS_COOKIES, cookie_format=COOKIE_FORMAT_CHROME_V1, extension_protocol_version=2))
@@ -485,7 +485,7 @@ def test_sync_verify_timeout_reports_verifying(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: gate.wait())
+        lambda p, c, metrics=None: gate.wait())
     monkeypatch.setattr(accounts_mod, "SYNC_VERIFY_TIMEOUT_SECONDS", 0.05)
 
     async def scenario():
@@ -509,7 +509,7 @@ def test_sync_success_marks_connected_verified(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
 
     result = asyncio.run(sync_platform_cookies(
         "xhs", _XHS_COOKIES, cookie_format=COOKIE_FORMAT_CHROME_V1, extension_protocol_version=2))
@@ -598,12 +598,12 @@ def test_verify_connected_then_pong_failure_returns_expired(monkeypatch):
     acc._set_state("douyin", status="disconnected", verified=False)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
     assert asyncio.run(verify_platform("douyin"))["status"] == "connected"
 
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=False))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=False))
     result = asyncio.run(verify_platform("douyin"))
     assert result["success"] is True
     assert result["status"] == "expired"
@@ -648,7 +648,7 @@ def test_verify_success_marks_verified(monkeypatch):
     monkeypatch.setattr("api.services.accounts._launch_profile_context",
                         fake_launch)
     monkeypatch.setattr("api.services.accounts._pong_with_profile",
-                        lambda platform, ctx: asyncio.sleep(0, result=True))
+                        lambda platform, ctx, metrics=None: asyncio.sleep(0, result=True))
 
     result = asyncio.run(verify_platform("xhs"))
     assert result["verified"] is True
@@ -822,7 +822,7 @@ def test_sync_rejects_outdated_extension_protocol(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=True))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=True))
     with pytest.raises(accounts_mod.ExtensionProtocolOutdatedError):
         asyncio.run(sync_platform_cookies(
             "xhs", _XHS_COOKIES, cookie_format=COOKIE_FORMAT_CHROME_V1,
@@ -841,7 +841,7 @@ def test_verify_runs_once_even_when_bound_expires(monkeypatch):
     gate = asyncio.Event()
     calls = {"n": 0}
 
-    async def counting_pong(platform, ctx):
+    async def counting_pong(platform, ctx, metrics=None):
         calls["n"] += 1
         await gate.wait()
         return True
@@ -876,7 +876,7 @@ def test_cancel_verify_tasks_cancels_inflight(monkeypatch):
 
     gate = asyncio.Event()
 
-    async def stuck_pong(platform, ctx):
+    async def stuck_pong(platform, ctx, metrics=None):
         await gate.wait()
         return True
 
@@ -1039,7 +1039,7 @@ def test_douyin_import_many_cookies_without_login_status(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=False))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=False))
     result = asyncio.run(sync_platform_cookies(
         "douyin", cookies, cookie_format=COOKIE_FORMAT_CHROME_V1,
         extension_protocol_version=2))
@@ -1131,7 +1131,7 @@ def test_resync_connected_clear_not_logged_in_goes_expired(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=False))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=False))
 
     result = asyncio.run(sync_platform_cookies(
         "xhs", _XHS_COOKIES, cookie_format=COOKIE_FORMAT_CHROME_V1,
@@ -1218,7 +1218,7 @@ def test_concurrent_sync_previous_status_not_mixed(monkeypatch):
     _patch_launch(monkeypatch)
     monkeypatch.setattr(
         "api.services.accounts._pong_with_profile",
-        lambda p, c: asyncio.sleep(0, result=False))
+        lambda p, c, metrics=None: asyncio.sleep(0, result=False))
 
     async def scenario():
         xhs_res, dy_res = await asyncio.gather(

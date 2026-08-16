@@ -65,6 +65,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self) -> None:
+        self._begin_phase_timing()
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
@@ -93,9 +94,16 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 )
                 # stealth.min.js is a js script to prevent the website from detecting the crawler.
                 await self.browser_context.add_init_script(path="libs/stealth.min.js")
+            self._report_metric("browser_launch")
+            await self._apply_light_page()
 
             self.context_page = await self.browser_context.new_page()
-            await self.context_page.goto(self.index_url)
+            if self._light_page():
+                from tools.light_page import light_goto_kwargs
+                await self.context_page.goto(self.index_url, **light_goto_kwargs())
+            else:
+                await self.context_page.goto(self.index_url)
+            self._report_metric("navigation")
 
             # Create a client to interact with the Xiaohongshu website.
             self.xhs_client = await self.create_xhs_client(httpx_proxy_format)
@@ -115,6 +123,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     browser_context=self.browser_context,
                     urls=self.cookie_urls,
                 )
+            self._report_metric("preflight")
 
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
@@ -141,11 +150,13 @@ class XiaoHongShuCrawler(AbstractCrawler):
         max_notes = min(config.CRAWLER_MAX_NOTES_COUNT, self._result_limit())
         start_page = config.START_PAGE
         remaining = max_notes  # track how many more items we need
+        _search_api_reported = False
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
             utils.logger.info(f"[XiaoHongShuCrawler.search] Current search keyword: {keyword}")
             page = 1
             search_id = get_search_id()
+            source_offset = 0  # 已处理页累计条目数（原始搜索列表序号基准）
             while remaining > 0 and (page - start_page + 1) * xhs_limit_count <= config.CRAWLER_MAX_NOTES_COUNT + xhs_limit_count:
                 if page < start_page:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Skip page {page}")
@@ -168,6 +179,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         f"[XiaoHongShuCrawler.search] page {page} got {item_count} items "
                         f"in {(time.perf_counter() - _req_start) * 1000:.0f}ms"
                     )
+                    if not _search_api_reported:
+                        self._report_metric("search_api")
+                        _search_api_reported = True
                     if not notes_res:
                         utils.logger.info("[XiaoHongShuCrawler.search] No response!")
                         break
@@ -183,18 +197,27 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         if i.get("model_type") not in ("rec_query", "hot_query")
                     ]
                     items_to_fetch = filtered_items[:remaining]
+                    # Round 16.1: 原始搜索列表序号（过滤前 current_items 中的
+                    # 位置 + 已处理页累计偏移）。详情任务按完成顺序 sink，最终
+                    # 顺序必须按此恢复相关性（rec/hot 推荐项占位但不抓取）。
+                    source_index_by_id = {
+                        i.get("id"): source_offset + idx
+                        for idx, i in enumerate(current_items)
+                    }
                     semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
 
                     if self._stream_results():
-                        # Phase 3.1 渐进 sink：先创建 Task 并发运行，再按原始
-                        # 顺序 await，每得到一条合法详情立即发送（不等全部完成）。
+                        # Phase 3.1/16 渐进 sink：详情任务在"完成即 sink（先于
+                        # cooldown）"；这里只按原顺序 await 收集，不重复 sink。
                         task_list = [
                             asyncio.create_task(self.get_note_detail_async_task(
                                 note_id=post_item.get("id"),
                                 xsec_source=post_item.get("xsec_source"),
                                 xsec_token=post_item.get("xsec_token"),
                                 semaphore=semaphore,
-                            )) for post_item in items_to_fetch
+                                source_index=source_index_by_id.get(
+                                    post_item.get("id"), idx),
+                            )) for idx, post_item in enumerate(items_to_fetch)
                         ]
                         valid_details = []
                         try:
@@ -202,7 +225,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                                 note_detail = await task
                                 if note_detail:
                                     valid_details.append(note_detail)
-                                    self._result_sink_call([note_detail])
                         except BaseException:
                             # strict_errors=True：异常照常上抛；取消并回收
                             # 剩余任务，绝不遗留后台 task。
@@ -234,6 +256,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             await self.get_notice_media(note_detail)
                         note_ids.append(note_detail.get("note_id"))
                         xsec_tokens.append(note_detail.get("xsec_token"))
+                    source_offset += len(current_items)
                     page += 1
                     utils.logger.info(
                         f"[XiaoHongShuCrawler.search] page {page-1}: {len(valid_details)} valid details"
@@ -348,6 +371,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         xsec_source: str,
         xsec_token: str,
         semaphore: asyncio.Semaphore,
+        source_index: Optional[int] = None,
     ) -> Optional[Dict]:
         """Get note detail
 
@@ -356,6 +380,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
             xsec_source:
             xsec_token:
             semaphore:
+            source_index: 该笔记在原始搜索列表中的序号（Round 16.1：详情按
+                完成顺序 sink，最终顺序按此恢复相关性）。仅聚合搜索传入；
+                None（默认：原爬虫控制台/存储路径）时不向数据添加该字段。
 
         Returns:
             Dict: note detail
@@ -387,6 +414,14 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     return None
 
                 note_detail.update({"xsec_token": xsec_token, "xsec_source": xsec_source})
+                # Round 16.1/16.2: 仅聚合搜索传入 source_index 时才盖章
+                # （原爬虫控制台/存储路径不新增该字段）。
+                if source_index is not None:
+                    note_detail["source_index"] = source_index
+                if self._stream_results():
+                    # Round 16: 详情完成 → 立即 sink（先于 cooldown），
+                    # 请求速率不变（cooldown 仍在槽内）。
+                    self._result_sink_call([note_detail])
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[get_note_detail_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching note {note_id}")
                 return note_detail
@@ -473,6 +508,39 @@ class XiaoHongShuCrawler(AbstractCrawler):
             reuse_http_client=self._reuse_http_client(),
         )
         return xhs_client_obj
+
+    async def create_xhs_client_from_snapshot(
+        self, cookie_dict: Dict[str, str],
+    ) -> XiaoHongShuClient:
+        """Round 16 fast path：从内存会话快照构造 client，无浏览器（page=None）。
+        详情 HTML fallback 不可用（需要页面）—— 失败时由 worker 安全回退
+        原浏览器路径。"""
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        return XiaoHongShuClient(
+            proxy=None,
+            headers={
+                "accept": "application/json, text/plain, */*",
+                "accept-language": "zh-CN,zh;q=0.9",
+                "cache-control": "no-cache",
+                "content-type": "application/json;charset=UTF-8",
+                "origin": self.index_url,
+                "pragma": "no-cache",
+                "priority": "u=1, i",
+                "referer": f"{self.index_url}/",
+                "sec-ch-ua": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+                "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                "Cookie": cookie_str,
+            },
+            playwright_page=None,
+            cookie_dict=dict(cookie_dict),
+            proxy_ip_pool=None,
+            reuse_http_client=self._reuse_http_client(),
+        )
 
     async def launch_browser(
         self,

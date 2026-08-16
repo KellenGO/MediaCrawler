@@ -414,15 +414,17 @@ class TestXhsStreamingSink:
     @pytest.mark.asyncio
     async def test_first_result_emitted_before_all_details_finish(
             self, base_config, monkeypatch):
-        """首条 result 在全部详情 gather 完成前发出（渐进 sink）。"""
+        """首条 result 在全部详情 gather 完成前发出，且 sink 先于 cooldown。"""
         gate = asyncio.Event()
         client = _GatedXhsClient(gate)
         crawler = XiaoHongShuCrawler()
         first_sunk = asyncio.Event()
         sink_items = []
+        events = []  # ("sink", note_id) / ("sleep", secs) —— 记录生产顺序
 
         def sink(items):
             sink_items.extend(items)
+            events.append(("sink", items[0]["note_id"]))
             if len(sink_items) == 1:
                 first_sunk.set()
 
@@ -432,19 +434,27 @@ class TestXhsStreamingSink:
             result_sink=sink)
         crawler.xhs_client = client
         real_sleep = asyncio.sleep
+
+        def fake_sleep(secs):
+            events.append(("sleep", secs))
+            return real_sleep(0)
+
         monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep",
-            lambda s: real_sleep(0))
+            "media_platform.xhs.core.asyncio.sleep", fake_sleep)
 
         search_task = asyncio.create_task(crawler.search())
         # 第一个详情已 sink（n0 立即返回）；第二个详情（n1）仍在等待 gate。
         await asyncio.wait_for(first_sunk.wait(), timeout=5)
         assert sink_items[0]["note_id"] == "n0"
-        assert client.second_started.is_set()  # n1 已开始但未完成
-        assert len(sink_items) == 1  # 首条已发出，整体尚未结束
+        assert len(sink_items) == 1  # 首条已发出，n1 尚未完成（整体未结束）
+        # Round 16: sink 必须先于该详情的 cooldown sleep。
+        assert events.index(("sink", "n0")) < events.index(("sleep", 0))
         gate.set()
         await asyncio.wait_for(search_task, timeout=5)
-        assert [i["note_id"] for i in sink_items] == ["n0", "n1"]  # 顺序保持，不重发
+        assert [i["note_id"] for i in sink_items] == ["n0", "n1"]  # 顺序保持
+        # 每个详情恰好一次 sink（不重复 emit）。
+        assert [e for e in events if e[0] == "sink"] == \
+            [("sink", "n0"), ("sink", "n1")]
 
     @pytest.mark.asyncio
     async def test_streaming_strict_errors_cancels_remaining(
@@ -481,3 +491,145 @@ class TestXhsStreamingSink:
             await crawler.search()
         # 剩余任务已被取消（无后台泄漏）
         await asyncio.wait_for(client.cancelled.wait(), timeout=5)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4.1 小红书 source_index 盖章：详情完成顺序 ≠ 相关性顺序
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestXhsSourceIndexStamping:
+    @pytest.fixture
+    def base_config(self, monkeypatch):
+        monkeypatch.setattr(config, "KEYWORDS", "test")
+        monkeypatch.setattr(config, "START_PAGE", 1)
+        monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)
+        monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
+
+    @pytest.mark.asyncio
+    async def test_detail_task_stamps_source_index(self, base_config, monkeypatch):
+        """每个详情带原始搜索列表序号（0..n-1），供 worker 恢复相关性顺序。"""
+        sunk = []
+        crawler = XiaoHongShuCrawler()
+        crawler.runtime_options = CrawlerRuntimeOptions(
+            result_limit=5, persist_results=False, stream_results=True,
+            result_sink=lambda items: sunk.extend(items))
+        crawler.xhs_client = _FakeXhsClient()
+        real_sleep = asyncio.sleep
+        monkeypatch.setattr(
+            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
+
+        await crawler.search()
+        by_id = {d["note_id"]: d["source_index"] for d in sunk}
+        assert by_id == {"n0": 0, "n1": 1, "n2": 2, "n3": 3, "n4": 4}
+
+    @pytest.mark.asyncio
+    async def test_source_index_survives_rec_hot_filtering(self, base_config, monkeypatch):
+        """rec/hot 推荐项占位但不抓取：被过滤后序号仍按过滤前列表计算。"""
+        sunk = []
+
+        class _MixedClient(_FakeXhsClient):
+            async def get_note_by_keyword(self, **kwargs):
+                return {
+                    "items": [
+                        {"id": "rec1", "model_type": "rec_query"},
+                        {"id": "n0", "xsec_source": "pc_search",
+                         "xsec_token": "tok", "model_type": "note"},
+                        {"id": "rec2", "model_type": "hot_query"},
+                        {"id": "n1", "xsec_source": "pc_search",
+                         "xsec_token": "tok", "model_type": "note"},
+                    ],
+                    "has_more": False,
+                }
+
+        crawler = XiaoHongShuCrawler()
+        crawler.runtime_options = CrawlerRuntimeOptions(
+            result_limit=2, persist_results=False, stream_results=True,
+            result_sink=lambda items: sunk.extend(items))
+        crawler.xhs_client = _MixedClient()
+        real_sleep = asyncio.sleep
+        monkeypatch.setattr(
+            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
+
+        await crawler.search()
+        by_id = {d["note_id"]: d["source_index"] for d in sunk}
+        # n0 在原始列表 index=1，n1 在 index=3。
+        assert by_id == {"n0": 1, "n1": 3}
+
+    @pytest.mark.asyncio
+    async def test_legacy_default_no_source_index(self, base_config, monkeypatch):
+        """Round 16.2: 不传 source_index（原爬虫控制台路径）→ 数据不新增该字段。"""
+        crawler = XiaoHongShuCrawler()
+        crawler.runtime_options = CrawlerRuntimeOptions(
+            result_limit=5, persist_results=False, stream_results=False,
+            result_sink=lambda items: None)
+        crawler.xhs_client = _FakeXhsClient()
+        real_sleep = asyncio.sleep
+        monkeypatch.setattr(
+            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
+
+        semaphore = asyncio.Semaphore(2)
+        detail = await crawler.get_note_detail_async_task(
+            note_id="n0", xsec_source="pc_search", xsec_token="tok",
+            semaphore=semaphore)  # 不传 source_index
+        assert detail is not None
+        assert "source_index" not in detail, (
+            "legacy/default 路径不得向数据添加 source_index")
+
+    @pytest.mark.asyncio
+    async def test_non_stream_search_no_source_index(self, base_config, monkeypatch):
+        """Round 16.2: 非聚合（非 stream）search 路径不盖章 source_index。"""
+        sunk = []
+        crawler = XiaoHongShuCrawler()
+        crawler.runtime_options = CrawlerRuntimeOptions(
+            result_limit=2, persist_results=False, stream_results=False,
+            result_sink=lambda items: sunk.extend(items))
+        crawler.xhs_client = _FakeXhsClient()
+        real_sleep = asyncio.sleep
+        monkeypatch.setattr(
+            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
+
+        await crawler.search()
+        assert sunk, "非 stream 路径也应 sink 结果"
+        for detail in sunk:
+            assert "source_index" not in detail, (
+                "非聚合路径不得添加 source_index 字段")
+
+
+class TestFinalizeSortsByRank:
+    def test_finalize_restores_source_order(self):
+        """manager 终态按 rank 稳定重排：第二条先到达也恢复第一条、第二条。"""
+        from api.services.search_job_manager import _ActiveJob
+        from aggregate_search.models import UnifiedSearchResult
+
+        def _mk(cid, rank):
+            return UnifiedSearchResult(
+                platform="xhs", content_id=cid, title=cid,
+                url=f"https://x/{cid}", rank=rank)
+
+        job = _ActiveJob(job_id="j1", keyword="test", platforms=["xhs"],
+                         limit_per_platform=5)
+        job.add_result("xhs", _mk("b", 1))  # 第二条先到达
+        job.add_result("xhs", _mk("a", 0))  # 第一条后到达
+        assert [r.content_id for r in job.platform_results["xhs"]] == ["b", "a"]
+        job.finalize()
+        assert [r.content_id for r in job.platform_results["xhs"]] == ["a", "b"]
+
+    def test_duplicate_content_id_not_duplicated_after_sort(self):
+        """去重不受排序影响：同一 content_id 只出现一次。"""
+        from api.services.search_job_manager import _ActiveJob
+        from aggregate_search.models import UnifiedSearchResult
+
+        def _mk(cid, rank):
+            return UnifiedSearchResult(
+                platform="xhs", content_id=cid, title=cid,
+                url=f"https://x/{cid}", rank=rank)
+
+        job = _ActiveJob(job_id="j1", keyword="test", platforms=["xhs"],
+                         limit_per_platform=5)
+        job.add_result("xhs", _mk("b", 1))
+        job.add_result("xhs", _mk("a", 0))
+        job.add_result("xhs", _mk("b", 1))  # 重复到达（应被去重）
+        job.finalize()
+        ids = [r.content_id for r in job.platform_results["xhs"]]
+        assert ids == ["a", "b"]
+        assert len(ids) == len(set(ids))

@@ -54,15 +54,45 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Page,
         cookie_dict: Dict[str, str],
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        reuse_http_client: bool = False,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.default_headers = headers
+        self.reuse_http_client = reuse_http_client
+        self._http_client = None
+        self._http_client_proxy: Optional[str] = None
         self.cookie_urls = ["https://www.zhihu.com"]
         self.cookie_dict = cookie_dict
         self._extractor = ZhihuExtractor()
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
+
+    async def _get_reused_client(self):
+        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
+        if self._http_client is None or self._http_client_proxy != self.proxy:
+            await self._close_http_client()
+            self._http_client = make_async_client(proxy=self.proxy)
+            self._http_client_proxy = self.proxy
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        client = self._http_client
+        self._http_client = None
+        self._http_client_proxy = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+    async def aclose(self) -> None:
+        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
+        await self._close_http_client()
+
+    async def close(self) -> None:
+        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
+        await self._close_http_client()
 
     async def _pre_headers(self, url: str) -> Dict:
         """
@@ -99,8 +129,14 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         # return response.text
         return_response = kwargs.pop('return_response', False)
 
-        async with make_async_client(proxy=self.proxy) as client:
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        if self.reuse_http_client:
+            client = await self._get_reused_client()
+            response = await client.request(
+                method, url, timeout=self.timeout, **kwargs)
+        else:
+            async with make_async_client(proxy=self.proxy) as client:
+                response = await client.request(
+                    method, url, timeout=self.timeout, **kwargs)
 
         if response.status_code != 200:
             utils.logger.error(f"[ZhiHuClient.request] Requset Url: {url}, Request error: {response.text}")

@@ -51,10 +51,14 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Optional[Page],
         cookie_dict: Dict,
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        reuse_http_client: bool = False,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.headers = headers
+        self.reuse_http_client = reuse_http_client
+        self._http_client = None
+        self._http_client_proxy: Optional[str] = None
         self._host = "https://www.douyin.com"
         self.cookie_urls = [
             "https://douyin.com",
@@ -67,6 +71,32 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         self.cookie_dict = cookie_dict
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
+
+    async def _get_reused_client(self):
+        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
+        if self._http_client is None or self._http_client_proxy != self.proxy:
+            await self._close_http_client()
+            self._http_client = make_async_client(proxy=self.proxy)
+            self._http_client_proxy = self.proxy
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        client = self._http_client
+        self._http_client = None
+        self._http_client_proxy = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+    async def aclose(self) -> None:
+        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
+        await self._close_http_client()
+
+    async def close(self) -> None:
+        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
+        await self._close_http_client()
 
     async def __process_req_params(
         self,
@@ -124,8 +154,12 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         # Check whether the proxy has expired before each request
         await self._refresh_proxy_if_expired()
 
-        async with make_async_client(proxy=self.proxy) as client:
+        if self.reuse_http_client:
+            client = await self._get_reused_client()
             response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        else:
+            async with make_async_client(proxy=self.proxy) as client:
+                response = await client.request(method, url, timeout=self.timeout, **kwargs)
         try:
             if response.text == "" or response.text == "blocked":
                 utils.logger.error(f"request params incrr, response.text: {response.text}")

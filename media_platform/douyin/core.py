@@ -131,6 +131,7 @@ class DouYinCrawler(AbstractCrawler):
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self) -> None:
+        self._begin_phase_timing()
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
@@ -159,9 +160,16 @@ class DouYinCrawler(AbstractCrawler):
                 )
                 # stealth.min.js is a js script to prevent the website from detecting the crawler.
                 await self.browser_context.add_init_script(path="libs/stealth.min.js")
+            self._report_metric("browser_launch")
+            await self._apply_light_page()
 
             self.context_page = await self.browser_context.new_page()
-            await self.context_page.goto(self.index_url)
+            if self._light_page():
+                from tools.light_page import light_goto_kwargs
+                await self.context_page.goto(self.index_url, **light_goto_kwargs())
+            else:
+                await self.context_page.goto(self.index_url)
+            self._report_metric("navigation")
 
             self.dy_client = await self.create_douyin_client(httpx_proxy_format)
             if not await self.dy_client.pong(browser_context=self.browser_context):
@@ -184,6 +192,7 @@ class DouYinCrawler(AbstractCrawler):
                         browser_context=self.browser_context,
                         urls=self.cookie_urls,
                     )
+            self._report_metric("preflight")
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 # Search for notes and retrieve their comment information.
@@ -211,6 +220,7 @@ class DouYinCrawler(AbstractCrawler):
             page = 0
             dy_search_id = ""
             remaining = max_notes
+            _search_api_reported = False
             while remaining > 0 and (page - start_page + 1) * dy_limit_count <= config.CRAWLER_MAX_NOTES_COUNT + dy_limit_count:
                 if page < start_page:
                     utils.logger.info(f"[DouYinCrawler.search] Skip {page}")
@@ -235,6 +245,9 @@ class DouYinCrawler(AbstractCrawler):
                         raise
                     utils.logger.error(f"[DouYinCrawler.search] search douyin keyword: {keyword} failed")
                     break
+                if not _search_api_reported:
+                    self._report_metric("search_api")
+                    _search_api_reported = True
 
                 page += 1
                 if "data" not in posts_res:
@@ -417,6 +430,7 @@ class DouYinCrawler(AbstractCrawler):
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
             proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
+            reuse_http_client=self._reuse_http_client(),
         )
         return douyin_client
 

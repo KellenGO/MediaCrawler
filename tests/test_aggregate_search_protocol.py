@@ -294,6 +294,52 @@ class TestSecretSafety:
         output = self._capture_emit(deep)
         assert "deep-nested-token" not in output
 
+    def test_session_snapshot_subtree_redacted(self):
+        """Round 16：session_snapshot 整棵子树（cookie name→value 对）脱敏。"""
+        data = {
+            "session_snapshot": {
+                "web_session": "snap-secret-1",
+                "a1": "snap-secret-2",
+                "xsec_token": "snap-secret-3",
+            }
+        }
+        output = self._capture_emit(data)
+        for leak in ("snap-secret-1", "snap-secret-2", "snap-secret-3"):
+            assert leak not in output, f"snapshot secret '{leak}' leaked"
+        assert "[REDACTED]" in output
+
+    def test_session_snapshot_hyphen_and_camel_redacted(self):
+        data = {
+            "session-snapshot": {"web_session": "hyphen-snap"},
+            "SessionSnapshot": {"web_session": "camel-snap"},
+        }
+        output = self._capture_emit(data)
+        assert "hyphen-snap" not in output
+        assert "camel-snap" not in output
+
+    def test_localstorage_and_storage_subtrees_redacted(self):
+        """localStorage / storage 子树与快照同级脱敏（防 cookie 存 localStorage）。"""
+        data = {
+            "localStorage": {"cookie": "ls-secret"},
+            "storage": {"cookie": "st-secret"},
+            "local_storage": {"cookie": "uls-secret"},
+        }
+        output = self._capture_emit(data)
+        for leak in ("ls-secret", "st-secret", "uls-secret"):
+            assert leak not in output, f"storage secret '{leak}' leaked"
+        assert "[REDACTED]" in output
+
+    def test_snapshot_inside_result_list_redacted(self):
+        """快照出现在事件嵌套列表内也必须整体脱敏（防御性）。"""
+        data = {
+            "results": [
+                {"title": "OK", "session_snapshot": {"web_session": "list-snap"}},
+            ]
+        }
+        output = self._capture_emit(data)
+        assert "list-snap" not in output
+        assert "OK" in output
+
     def test_no_secrets_serialized(self):
         data = {
             "results": [{"title": "OK", "Cookie": "leak1", "X-CSRF-Token": "leak2"}],

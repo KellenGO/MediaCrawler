@@ -107,6 +107,12 @@ class XhsAdapter(BasePlatformAdapter):
             if not note_id:
                 continue
 
+            # Round 16.1: 若 crawler 盖了 source_index（流式 sink 场景，
+            # 详情完成顺序 ≠ 搜索相关性顺序），用它作为最终排序 rank。
+            src_rank = item.get("source_index")
+            if isinstance(src_rank, int) and not isinstance(src_rank, bool):
+                rank = src_rank
+
             title = self._safe_str(item.get("title") or item.get("display_title"))
             if not title:
                 title = self._safe_str(item.get("desc", ""))[:100]

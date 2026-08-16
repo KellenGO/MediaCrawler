@@ -464,6 +464,15 @@ async def sync_account_cookies(
                                   platform)
         return _account_error(409, "account_op_in_progress",
                               "已有两个账号操作正在进行，请稍后再试", platform)
+    # 竞态消除（Round 16）：搜索的排他租约在创建后立即释放，运行期由
+    # is_search_active() 覆盖 —— acquire 成功、真正操作前必须复查；若发现
+    # 搜索已启动，释放 lease 并返回 409，绝不与搜索并发打开同一 profile。
+    if search_job_manager.is_search_active():
+        await _operation_coordinator.release_account(platform)
+        return _account_error(409, "search_in_progress",
+                              "正在搜索，暂时不能同步账号，请等待搜索完成", platform)
+    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
+    await search_job_manager.stop_platform_worker(platform)
     try:
         try:
             await accounts_service.consume_sync_ticket(x_sync_ticket, platform)
@@ -513,6 +522,13 @@ async def verify_account(platform: str):
                                   platform)
         return _account_error(409, "account_op_in_progress",
                               "已有两个账号操作正在进行，请稍后再试", platform)
+    # 竞态消除（Round 16）：acquire 成功后、操作前复查搜索是否已启动。
+    if search_job_manager.is_search_active():
+        await _operation_coordinator.release_account(platform)
+        return _account_error(409, "search_in_progress",
+                              "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
+    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
+    await search_job_manager.stop_platform_worker(platform)
     try:
         try:
             return await accounts_service.verify_platform(platform)
@@ -540,6 +556,13 @@ async def delete_account_session(platform: str):
                                   platform)
         return _account_error(409, "account_op_in_progress",
                               "已有两个账号操作正在进行，请稍后再试", platform)
+    # 竞态消除（Round 16）：acquire 成功后、操作前复查搜索是否已启动。
+    if search_job_manager.is_search_active():
+        await _operation_coordinator.release_account(platform)
+        return _account_error(409, "search_in_progress",
+                              "正在搜索，暂时不能清除账号，请等待搜索完成", platform)
+    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
+    await search_job_manager.stop_platform_worker(platform)
     try:
         try:
             return await accounts_service.delete_platform_session(platform)

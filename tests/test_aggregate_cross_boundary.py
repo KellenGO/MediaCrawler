@@ -541,7 +541,7 @@ def test_bilibili_probe_network_error_is_unavailable(monkeypatch):
     (False, "not_logged_in"),
 ])
 def test_zhihu_probe_verdicts_through_production_pong(monkeypatch, pong_result, expected):
-    """zhihu：走完整导航流程（官网 → 搜索页 → cookie 刷新）后 probe。"""
+    """zhihu：已有 d_c0 → 分级验证走纯 HTTP（零页面导航）后 probe。"""
     from api.services import accounts as acc
     FakeClient = _make_fake_client_class(pong_result=pong_result)
     _patch_client(monkeypatch,
@@ -555,6 +555,23 @@ def test_zhihu_probe_verdicts_through_production_pong(monkeypatch, pong_result, 
     assert result == expected
     assert FakeClient.pong_calls == 1
     assert FakeClient.raise_on_error_seen is True
+    # Round 16 分级验证：已有 d_c0 → 不导航（纯 HTTP 验证）。
+    assert page.goto_urls == []
+
+
+def test_zhihu_probe_navigates_only_when_dc0_missing(monkeypatch):
+    """zhihu：缺少 d_c0 → 才走官网 + 搜索页导航刷新 Cookie 后 probe。"""
+    from api.services import accounts as acc
+    FakeClient = _make_fake_client_class(pong_result=True)
+    _patch_client(monkeypatch,
+                  "media_platform.zhihu.client.ZhiHuClient", FakeClient)
+    page = _FakePage()
+    ctx = _probe_ctx([
+        {"name": "z_c0", "value": "fake", "domain": ".zhihu.com"},  # 无 d_c0
+    ], page=page)
+    result = asyncio.run(acc._pong_with_profile("zhihu", ctx))
+    assert result == "verified"
+    assert FakeClient.pong_calls == 1
     assert page.goto_urls[0] == "https://www.zhihu.com"
     assert "zhihu.com/search" in page.goto_urls[1]
 
@@ -862,7 +879,7 @@ def _start_background_verify(monkeypatch):
     monkeypatch.setattr(acc, "SYNC_VERIFY_TIMEOUT_SECONDS", 0.05)
     original_pong = acc._pong_with_profile
 
-    async def gated_pong(platform, context):
+    async def gated_pong(platform, context, metrics=None):
         await gate.wait()
         return "verified"
     monkeypatch.setattr("api.services.accounts._pong_with_profile", gated_pong)
@@ -1034,5 +1051,186 @@ def test_router_operations_resume_after_verify_finishes(monkeypatch):
         assert status == 200
         assert body["status"] == "unavailable"
         assert body["verified"] is False
+
+    asyncio.run(scenario())
+
+
+# ── Round 16：搜索与账号操作的互斥竞态（真实路由 + 真实 coordinator）───────
+
+def _search_active(monkeypatch):
+    """模拟"搜索正在运行"：路由/coordinator 全生产路径，仅注入状态。"""
+    monkeypatch.setattr(router_mod.search_job_manager,
+                        "is_search_active", lambda: True)
+
+
+def _search_idle(monkeypatch):
+    monkeypatch.setattr(router_mod.search_job_manager,
+                        "is_search_active", lambda: False)
+
+
+def _record_stop_worker(monkeypatch):
+    """记录 stop_platform_worker 调用（不真杀进程）。"""
+    stopped = []
+
+    async def fake_stop(platform):
+        stopped.append(platform)
+
+    monkeypatch.setattr(router_mod.search_job_manager,
+                        "stop_platform_worker", fake_stop)
+    return stopped
+
+
+def test_router_sync_409_search_in_progress_releases_lease(monkeypatch):
+    """搜索运行中：sync → 409 search_in_progress，且槽位/租约被释放。"""
+    from api.services import accounts as acc
+    _search_active(monkeypatch)
+    stopped = _record_stop_worker(monkeypatch)
+
+    async def scenario():
+        status, body = await _response_of(
+            await sync_account_cookies(
+                "xhs", SyncCookiesRequest(
+                    cookies=_XHS_COOKIES, cookie_format="chrome-v1",
+                    extension_protocol_version=2),
+                _ext_request(), x_sync_ticket="fake-ticket"))
+        assert status == 409
+        assert body["safe_error_code"] == "search_in_progress"
+        assert stopped == [], "409 路径不得先停 worker（未取得操作资格）"
+        # 租约已释放：同平台可立即重新获取（无槽位泄漏）。
+        assert await acc.operation_coordinator.acquire_account(
+            "xhs", "sync") == ""
+        await acc.operation_coordinator.release_account("xhs")
+
+    asyncio.run(scenario())
+
+
+def test_router_verify_delete_409_search_in_progress_releases_lease(monkeypatch):
+    """搜索运行中：verify/delete → 409 search_in_progress + 租约释放。"""
+    from api.services import accounts as acc
+    _search_active(monkeypatch)
+    stopped = _record_stop_worker(monkeypatch)
+
+    async def scenario():
+        status, body = await _response_of(await verify_account("xhs"))
+        assert status == 409
+        assert body["safe_error_code"] == "search_in_progress"
+        status, body = await _response_of(
+            await delete_account_session("xhs"))
+        assert status == 409
+        assert body["safe_error_code"] == "search_in_progress"
+        assert stopped == []
+        assert await acc.operation_coordinator.acquire_account(
+            "xhs", "sync") == ""
+        await acc.operation_coordinator.release_account("xhs")
+
+    asyncio.run(scenario())
+
+
+def test_router_account_ops_409_conflict_never_reaches_service(monkeypatch):
+    """搜索运行中的 409 必须发生在调用账号服务之前（服务调用计数为 0）。"""
+    from api.services import accounts as acc
+    _search_active(monkeypatch)
+    calls = []
+
+    async def fake_verify(platform):
+        calls.append(platform)
+        return {"status": "verified", "verified": True}
+
+    async def fake_delete(platform):
+        calls.append(platform)
+        return {"success": True}
+
+    monkeypatch.setattr(acc, "verify_platform", fake_verify)
+    monkeypatch.setattr(acc, "delete_platform_session", fake_delete)
+
+    async def scenario():
+        status, _ = await _response_of(await verify_account("xhs"))
+        assert status == 409
+        status, _ = await _response_of(await delete_account_session("xhs"))
+        assert status == 409
+        assert calls == [], "409 路径绝不能触碰账号服务"
+
+    asyncio.run(scenario())
+
+
+def test_router_search_409_when_account_op_active(monkeypatch):
+    """账号操作进行中：新搜索 → 409；操作完成后搜索恢复。"""
+    from api.services import accounts as acc
+    from api.routers.search import create_search_job
+    from fastapi import HTTPException
+    _search_idle(monkeypatch)
+    created = []
+
+    async def fake_create_job(req):
+        created.append(req.keyword)
+        return {"job_id": "fake", "overall": "running", "keyword": req.keyword,
+                "created_at": "2026-01-01T00:00:00+00:00", "platforms": {},
+                "results": []}
+
+    monkeypatch.setattr(router_mod.search_job_manager,
+                        "create_job", fake_create_job)
+    req = SearchJobRequestSchema(keyword="test", platforms=["xhs"],
+                                 limit_per_platform=1)
+
+    async def scenario():
+        # 占用账号操作槽位（真实 coordinator）。
+        assert await acc.operation_coordinator.acquire_account(
+            "xhs", "sync") == ""
+        try:
+            with pytest.raises(HTTPException) as ei:
+                await create_search_job(req)
+            assert ei.value.status_code == 409
+            assert "账号操作" in str(ei.value.detail)
+            assert created == [], "409 时绝不能触达 manager.create_job"
+        finally:
+            await acc.operation_coordinator.release_account("xhs")
+        # 释放后：搜索正常创建（真实路由走到 manager.create_job）。
+        resp = await create_search_job(req)
+        assert resp["job_id"] == "fake"
+        assert created == ["test"]
+
+    asyncio.run(scenario())
+
+
+def test_router_account_ops_stop_platform_worker_before_op(monkeypatch):
+    """账号操作（无冲突时）必须先停对应平台 worker，再调用服务。"""
+    from api.services import accounts as acc
+    _search_idle(monkeypatch)
+    stopped = _record_stop_worker(monkeypatch)
+
+    async def fake_verify(platform):
+        return {"status": "verified", "verified": True, "platform": platform}
+
+    async def fake_delete(platform):
+        return {"success": True, "platform": platform}
+
+    async def fake_sync(platform, cookies, cookie_format, **kw):
+        return {"status": "verified", "verified": True, "platform": platform}
+
+    monkeypatch.setattr(acc, "verify_platform", fake_verify)
+    monkeypatch.setattr(acc, "delete_platform_session", fake_delete)
+    monkeypatch.setattr(acc, "sync_platform_cookies", fake_sync)
+
+    async def scenario():
+        status, body = await _response_of(await verify_account("xhs"))
+        assert status == 200 and body["status"] == "verified"
+        assert stopped == ["xhs"], "verify 前必须停 xhs worker"
+        stopped.clear()
+
+        status, body = await _response_of(
+            await delete_account_session("xhs"))
+        assert status == 200 and body["success"] is True
+        assert stopped == ["xhs"], "delete 前必须停 xhs worker"
+        stopped.clear()
+
+        ticket = create_sync_ticket("xhs")
+        status, body = await _response_of(
+            await sync_account_cookies(
+                "xhs", SyncCookiesRequest(
+                    cookies=_XHS_COOKIES, cookie_format="chrome-v1",
+                    extension_protocol_version=2),
+                _ext_request(), x_sync_ticket=ticket))
+        assert status == 200
+        assert stopped == ["xhs"], "sync 前必须停 xhs worker"
 
     asyncio.run(scenario())

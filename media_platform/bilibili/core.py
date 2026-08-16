@@ -72,6 +72,7 @@ class BilibiliCrawler(AbstractCrawler):
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self):
+        self._begin_phase_timing()
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
@@ -95,9 +96,16 @@ class BilibiliCrawler(AbstractCrawler):
                 self.browser_context = await self.launch_browser(chromium, None, self.user_agent, headless=config.HEADLESS)
                 # stealth.min.js is a js script to prevent the website from detecting the crawler.
                 await self.browser_context.add_init_script(path="libs/stealth.min.js")
+            self._report_metric("browser_launch")
+            await self._apply_light_page()
 
             self.context_page = await self.browser_context.new_page()
-            await self.context_page.goto(self.index_url)
+            if self._light_page():
+                from tools.light_page import light_goto_kwargs
+                await self.context_page.goto(self.index_url, **light_goto_kwargs())
+            else:
+                await self.context_page.goto(self.index_url)
+            self._report_metric("navigation")
 
             # Create a client to interact with the xiaohongshu website.
             self.bili_client = await self.create_bilibili_client(httpx_proxy_format)
@@ -117,6 +125,7 @@ class BilibiliCrawler(AbstractCrawler):
                     browser_context=self.browser_context,
                     urls=self.cookie_urls,
                 )
+            self._report_metric("preflight")
 
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
@@ -203,6 +212,7 @@ class BilibiliCrawler(AbstractCrawler):
             utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Current search keyword: {keyword}")
             page = 1
             remaining = max_notes
+            _search_api_reported = False
             while remaining > 0 and (page - start_page + 1) * bili_limit_count <= config.CRAWLER_MAX_NOTES_COUNT + bili_limit_count:
                 if page < start_page:
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Skip page: {page}")
@@ -219,6 +229,9 @@ class BilibiliCrawler(AbstractCrawler):
                     pubtime_begin_s=0,  # Publish date start timestamp
                     pubtime_end_s=0,  # Publish date end timestamp
                 )
+                if not _search_api_reported:
+                    self._report_metric("search_api")
+                    _search_api_reported = True
                 video_list: List[Dict] = videos_res.get("result")
 
                 if not video_list:
@@ -520,6 +533,27 @@ class BilibiliCrawler(AbstractCrawler):
             proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
         )
         return bilibili_client_obj
+
+    async def create_bilibili_client_from_snapshot(
+        self, cookie_dict: Dict[str, str],
+    ) -> BilibiliClient:
+        """Round 16 fast path：从内存会话快照构造 client，无浏览器（page=None）。
+        WBI Key 走 /x/web-interface/nav HTTP 路径；Cookie 语义与浏览器路径一致。"""
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        return BilibiliClient(
+            proxy=None,
+            headers={
+                "User-Agent": self.user_agent,
+                "Cookie": cookie_str,
+                "Origin": "https://www.bilibili.com",
+                "Referer": "https://www.bilibili.com",
+                "Content-Type": "application/json;charset=UTF-8",
+            },
+            playwright_page=None,
+            cookie_dict=dict(cookie_dict),
+            proxy_ip_pool=None,
+            reuse_http_client=self._reuse_http_client(),
+        )
 
     async def launch_browser(
         self,

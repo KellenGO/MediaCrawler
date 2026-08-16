@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ── Platform & status enums ────────────────────────────────────────────
@@ -168,17 +168,56 @@ class SearchJobStatus(BaseModel):
 class WorkerRequest(BaseModel):
     """Request sent from parent process to worker via stdin."""
 
+    # Round 16.2: 校验错误不回显输入值（model_validate 路径）—— 否则
+    # ValidationError 会打印 session_snapshot 的原始输入（可能含 Cookie）。
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     job_id: str
     mode: Literal["search", "login"]
     platform: PlatformSlug
     keyword: str = ""
     limit: int = 10
+    # Round 16: 内存会话快照（cookie name→value，仅经 stdin 传输，绝不
+    # 进 argv/env/日志；后端重启后为 None，worker 自动回退浏览器路径）。
+    # Round 16.1/16.2: repr=False —— 默认 repr 省略该字段；安全 __repr__/
+    # __str__ 显式用 <redacted> 占位。model_dump_json 仍保留（唯一 stdin
+    # 传输序列化）。__init__ 预检把类型错误变成普通 ValueError，避免
+    # pydantic ValidationError 回显 input_value（其中可能含 Cookie）。
+    session_snapshot: Optional[Dict[str, str]] = Field(default=None, repr=False)
+    # Round 16: 允许无浏览器快速路径（worker 内部仍会安全回退）。
+    fast_path: bool = False
+    # Round 16: 用户主动重新搜索时绕过结果缓存（默认 False）。
+    bypass_cache: bool = False
+
+    def __init__(self, **data):
+        snap = data.get("session_snapshot")
+        if snap is not None and not isinstance(snap, dict):
+            # 不回显输入值（可能含 Cookie/快照内容）。
+            raise ValueError("session_snapshot must be a dict or None")
+        if isinstance(snap, dict):
+            for k, v in snap.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise ValueError("session_snapshot must map str to str")
+        super().__init__(**data)
+
+    def __repr__(self) -> str:
+        """安全 repr：会话快照用 <redacted> 占位，绝不打印 Cookie 值。"""
+        return (
+            f"WorkerRequest(job_id={self.job_id!r}, mode={self.mode!r}, "
+            f"platform={self.platform!r}, keyword={self.keyword!r}, "
+            f"limit={self.limit!r}, session_snapshot=<redacted>, "
+            f"fast_path={self.fast_path!r}, bypass_cache={self.bypass_cache!r})"
+        )
+
+    def __str__(self) -> str:
+        """str 与 repr 一致（%s 日志路径同样安全）。"""
+        return self.__repr__()
 
 
 class WorkerEvent(BaseModel):
     """Event emitted by worker on stdout (NDJSON with prefix)."""
 
-    event: Literal["status", "result", "done", "error"]
+    event: Literal["status", "result", "done", "error", "metrics"]
     job_id: str
     platform: PlatformSlug
     data: Any = None

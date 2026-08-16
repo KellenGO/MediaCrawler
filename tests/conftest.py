@@ -29,6 +29,22 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
+@pytest.fixture(autouse=True)
+def _default_oneshot_worker_mode():
+    """默认以 one-shot 模式运行搜索 worker，避免既有测试泄漏常驻进程。
+
+    需要测试 supervisor 常驻 worker 的用例请自行将
+    api.services.search_job_manager.SEARCH_WORKER_MODE 置为 "supervisor"
+    （并在用例结束后恢复）。
+    """
+    import api.services.search_job_manager as sjm
+
+    prev = sjm.SEARCH_WORKER_MODE
+    sjm.SEARCH_WORKER_MODE = "oneshot"
+    yield
+    sjm.SEARCH_WORKER_MODE = prev
+
+
 @pytest.fixture(scope="session")
 def project_root_path():
     """Return project root path"""

@@ -96,6 +96,18 @@ class CrawlerRuntimeOptions:
     #: keeps the original per-request client lifecycle.
     reuse_http_client: bool = False
 
+    #: Aggregate-only performance metric callback: ``cb(phase, elapsed_ms)``
+    #: invoked by the crawler at phase boundaries (browser_launch /
+    #: navigation / preflight / search_api). None (console mode) keeps the
+    #: original behaviour with zero overhead. Only numbers are reported.
+    metrics_cb: Optional[Callable[[str, int], None]] = None
+
+    #: Light page load (aggregate-only): goto uses ``domcontentloaded`` and
+    #: image/media/font/analytics requests are intercepted. Never touches
+    #: document/script/stylesheet/XHR/fetch. Default False (console keeps
+    #: the original full-page behaviour).
+    light_page: bool = False
+
     #: Public-search mode: when True, the crawler proceeds to search even
     #: when pong did NOT confirm a logged-in session (douyin/zhihu aggregate
     #: search use this — public search APIs can work without login).

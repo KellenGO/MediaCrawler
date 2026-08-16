@@ -21,15 +21,74 @@
 
 import sys
 import os
+import io
+import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from api.services import search_job_manager as sjm
 from aggregate_search.models import UnifiedSearchResult
+from aggregate_search.protocol import parse_event_line
+from base.crawler_runtime import CrawlerRuntimeOptions
 
 TERMINAL = {"succeeded", "empty", "login_required", "rate_limited",
             "timed_out", "failed", "cancelled"}
+
+
+class _FakeTimingCrawler:
+    """供 worker 级 timing 测试使用的替身 crawler（fast path 成功路径）。"""
+
+    def __init__(self):
+        self.runtime_options = None
+        self.snapshot_seen = None
+
+    async def create_xhs_client_from_snapshot(self, snapshot):
+        self.snapshot_seen = dict(snapshot or {})
+        return object()
+
+    async def search(self):
+        note = {
+            "note_id": "abc123def", "title": "露营装备推荐", "type": "normal",
+            "time": 1736937000, "user": {"nickname": "户外小白"},
+            "interact_info": {"liked_count": "2300"},
+            "image_list": [{"url_default": "https://ci.xiaohongshu.com/a.jpg"}],
+        }
+        self.runtime_options.result_sink([note])
+
+
+class _FakeStdout:
+    def __init__(self):
+        self.buffer = io.BytesIO()
+
+    def write(self, s):
+        self.buffer.write(str(s).encode("utf-8", "replace"))
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+    @property
+    def encoding(self):
+        return "utf-8"
+
+
+def _capture_worker_events(coro_fn, *args, **kw):
+    fake = _FakeStdout()
+    old_stdout = sys.stdout
+    sys.stdout = fake
+    try:
+        asyncio.run(coro_fn(*args, **kw))
+    finally:
+        sys.stdout = old_stdout
+    events = []
+    for line in fake.buffer.getvalue().decode("utf-8", "replace").splitlines():
+        evt = parse_event_line(line)
+        if evt is not None:
+            events.append(evt)
+    return events
 
 
 class _FakeClock:
@@ -152,7 +211,8 @@ class TestJobTotalTiming:
         clock.advance(600)
         job.set_platform_status("douyin", "failed")
         resp = job.to_response()
-        assert resp.total_ms is None  # job 未 finalize
+        # Round 16：job 已终态（partial）→ total_ms 实时可得（不再等 finalize）。
+        assert resp.total_ms == 2600
         xhs_t = resp.platforms["xhs"].timings
         assert xhs_t is not None
         assert xhs_t.first_result_ms == 1200
@@ -193,3 +253,93 @@ class TestTimingSafety:
         assert isinstance(t.first_result_ms, int)
         assert isinstance(t.total_ms, int)
         assert isinstance(job.total_ms, int)
+
+
+class TestInternalMetrics:
+    """Round 16：worker 上报内部指标的合并（只接受白名单数值/枚举）。"""
+
+    def test_apply_metrics_merges_numeric_fields(self, clock):
+        job = _make_job(clock)
+        job.apply_metrics("xhs", {
+            "worker_ready_ms": 1200,
+            "browser_launch_ms": 1800,
+            "navigation_ms": 2400,
+            "preflight_ms": 3100,
+            "search_api_ms": 3600,
+            "fast_path_used": True,
+        })
+        t = job.timings["xhs"]
+        assert t.worker_ready_ms == 1200
+        assert t.browser_launch_ms == 1800
+        assert t.navigation_ms == 2400
+        assert t.preflight_ms == 3100
+        assert t.search_api_ms == 3600
+        assert t.fast_path_used is True
+        assert t.fallback_reason is None
+
+    def test_apply_metrics_rejects_non_whitelist(self, clock):
+        job = _make_job(clock)
+        job.apply_metrics("xhs", {
+            "worker_ready_ms": 100,
+            "evil_cookie_value": "super-secret",
+            "response_body": {"a": 1},
+            "first_result_ms": "9999",  # 字符串不算数值
+            "fast_path_used": "yes",    # 非布尔不算
+        })
+        t = job.timings["xhs"]
+        assert t.worker_ready_ms == 100
+        assert getattr(t, "evil_cookie_value", None) is None
+        assert t.first_result_ms is None
+        assert t.fast_path_used is None
+
+    def test_apply_metrics_fallback_reason_is_bounded(self, clock):
+        job = _make_job(clock)
+        job.apply_metrics("xhs", {"fallback_reason": "x" * 500})
+        assert len(job.timings["xhs"].fallback_reason) <= 50
+
+    def test_metrics_never_in_response_leak_check(self, clock):
+        job = _make_job(clock)
+        job.apply_metrics("xhs", {"worker_ready_ms": 100, "fallback_reason": "no_browser"})
+        data = job.to_response().model_dump_json()
+        for key in ("cookie", "token", "session", "password", "traceback", "secret"):
+            assert key not in data.lower()
+
+
+class TestReusedWorkerTiming:
+    """Round 16.1: reused_worker 标记在 schema/响应中表达。"""
+
+    def test_reused_worker_field_roundtrip(self, clock):
+        job = _make_job(clock)
+        assert job.timings["xhs"].reused_worker is None
+        job.timings["xhs"].reused_worker = True
+        resp = job.to_response()
+        assert resp.platforms["xhs"].timings.reused_worker is True
+        assert '"reused_worker":true' in resp.model_dump_json()
+
+    def test_worker_ready_constant_does_not_grow_with_idle(self, monkeypatch):
+        """worker_ready_ms 是进程启动→模块加载完成的固定常量：模拟空闲 60s
+        后第二次上报仍等于常量（修复前 worker_ready 随 perf_counter 增长）。"""
+        import time as _time
+        import aggregate_search.worker as worker_mod
+
+        ready = worker_mod._PROCESS_READY_MS
+        assert isinstance(ready, int) and ready >= 0
+        assert worker_mod._PROCESS_START > 0
+
+        # 假时钟：进程已"空闲"60 秒后再跑一次请求。
+        fake = {"t": _time.perf_counter() + 60.0}
+        monkeypatch.setattr(worker_mod.time, "perf_counter",
+                            lambda: fake["t"])
+
+        crawler = _FakeTimingCrawler()
+        monkeypatch.setattr(
+            "main.CrawlerFactory.create_crawler", lambda platform: crawler)
+        events = _capture_worker_events(
+            worker_mod._run_standard_search,
+            "j1", "xhs", "露营", 3, {"web_session": "v1"})
+        reported = [m["worker_ready_ms"] for m in
+                    (e.data or {} for e in events if e.event == "metrics")
+                    if isinstance(m, dict) and "worker_ready_ms" in m]
+        assert reported, "必须上报 worker_ready_ms"
+        assert all(v == ready for v in reported), (
+            f"worker_ready_ms 不得随空闲增长: {reported} vs 常量 {ready}")
