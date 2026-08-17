@@ -79,10 +79,11 @@ class CrawlerRuntimeOptions:
     #: Whether to run the browser headless. None means use config default.
     headless: Optional[bool] = None
 
-    #: Bilibili light-list mode: when False, the search list
-    #: (/x/web-interface/wbi/search/type flat items) is passed to the result
-    #: sink directly — no per-item detail API call, no store, no comments,
-    #: no media. Default True keeps the original detail-fetching behaviour.
+    #: Light-list mode (aggregate search): when False, the search list items
+    #: are passed to the result sink directly — no per-item detail API call,
+    #: no store, no comments, no media. Bilibili and Xiaohongshu aggregate
+    #: search use this. Default True keeps the original per-item
+    #: detail-fetching behaviour.
     fetch_details: bool = True
 
     #: Progressive result sink: when True, each newly fetched detail is

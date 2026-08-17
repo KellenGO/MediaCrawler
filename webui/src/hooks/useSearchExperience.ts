@@ -81,7 +81,7 @@ export function useSearchExperience() {
 
   // ── 全量搜索 / 历史回放（keyword/platforms 直接来自调用方参数） ──────
   const handleFullSearch = useCallback(
-    async (keyword: string, platforms: PlatformSlug[]) => {
+    async (keyword: string, platforms: PlatformSlug[], bypassCache = false) => {
       if (busy || taskInFlightRef.current) return;
       const seq = ++taskSeqRef.current;
       taskInFlightRef.current = true;
@@ -94,7 +94,8 @@ export function useSearchExperience() {
           keyword,
           platforms,
           10,
-          selectedPlatformLimits(limits, platforms)
+          selectedPlatformLimits(limits, platforms),
+          bypassCache
         );
         if (taskSeqRef.current !== seq) return; // 已发起更新的任务，本结果作废
         // 只有 POST 被后端接受后才写入身份与历史。
@@ -134,7 +135,8 @@ export function useSearchExperience() {
           keyword,
           [platform],
           10,
-          selectedPlatformLimits(limits, [platform])
+          selectedPlatformLimits(limits, [platform]),
+          true
         );
         if (taskSeqRef.current !== seq) return;
         // 重试被接受：登记身份（不写历史），终态经 job_terminal 提交。
@@ -148,6 +150,17 @@ export function useSearchExperience() {
     },
     [busy, base, state.display.jobResponse, limits]
   );
+
+  // 用户明确点击"重新搜索"：整组绕过短缓存，获取平台新结果。
+  const handleRefresh = useCallback(() => {
+    const current = state.display.jobResponse;
+    if (!current?.keyword || busy || taskInFlightRef.current) return;
+    void handleFullSearch(
+      current.keyword,
+      Object.keys(current.platforms) as PlatformSlug[],
+      true,
+    );
+  }, [busy, handleFullSearch, state.display.jobResponse]);
 
   // ── 任务观察：区分"用户发起"与"页面加载恢复" ────────────────────────
   // - 恢复任务（/jobs/current 或 sessionStorage 恢复）：首次观察到任意状态
@@ -246,6 +259,7 @@ export function useSearchExperience() {
     platformPref: state.platformPref,
     // 动作
     handleFullSearch,
+    handleRefresh,
     handleRetry,
     handleCancel,
     handleReset,

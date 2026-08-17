@@ -257,11 +257,50 @@ test("consumeUnverifiedWarning: 同一次页面生命周期只允许一次", () 
 });
 
 test("accountSummaryLabel: 浮层文案（可公开搜索保留，但不计入登录）", () => {
-  assert.equal(accountSummaryLabel({ status: "connected", verified: true, profile_exists: true }), "已连接");
-  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: true }), "可公开搜索");
-  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: false }), "尚未验证");
-  assert.equal(accountSummaryLabel({ status: "expired", verified: false, profile_exists: true }), "会话失效");
-  assert.equal(accountSummaryLabel({ status: "failed", verified: false, profile_exists: true }), "同步失败");
-  assert.equal(accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: false }), "验证暂不可用");
-  assert.equal(accountSummaryLabel({ status: "disconnected", verified: false, profile_exists: false }), "未同步");
+  assert.equal(accountSummaryLabel({ status: "connected", verified: true, profile_exists: true, safe_error_code: null }), "已连接");
+  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: true, safe_error_code: null }), "可公开搜索");
+  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: false, safe_error_code: null }), "尚未验证");
+  assert.equal(accountSummaryLabel({ status: "expired", verified: false, profile_exists: true, safe_error_code: null }), "会话失效");
+  assert.equal(accountSummaryLabel({ status: "failed", verified: false, profile_exists: true, safe_error_code: null }), "同步失败");
+  assert.equal(accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: false, safe_error_code: null }), "验证暂不可用");
+  assert.equal(accountSummaryLabel({ status: "disconnected", verified: false, profile_exists: false, safe_error_code: null }), "未同步");
+});
+
+// ── Round 17.2: 小红书 461/471 风控（login_verification_rate_limited）────
+
+test("accountSummaryLabel: 风控 unavailable → 验证受限；普通 unavailable → 验证暂不可用", () => {
+  assert.equal(
+    accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: true, safe_error_code: "login_verification_rate_limited" }),
+    "验证受限",
+  );
+  assert.equal(
+    accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: true, safe_error_code: "login_verification_unavailable" }),
+    "验证暂不可用",
+  );
+});
+
+test("summarizeAccounts: 风控 unavailable 不计入 verified", () => {
+  const s = summarizeAccounts([
+    acc({ platform: "xhs", status: "unavailable", verified: false, profile_exists: true, safe_error_code: "login_verification_rate_limited" }),
+    acc({ platform: "douyin", status: "connected", verified: true, profile_exists: true }),
+  ]);
+  assert.equal(s.verified, 1); // 只有 douyin 计入
+  assert.equal(s.unavailable, 1);
+});
+
+test("loginExpiryEvents: 风控 unavailable 不生成登录失效 toast", () => {
+  const prev = [
+    acc({ platform: "xhs", status: "connected", verified: true, last_verified_at: "T1" }),
+  ];
+  const next = [
+    acc({ platform: "xhs", status: "unavailable", verified: false, profile_exists: true, safe_error_code: "login_verification_rate_limited", last_verified_at: null }),
+  ];
+  assert.deepEqual(loginExpiryEvents(prev, next), []);
+});
+
+test("accountTone: 风控 unavailable 不返回 ok（不显示绿色）", () => {
+  assert.equal(
+    accountTone({ status: "unavailable", verified: false, profile_exists: true }),
+    "warn",
+  );
 });

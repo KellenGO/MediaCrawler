@@ -1105,6 +1105,21 @@ def _finalize_verdict(
             "safe_message": msg,
         }
 
+    # Round 17.2: 平台风控（461/471 验证码/访问限制）→ 独立"验证受限"语义：
+    # 账号 status 仍用现有 "unavailable"，绝不虚构已连接或登录失效；
+    # profile 保留、不清 Cookie、不生成 login_required、不提示重新同步。
+    if verdict == "rate_limited":
+        msg = "小红书暂时限制了登录验证请求，请稍后再试；这不代表登录状态已经失效"
+        _set_state(platform, status="unavailable", verified=False,
+                   safe_error_code="login_verification_rate_limited",
+                   safe_message=msg, browser_backend=backend)
+        return {
+            "success": True, "platform": platform,
+            "verified": False, "status": "unavailable",
+            "safe_error_code": "login_verification_rate_limited",
+            "safe_message": msg,
+        }
+
     # 明确未登录（pong=False）：之前曾确认过登录，现在真实验证明确
     # 失效 → expired；从未确认过 → unverified（会话已导入，只是还没
     # 确认登录，公开搜索仍可尝试）。
@@ -1185,6 +1200,7 @@ async def _pong_with_profile(
     if platform == "xhs":
         try:
             from media_platform.xhs.client import XiaoHongShuClient
+            from media_platform.xhs.exception import XhsRateLimitError
             client = XiaoHongShuClient(
                 proxy=None, headers={
                     "User-Agent": _UA, "Cookie": cookie_str,
@@ -1193,7 +1209,11 @@ async def _pong_with_profile(
             # 403 风控/接口异常会传播到这里被 except 归为 unavailable；
             # 只有 200 + 明确无登录（success=false）才返回 False →
             # not_logged_in。默认 False 的 console/login 行为保持不变。
+            # Round 17.2: 461/471 平台风控（验证码/访问限制）→ 独立 verdict
+            # "rate_limited"，绝不是"明确未登录"也不是笼统的"无法验证"。
             return "verified" if bool(await client.pong(raise_on_error=True)) else "not_logged_in"
+        except XhsRateLimitError:
+            return "rate_limited"
         except Exception:
             return "unavailable"
     if platform == "douyin":

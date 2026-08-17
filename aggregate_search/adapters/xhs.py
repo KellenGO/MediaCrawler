@@ -39,7 +39,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlsplit
 
-from aggregate_search.models import UnifiedSearchResult, _parse_timestamp
+from aggregate_search.models import UnifiedSearchResult, _parse_timestamp, clean_snippet, clean_title
 
 from .base import BasePlatformAdapter
 
@@ -98,48 +98,80 @@ class XhsAdapter(BasePlatformAdapter):
     PLATFORM = "xhs"
 
     def adapt(self, raw_results: List[Any], keyword: str = "") -> List[UnifiedSearchResult]:
+        """同时兼容两种数据形状（Round 17）：
+
+        A. 原详情对象：``note_id`` / ``title`` / ``user`` / ``interact_info`` /
+           ``image_list`` / ``video`` / ``type`` / ``time`` / ``note_url``；
+        B. get_note_by_keyword 搜索列表项：外层 ``id`` + 内层 ``note_card``
+           （note_id / display_title / user / cover / image_list / type /
+           interact_info / time），外层带 xsec_token / xsec_source。
+
+        不得假设所有字段存在；缺 content_id 的项跳过，可选字段缺失照常
+        输出（绝不自动回退逐条详情请求）。
+        """
         results: List[UnifiedSearchResult] = []
         for rank, item in enumerate(raw_results):
             if not isinstance(item, dict):
                 continue
+            card = item.get("note_card")
+            if not isinstance(card, dict):
+                card = {}
 
-            note_id = self._safe_str(item.get("note_id"))
-            if not note_id:
+            # content_id：外层 id → note_card.note_id → 原详情 note_id
+            content_id = self._safe_str(
+                item.get("id") or card.get("note_id") or item.get("note_id"))
+            if not content_id:
                 continue
 
-            # Round 16.1: 若 crawler 盖了 source_index（流式 sink 场景，
-            # 详情完成顺序 ≠ 搜索相关性顺序），用它作为最终排序 rank。
+            # rank：优先 source_index（轻量/流式 sink 已盖章原始搜索序号），
+            # 否则保持原始稳定顺序（enumerate）。
             src_rank = item.get("source_index")
             if isinstance(src_rank, int) and not isinstance(src_rank, bool):
                 rank = src_rank
 
-            title = self._safe_str(item.get("title") or item.get("display_title"))
+            # title：display_title → title → desc 截断 → 安全占位
+            # （绝不为了标题去抓详情）。
+            title = clean_title(self._safe_str(
+                card.get("display_title") or card.get("title")
+                or item.get("title") or item.get("display_title")))
             if not title:
-                title = self._safe_str(item.get("desc", ""))[:100]
+                title = clean_title(self._safe_str(item.get("desc", ""))[:100])
+            if not title:
+                title = "小红书笔记"
 
-            author = self._get_public_nickname(item)
+            author = self._get_public_nickname(card) \
+                or self._get_public_nickname(item)
 
             url = build_note_url(
-                note_id,
+                content_id,
                 note_url=self._safe_str(item.get("note_url")) or None,
                 xsec_token=self._safe_str(item.get("xsec_token")) or None,
                 xsec_source=self._safe_str(item.get("xsec_source")) or None,
-            ) or XHS_EXPLORE_URL.format(note_id=note_id)
+            ) or XHS_EXPLORE_URL.format(note_id=content_id)
 
-            published_at = _parse_timestamp(item.get("time"))
+            # 搜索列表有可靠时间字段才解析；没有则 null（不为发布时间抓详情）。
+            published_at = _parse_timestamp(
+                card.get("time") or item.get("time"))
 
-            cover_url = self._extract_cover_url(item)
+            # 搜索列表/详情已有 desc，直接作为片段；不额外抓详情。
+            snippet = clean_snippet(card.get("desc") or item.get("desc"))
 
-            metrics = self._extract_metrics(item)
+            cover_url = self._extract_cover_url(card) \
+                or self._extract_cover_url(item)
 
-            content_type = "video" if item.get("type") == "video" else "note"
+            metrics = self._extract_metrics(card) \
+                or self._extract_metrics(item)
+
+            content_type = "video" \
+                if (card.get("type") or item.get("type")) == "video" else "note"
 
             results.append(
                 UnifiedSearchResult(
                     platform="xhs",
-                    content_id=note_id,
+                    content_id=content_id,
                     content_type=content_type,
                     title=title,
+                    snippet=snippet,
                     author=author,
                     url=url,
                     published_at=published_at,
@@ -153,39 +185,64 @@ class XhsAdapter(BasePlatformAdapter):
     def _get_public_nickname(self, item: Dict) -> Optional[str]:
         user = item.get("user") or item.get("author")
         if isinstance(user, dict):
-            return user.get("nickname") or user.get("name")
+            return (user.get("nickname") or user.get("nick_name")
+                    or user.get("name"))
+        return None
+
+    @staticmethod
+    def _valid_cover_url(candidate: Any) -> Optional[str]:
+        """封面 URL 最小安全校验（Round 17.1）：只接受 http/https 或
+        protocol-relative（``//host/...``，浏览器按页面协议解析）；去除首尾
+        空白；空串与 javascript: 等其他协议返回 None。不做 CDN 升级/代理。
+        """
+        if not isinstance(candidate, str):
+            return None
+        c = candidate.strip()
+        if not c:
+            return None
+        if (c.startswith("http://") or c.startswith("https://")
+                or c.startswith("//")):
+            return c
         return None
 
     def _extract_cover_url(self, raw_item: Dict) -> Optional[str]:
+        # 搜索列表项：note_card.cover{url_default, url_pre, url}
+        cover_obj = raw_item.get("cover")
+        if isinstance(cover_obj, dict):
+            c = (cover_obj.get("url_default") or cover_obj.get("url_pre")
+                 or cover_obj.get("url"))
+            if self._valid_cover_url(c):
+                return c
         # Image list first
         image_list = raw_item.get("image_list") or []
         if isinstance(image_list, list) and image_list:
             first_img = image_list[0]
             if isinstance(first_img, dict):
                 url = first_img.get("url_default") or first_img.get("url")
-                if url and isinstance(url, str):
+                if self._valid_cover_url(url):
                     return url
                 # Check info_list for alternate URL format
                 info_list = first_img.get("info_list") or []
                 if info_list and isinstance(info_list, list):
                     info = info_list[0]
                     if isinstance(info, dict):
-                        info_url = info.get("url")
-                        if info_url and isinstance(info_url, str):
-                            return info_url
+                        if self._valid_cover_url(info.get("url")):
+                            return info.get("url")
 
         # Video cover fallback
         video = raw_item.get("video")
         if isinstance(video, dict):
             cover = video.get("image") or video.get("cover")
             if isinstance(cover, dict):
-                return cover.get("url_default") or cover.get("url")
-            if isinstance(cover, str) and cover:
+                c = cover.get("url_default") or cover.get("url")
+                if self._valid_cover_url(c):
+                    return c
+            if self._valid_cover_url(cover):
                 return cover
 
-        # Any cover field
+        # Any cover field (string form)
         cover = raw_item.get("cover") or raw_item.get("cover_url")
-        if isinstance(cover, str) and cover:
+        if self._valid_cover_url(cover):
             return cover
 
         return None

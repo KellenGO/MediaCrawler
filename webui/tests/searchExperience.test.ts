@@ -14,11 +14,15 @@ import {
   PLATFORM_SLUGS,
   addHistoryItem,
   applySearchTransition,
+  aggregateSortResults,
   createInitialExperienceState,
+  deduplicateCrossPlatformResults,
   engagementScore,
   groupByPlatform,
   interleaveByPlatform,
+  interactionStrengthScore,
   isSearchBlocked,
+  keywordRelevanceScore,
   makeDedupKey,
   mergeSinglePlatformRetry,
   normalizeHistoryKeyword,
@@ -265,17 +269,82 @@ test("readPlatformPref: 存储不可用时默认全选", () => {
   assert.deepEqual(readPlatformPref(storage), [...PLATFORM_SLUGS]);
 });
 
-// ── 7. 综合排序保持原始顺序 ───────────────────────────────────────────
+// ── 7. 综合排序 V1 ────────────────────────────────────────────────────
 
-test("sortResults default: 完全保留后端顺序", () => {
+test("aggregateSortResults: 关键词完整命中优先于无关标题", () => {
   const results = [
-    makeResult("xhs", "1"),
-    makeResult("bilibili", "2"),
-    makeResult("douyin", "3"),
+    makeResult("xhs", "unrelated", { title: "旅行日记", rank: 0 }),
+    makeResult("douyin", "matched", { title: "露营装备推荐", rank: 5 }),
   ];
-  const sorted = sortResults(results, "default");
-  assert.equal(sorted, results); // 综合模式返回原引用，零重排
-  assert.deepEqual(sorted.map((r) => r.content_id), ["1", "2", "3"]);
+  const sorted = aggregateSortResults(results, "露营", { nowMs: Date.parse("2026-08-01T00:00:00Z") });
+  assert.deepEqual(sorted.map((r) => r.content_id), ["matched", "unrelated"]);
+});
+
+test("keywordRelevanceScore: 标题优先于 snippet，snippet 优先于作者", () => {
+  const keyword = "露营装备";
+  const titleHit = makeResult("xhs", "title-hit", { title: "露营装备" });
+  const snippetHit = makeResult("xhs", "snippet-hit", {
+    title: "周末记录",
+    snippet: "这篇内容介绍露营装备选择。",
+  });
+  const authorHit = makeResult("xhs", "author-hit", {
+    title: "周末记录",
+    author: "露营装备测评员",
+  });
+  assert.ok(keywordRelevanceScore(titleHit, keyword) > keywordRelevanceScore(snippetHit, keyword));
+  assert.ok(keywordRelevanceScore(snippetHit, keyword) > keywordRelevanceScore(authorHit, keyword));
+});
+
+test("keywordRelevanceScore: 中文完整短语和双字 token 有效，单字弱命中不计分", () => {
+  const keyword = "露营装备";
+  const exact = makeResult("xhs", "exact", { title: "露营装备真实体验" });
+  const tokenHit = makeResult("xhs", "token", { title: "露营帐篷推荐" });
+  const singleChar = makeResult("xhs", "single", { title: "营地风景分享" });
+  assert.ok(keywordRelevanceScore(exact, keyword) > keywordRelevanceScore(tokenHit, keyword));
+  assert.ok(keywordRelevanceScore(tokenHit, keyword) > keywordRelevanceScore(singleChar, keyword));
+  assert.equal(keywordRelevanceScore(singleChar, keyword), 0);
+});
+
+test("aggregateSortResults: 互动只使用平台内相对排名，不跨平台比较绝对数量", () => {
+  const results = [
+    makeResult("xhs", "x-high", { rank: 0, metrics: { like_count: 100 } }),
+    makeResult("xhs", "x-low", { rank: 1, metrics: { like_count: 10 } }),
+    makeResult("douyin", "d-high", { rank: 0, metrics: { like_count: 100000 } }),
+    makeResult("douyin", "d-low", { rank: 1, metrics: { like_count: 10000 } }),
+  ];
+  const sorted = aggregateSortResults(results, "", { nowMs: Date.parse("2026-08-01T00:00:00Z") });
+  assert.deepEqual(sorted.slice(0, 2).map((r) => r.content_id), ["x-high", "d-high"]);
+});
+
+test("aggregateSortResults: 原始 rank 和新鲜度参与综合分", () => {
+  const results = [
+    makeResult("xhs", "old-best-rank", {
+      rank: 0,
+      published_at: "2025-01-01T00:00:00Z",
+    }),
+    makeResult("xhs", "new-lower-rank", {
+      rank: 1,
+      published_at: "2026-07-20T00:00:00Z",
+    }),
+  ];
+  const sorted = aggregateSortResults(results, "", { nowMs: Date.parse("2026-08-01T00:00:00Z") });
+  assert.deepEqual(sorted.map((r) => r.content_id), ["old-best-rank", "new-lower-rank"]);
+});
+
+test("aggregateSortResults: 连续结果会施加平台多样性惩罚", () => {
+  const results = [
+    makeResult("xhs", "x1", { rank: 0 }),
+    makeResult("xhs", "x2", { rank: 1 }),
+    makeResult("xhs", "x3", { rank: 2 }),
+    makeResult("bilibili", "b1", { rank: 0 }),
+    makeResult("bilibili", "b2", { rank: 1 }),
+    makeResult("bilibili", "b3", { rank: 2 }),
+  ];
+  const sorted = aggregateSortResults(results, "", {
+    nowMs: Date.parse("2026-08-01T00:00:00Z"),
+    platformOrder: ["xhs", "bilibili"],
+  });
+  assert.deepEqual(sorted.slice(0, 4).map((r) => r.platform), ["xhs", "bilibili", "xhs", "bilibili"]);
 });
 
 // ── 8. 最新排序：非法/缺失时间放最后，稳定 ────────────────────────────
@@ -343,6 +412,50 @@ test("sortResults engagement: 分数从高到低，同分保持原始顺序", ()
   assert.deepEqual(sorted.map((r) => r.content_id), ["a", "e", "b", "d", "c"]);
 });
 
+test("sortResults engagement: 使用平台内相对互动排名，不跨平台比较绝对数量", () => {
+  const results = [
+    makeResult("xhs", "x-low", { metrics: { like_count: 10 } }),
+    makeResult("douyin", "d-low", { metrics: { like_count: 100000 } }),
+    makeResult("xhs", "x-high", { metrics: { like_count: 100 } }),
+    makeResult("douyin", "d-high", { metrics: { like_count: 1000000 } }),
+  ];
+  const sorted = sortResults(results, "engagement");
+  assert.deepEqual(sorted.map((r) => r.content_id), ["d-high", "x-high", "d-low", "x-low"]);
+});
+
+test("sortResults engagement: 评论和深度互动可打破平台第一名并列", () => {
+  const results = [
+    makeResult("xhs", "xhs-top", {
+      metrics: { like_count: 398, comment_count: 67, collect_count: 319 },
+    }),
+    makeResult("bilibili", "bili-top", {
+      metrics: {
+        view_count: 269000,
+        comment_count: 551,
+        like_count: 9900,
+        coin_count: 502,
+      },
+    }),
+  ];
+  assert.ok(interactionStrengthScore(results[1].metrics) > interactionStrengthScore(results[0].metrics));
+  assert.deepEqual(sortResults(results, "engagement").map((r) => r.content_id), ["bili-top", "xhs-top"]);
+});
+
+test("sortResults engagement: 播放量低权重，不能单独压过深度互动", () => {
+  const results = [
+    makeResult("xhs", "deep", { metrics: { like_count: 1000, comment_count: 100 } }),
+    makeResult("bilibili", "views-only", { metrics: { view_count: 100000000 } }),
+  ];
+  assert.deepEqual(sortResults(results, "engagement").map((r) => r.content_id), ["deep", "views-only"]);
+});
+
+test("interactionStrengthScore: 极端数值有限且评论权重高于点赞", () => {
+  const comment = interactionStrengthScore({ comment_count: 100 });
+  const likes = interactionStrengthScore({ like_count: 1000 });
+  assert.ok(comment > likes);
+  assert.ok(Number.isFinite(interactionStrengthScore({ view_count: Number.MAX_VALUE })));
+});
+
 // ── 10. 平台轮询交错 ──────────────────────────────────────────────────
 
 test("interleaveByPlatform: 按平台顺序轮流取，保持各平台内部顺序", () => {
@@ -363,6 +476,96 @@ test("interleaveByPlatform: 重复结果被去重", () => {
   assert.equal(merged.length, 3);
   // douyin 队列跳过重复的 dup 后同轮取 d1（与后端 interleave_results 一致）
   assert.deepEqual(merged.map((r) => r.content_id), ["dup", "d1", "x2"]);
+});
+
+test("deduplicateCrossPlatformResults: 标题规范化后跨平台去重并保留完整代表", () => {
+  const results = [
+    makeResult("xhs", "x1", {
+      title: "iPhone 18 使用一个月真实体验！",
+      rank: 0,
+    }),
+    makeResult("douyin", "d1", {
+      title: "iphone18使用一个月真实体验",
+      snippet: "详细记录使用一个月后的体验。",
+      author: "作者",
+      rank: 1,
+    }),
+  ];
+  const deduped = deduplicateCrossPlatformResults(results);
+  assert.deepEqual(deduped.map((r) => r.content_id), ["d1"]);
+});
+
+test("deduplicateCrossPlatformResults: 同作者标题附加修饰被识别为同一内容", () => {
+  const results = [
+    makeResult("xhs", "x1", {
+      author: "秋芝2046",
+      title: "全网最全！60分钟全面掌握Claude Code~",
+    }),
+    makeResult("bilibili", "b1", {
+      author: "秋芝2046",
+      title: "全网最全！60分钟全面掌握Claude Code~【附完整文档】",
+      snippet: "附完整文档和教程。",
+    }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 1);
+});
+
+test("deduplicateCrossPlatformResults: A~B、A~C 通过连通组聚类，即使 B~C 不直接匹配也只留一个", () => {
+  const results = [
+    makeResult("xhs", "a", { author: "秋芝", title: "Claude Code 全面教程" }),
+    makeResult("bilibili", "b", { author: "秋芝2046", title: "Claude Code 全面教程安装与配置" }),
+    makeResult("douyin", "c", { author: "秋芝_2046", title: "Claude Code 全面教程实战与部署" }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 1);
+});
+
+test("deduplicateCrossPlatformResults: 同作者三个不同视频全部保留", () => {
+  const results = [
+    makeResult("xhs", "a", { author: "秋芝", title: "Claude Code 入门教程" }),
+    makeResult("bilibili", "b", { author: "秋芝2046", title: "Claude Code 调试技巧" }),
+    makeResult("douyin", "c", { author: "秋芝_2046", title: "Claude Code 插件开发" }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 3);
+});
+
+test("deduplicateCrossPlatformResults: 危险链式相似只合并安全的一侧", () => {
+  const results = [
+    makeResult("xhs", "a", { author: "秋芝", title: "Claude Code 入门教程" }),
+    makeResult("bilibili", "b", { author: "秋芝", title: "Claude Code 入门教程与配置" }),
+    makeResult("douyin", "c", { author: "秋芝", title: "Claude Code 入门与配置" }),
+  ];
+  // A~B、B~C，但 A/C 的核心标题不同，不应把三条传递并成一组。
+  assert.equal(deduplicateCrossPlatformResults(results).length, 2);
+});
+
+test("deduplicateCrossPlatformResults: 同作者主题相近但标题核心不同不误删", () => {
+  const results = [
+    makeResult("xhs", "x1", {
+      author: "秋芝2046",
+      title: "Claude Code 入门教程与安装",
+    }),
+    makeResult("bilibili", "b1", {
+      author: "秋芝2046",
+      title: "Claude Code 进阶实战与部署",
+    }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 2);
+});
+
+test("deduplicateCrossPlatformResults: 主题相近但无辅助信号时保留", () => {
+  const results = [
+    makeResult("xhs", "x1", { title: "iPhone 18 使用一个月真实体验分享" }),
+    makeResult("bilibili", "b1", { title: "iPhone 18 使用一个月续航测试" }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 2);
+});
+
+test("deduplicateCrossPlatformResults: 不同平台相同 content_id 不能单独触发去重", () => {
+  const results = [
+    makeResult("xhs", "same-id", { title: "露营装备清单" }),
+    makeResult("douyin", "same-id", { title: "城市通勤装备推荐" }),
+  ];
+  assert.equal(deduplicateCrossPlatformResults(results).length, 2);
 });
 
 test("makeDedupKey 唯一性", () => {

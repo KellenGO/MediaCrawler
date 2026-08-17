@@ -18,6 +18,7 @@ export interface UnifiedSearchResult {
   content_id: string;
   content_type: string;
   title: string;
+  snippet?: string | null;
   author: string | null;
   url: string;
   published_at: string | null;
@@ -61,6 +62,8 @@ export interface SearchJobRequest {
   limit_per_platform?: number;
   /** Round 15: 按平台独立数量（1–20 整数）；缺失平台回退 limit_per_platform。 */
   platform_limits?: Partial<Record<PlatformSlug, number>>;
+  /** 普通搜索允许命中短缓存；显式重新搜索时设为 true。 */
+  bypass_cache?: boolean;
 }
 
 export const PLATFORM_LABELS: Record<PlatformSlug, string> = {

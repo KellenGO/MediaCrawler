@@ -157,6 +157,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
             page = 1
             search_id = get_search_id()
             source_offset = 0  # 已处理页累计条目数（原始搜索列表序号基准）
+            # Round 17.1: 轻量列表跨页去重集合（重复 content_id 不消耗
+            # remaining）；按关键词重置（各关键词搜索相互独立）。
+            seen_light_content_ids: set = set()
             while remaining > 0 and (page - start_page + 1) * xhs_limit_count <= config.CRAWLER_MAX_NOTES_COUNT + xhs_limit_count:
                 if page < start_page:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Skip page {page}")
@@ -204,6 +207,60 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         i.get("id"): source_offset + idx
                         for idx, i in enumerate(current_items)
                     }
+
+                    if not self._fetch_details():
+                        # ── Round 17/17.1 聚合搜索轻量列表模式 ──────────
+                        # 直接使用搜索列表接口数据生成结果，不再逐条调详情。
+                        # 直接枚举原始 current_items（保留真实原始位置）：
+                        # - rec_query/hot_query 跳过但占位；
+                        # - content_id 缺失/重复的项跳过，绝不消耗 remaining；
+                        # - source_index = source_offset + 原始 enumerate 下标
+                        #   （不再用 source_index_by_id 字典反查）；
+                        # - 收集满 remaining 个有效唯一条目即停止；
+                        # 安全浅拷贝，不修改平台原始响应。
+                        light_items = []
+                        for idx, post_item in enumerate(current_items):
+                            if len(light_items) >= remaining:
+                                break
+                            if post_item.get("model_type") in (
+                                    "rec_query", "hot_query"):
+                                continue
+                            card = post_item.get("note_card")
+                            content_id = post_item.get("id")
+                            if content_id is None and isinstance(card, dict):
+                                content_id = card.get("note_id")
+                            if content_id is None:
+                                content_id = post_item.get("note_id")
+                            if not content_id:
+                                continue  # 无效项不消耗 remaining
+                            if content_id in seen_light_content_ids:
+                                continue  # 重复项不消耗 remaining
+                            seen_light_content_ids.add(content_id)
+                            item = dict(post_item)  # 浅拷贝
+                            item["source_index"] = source_offset + idx
+                            light_items.append(item)
+                        if light_items:
+                            self._result_sink_call(light_items)
+                        remaining -= len(light_items)
+                        source_offset += len(current_items)
+                        page += 1
+                        utils.logger.info(
+                            f"[XiaoHongShuCrawler.search] light-list page "
+                            f"{page - 1}: {len(light_items)} items")
+                        # 第一页已达 limit：不执行额外 page sleep；不足且
+                        # has_more=True 时才沿用现有分页间隔请求下一页。
+                        if remaining > 0 and notes_res.get("has_more", False):
+                            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                            utils.logger.info(
+                                f"[XiaoHongShuCrawler.search] Sleeping for "
+                                f"{config.CRAWLER_MAX_SLEEP_SEC} seconds after "
+                                f"page {page - 1}")
+                        if not notes_res.get("has_more", False):
+                            utils.logger.info(
+                                "[XiaoHongShuCrawler.search] No more pages!")
+                            break
+                        continue
+
                     semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
 
                     if self._stream_results():

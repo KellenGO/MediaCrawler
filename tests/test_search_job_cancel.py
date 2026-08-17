@@ -119,7 +119,11 @@ async def test_full_flow_cancel_mid_search(monkeypatch, tmp_path):
                 break
             await asyncio.sleep(0.05)
         assert len(job.procs) == 4, "子进程必须全部启动"
-        assert all(p.returncode is None for p in job.procs)
+        # 确定性断言（Round 17.1：不依赖 job.platforms 与 job.procs 的位置
+        # 映射 —— 并发 append 顺序不保证一致）：三个 sleep(60) 子进程必然
+        # 存活；xhs 已 succeeded 的进程可能已退出。
+        assert sum(1 for p in job.procs if p.returncode is None) >= 3, \
+            "至少 3 个子进程必须仍在运行"
 
         # xhs worker 快速返回结果并成功退出（部分平台已返回结果）
         deadline = asyncio.get_running_loop().time() + 10
@@ -130,8 +134,11 @@ async def test_full_flow_cancel_mid_search(monkeypatch, tmp_path):
         assert job.platforms_state["xhs"].status == "succeeded"
         assert len(job.platform_results["xhs"]) == 1
 
-        # 中途取消（其余平台仍在 running）
-        assert job.platforms_state["douyin"].status == "running"
+        # 其余平台仍为 running（按平台状态断言，不做进程位置猜测）
+        for p in ("douyin", "bilibili", "zhihu"):
+            assert job.platforms_state[p].status == "running"
+
+        # 中途取消
         cancelled = await mgr.cancel_job(job.job_id)
         assert cancelled is True
 

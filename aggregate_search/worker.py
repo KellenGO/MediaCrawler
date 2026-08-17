@@ -257,8 +257,9 @@ async def _run_standard_search(
             result_limit=limit,
             strict_errors=True,
             headless=True,
-            # bilibili: 搜索列表已含 MVP 字段，跳过逐条详情 API（P0 轻量模式）
-            fetch_details=(core_platform != "bili"),
+            # Round 17: xhs/bilibili 搜索列表已含 MVP 字段，跳过逐条详情
+            # API（轻量列表模式，复用 fetch_details 通用选项）。
+            fetch_details=(core_platform not in ("xhs", "bili")),
             # douyin: pong 未确认登录时仍尝试公开搜索（登录门禁不适用公开 API）
             allow_public_search=(core_platform == "dy"),
             # xhs: 详情按原始顺序逐条 sink + 复用单个 httpx client（Phase 3）
@@ -316,7 +317,8 @@ async def _run_fast_standard_search(
         result_limit=limit,
         strict_errors=True,
         headless=True,
-        fetch_details=(core_platform != "bili"),
+        # Round 17: 快速路径与浏览器路径一致 —— xhs/bilibili 轻量列表。
+        fetch_details=(core_platform not in ("xhs", "bili")),
         stream_results=(core_platform == "xhs"),
         reuse_http_client=True,
         metrics_cb=phase_metric,

@@ -39,6 +39,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
     updatePlatformPref,
     platformPref,
     handleFullSearch,
+    handleRefresh,
     handleRetry,
     handleCancel,
     handleReset,
@@ -265,13 +266,27 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             </div>
           )}
 
-          <p className="text-xs text-cyber-text-muted mb-2">
-            搜索: <span className="text-cyber-text-primary">{displayJobResponse.keyword}</span>
-            {isTerminal && displayJobResponse.completed_at && (
-              <span className="ml-3">完成于 {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs text-cyber-text-muted">
+              搜索: <span className="text-cyber-text-primary">{displayJobResponse.keyword}</span>
+              {isTerminal && displayJobResponse.completed_at && (
+                <span className="ml-3">完成于 {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
+              )}
+              {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
+            </p>
+            {isTerminal && (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={busy}
+                className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-cyber-border-subtle text-xs text-cyber-text-secondary hover:text-brand-strong hover:border-brand/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="重新搜索"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                重新搜索
+              </button>
             )}
-            {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
-          </p>
+          </div>
 
           {/* 单平台重试失败提示（保留旧结果，仅显示安全摘要） */}
           {Object.entries(retryErrors).map(([platform, message]) => (
@@ -303,6 +318,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
 
           <ResultTabs
             results={displayJobResponse.results}
+            keyword={displayJobResponse.keyword}
             overall={displayJobResponse.overall}
             platforms={Object.keys(displayJobResponse.platforms) as PlatformSlug[]}
             sortMode={sortMode}

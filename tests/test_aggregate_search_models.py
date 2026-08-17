@@ -31,6 +31,9 @@ from aggregate_search.models import (
     PLATFORM_SLUGS,
     make_dedup_key,
     interleave_results,
+    clean_snippet,
+    clean_title,
+    deduplicate_cross_platform_results,
     _parse_timestamp,
 )
 
@@ -48,6 +51,7 @@ class TestUnifiedSearchResult:
         assert r.content_id == "abc123"
         assert r.content_type == "note"  # default
         assert r.author is None
+        assert r.snippet is None
         assert r.metrics == {}
         assert r.cover_url is None
 
@@ -57,6 +61,7 @@ class TestUnifiedSearchResult:
             content_id="7123456789",
             content_type="video",
             title="测试视频",
+            snippet="这是视频摘要",
             author="测试作者",
             url="https://www.douyin.com/video/7123456789",
             published_at="2025-01-15T10:30:00",
@@ -67,6 +72,7 @@ class TestUnifiedSearchResult:
         data = r.model_dump()
         assert data["platform"] == "douyin"
         assert data["metrics"]["like_count"] == 100
+        assert data["snippet"] == "这是视频摘要"
 
     def test_extra_fields_ignored(self):
         r = UnifiedSearchResult(
@@ -80,6 +86,19 @@ class TestUnifiedSearchResult:
         )
         data = r.model_dump()
         assert "some_extra_field" not in data
+
+    def test_clean_snippet_removes_html_collapses_whitespace_and_limits_length(self):
+        assert clean_snippet(" <p>这是&nbsp;一段</p>\n<b>摘要</b> ") == "这是 一段 摘要"
+        assert clean_snippet("<script>alert(1)</script>正文") == "正文"
+        cleaned = clean_snippet("x" * 200)
+        assert cleaned is not None
+        assert len(cleaned) == 180
+        assert cleaned.endswith("…")
+        assert clean_snippet(" <br> \n\t") is None
+
+    def test_clean_title_removes_html_without_truncating(self):
+        title = clean_title("2026年（8月）1000元<em>以下人体工学椅</em>选购推荐")
+        assert title == "2026年（8月）1000元以下人体工学椅选购推荐"
 
 
 class TestPlatformResult:
@@ -208,11 +227,118 @@ class TestInterleave:
         assert len(merged) == 1
 
     def test_cross_platform_dedup_not_happening(self):
-        """Same ID on different platforms is allowed."""
+        """Same ID with unrelated titles must remain separate."""
         r1 = UnifiedSearchResult(platform="xhs", content_id="123", title="A", url="u", rank=0)
         r2 = UnifiedSearchResult(platform="douyin", content_id="123", title="B", url="u", rank=0)
         merged = interleave_results({"xhs": [r1], "douyin": [r2]})
         assert len(merged) == 2
+
+    def test_exact_normalized_title_is_cross_platform_deduped(self):
+        r1 = UnifiedSearchResult(
+            platform="xhs", content_id="x1",
+            title="iPhone 18 使用一个月真实体验！", url="u", rank=0,
+        )
+        r2 = UnifiedSearchResult(
+            platform="douyin", content_id="d1",
+            title="iphone18使用一个月真实体验", url="u", rank=1,
+            snippet="详细记录使用一个月后的体验。", author="作者",
+        )
+        merged = interleave_results({"xhs": [r1], "douyin": [r2]})
+        assert len(merged) == 1
+        assert merged[0].content_id == "d1"  # more complete representative
+
+    def test_fuzzy_title_requires_supporting_signal(self):
+        base = UnifiedSearchResult(
+            platform="xhs", content_id="x1",
+            title="iPhone 18 使用一个月真实体验分享", url="u", rank=0,
+            published_at="2026-08-01T00:00:00+00:00",
+        )
+        similar = UnifiedSearchResult(
+            platform="bilibili", content_id="b1",
+            title="iPhone18使用一个月真实体验", url="u", rank=1,
+            published_at="2026-08-05T00:00:00+00:00",
+        )
+        assert len(deduplicate_cross_platform_results([base, similar])) == 1
+
+        different_topic = UnifiedSearchResult(
+            platform="douyin", content_id="d1",
+            title="iPhone 18 使用一个月续航测试", url="u", rank=1,
+            published_at="2026-12-01T00:00:00+00:00",
+        )
+        assert len(deduplicate_cross_platform_results([base, different_topic])) == 2
+
+    def test_same_author_title_suffix_is_cross_platform_deduped(self):
+        base = UnifiedSearchResult(
+            platform="xhs", content_id="x1",
+            title="全网最全！60分钟全面掌握Claude Code~", author="秋芝2046", url="u", rank=0,
+        )
+        expanded = UnifiedSearchResult(
+            platform="bilibili", content_id="b1",
+            title="全网最全！60分钟全面掌握Claude Code~【附完整文档】", author="秋芝2046", url="u", rank=1,
+        )
+        assert len(deduplicate_cross_platform_results([base, expanded])) == 1
+
+    def test_connected_duplicate_cluster_keeps_one_for_three_platform_copies(self):
+        results = [
+            UnifiedSearchResult(
+                platform="xhs", content_id="a", title="Claude Code 全面教程", author="秋芝", url="u", rank=0,
+            ),
+            UnifiedSearchResult(
+                platform="bilibili", content_id="b", title="Claude Code 全面教程安装与配置", author="秋芝2046", url="u", rank=1,
+            ),
+            UnifiedSearchResult(
+                platform="douyin", content_id="c", title="Claude Code 全面教程实战与部署", author="秋芝_2046", url="u", rank=2,
+            ),
+        ]
+        assert len(deduplicate_cross_platform_results(results)) == 1
+
+    def test_same_author_different_videos_are_not_clustered(self):
+        results = [
+            UnifiedSearchResult(
+                platform="xhs", content_id="a", title="Claude Code 入门教程", author="秋芝", url="u", rank=0,
+            ),
+            UnifiedSearchResult(
+                platform="bilibili", content_id="b", title="Claude Code 调试技巧", author="秋芝2046", url="u", rank=1,
+            ),
+            UnifiedSearchResult(
+                platform="douyin", content_id="c", title="Claude Code 插件开发", author="秋芝_2046", url="u", rank=2,
+            ),
+        ]
+        assert len(deduplicate_cross_platform_results(results)) == 3
+
+    def test_dangerous_duplicate_chain_does_not_merge_the_third_title(self):
+        results = [
+            UnifiedSearchResult(
+                platform="xhs", content_id="a", title="Claude Code 入门教程", author="秋芝", url="u", rank=0,
+            ),
+            UnifiedSearchResult(
+                platform="bilibili", content_id="b", title="Claude Code 入门教程与配置", author="秋芝", url="u", rank=1,
+            ),
+            UnifiedSearchResult(
+                platform="douyin", content_id="c", title="Claude Code 入门与配置", author="秋芝", url="u", rank=2,
+            ),
+        ]
+        assert len(deduplicate_cross_platform_results(results)) == 2
+
+    def test_same_author_similar_but_different_topic_is_retained(self):
+        first = UnifiedSearchResult(
+            platform="xhs", content_id="x1",
+            title="Claude Code 入门教程与安装", author="秋芝2046", url="u", rank=0,
+        )
+        second = UnifiedSearchResult(
+            platform="bilibili", content_id="b1",
+            title="Claude Code 进阶实战与部署", author="秋芝2046", url="u", rank=1,
+        )
+        assert len(deduplicate_cross_platform_results([first, second])) == 2
+
+    def test_same_content_id_different_platform_is_not_id_only_deduped(self):
+        r1 = UnifiedSearchResult(
+            platform="xhs", content_id="same-id", title="露营装备清单", url="u", rank=0,
+        )
+        r2 = UnifiedSearchResult(
+            platform="douyin", content_id="same-id", title="城市通勤装备推荐", url="u", rank=0,
+        )
+        assert len(deduplicate_cross_platform_results([r1, r2])) == 2
 
 
 class TestTimeParsing:

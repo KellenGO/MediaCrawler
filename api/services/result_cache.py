@@ -9,8 +9,8 @@
 边界（严格）：
 - key = 标准化关键词 + 平台 + limit + 账号代数；代数在账号同步/失效/清除/
   shutdown 时自增 → 缓存自动失效；
-- TTL 默认 0（禁用）：UI 没有强制刷新入口，默认不缓存，避免用户看到陈旧
-  结果；显式配置（MC_RESULTS_CACHE_TTL_SECONDS）时夹紧到 [60, 120] 秒；
+- TTL 默认 90 秒：社交平台搜索结果只短暂复用；显式配置
+  （MC_RESULTS_CACHE_TTL_SECONDS）时夹紧到 [60, 120] 秒，显式设为 0 可禁用；
 - 最大容量 MAX_ENTRIES=200：get/set 时清理过期项；超容量按 LRU 淘汰
   （dict 插入序 = 最近使用序）；账号代数推进后旧代数条目在 set 时被清理，
   不永久留存；
@@ -29,8 +29,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import accounts as accounts_service
 
-# TTL 秒数；0 = 禁用（默认）。环境变量显式开启时夹紧到 [60, 120]。
-_CACHE_TTL_SECONDS: int = 0
+# TTL 秒数；默认 90 秒。环境变量显式配置时夹紧到 [60, 120]，设为 0 可禁用。
+DEFAULT_CACHE_TTL_SECONDS = 90
+_CACHE_TTL_SECONDS: int = DEFAULT_CACHE_TTL_SECONDS
 
 # Round 16.1: 最大缓存条目数（平台粒度，总计）。
 MAX_ENTRIES: int = 200
@@ -44,11 +45,11 @@ _MAX_TTL = 120
 def _parse_env_ttl() -> int:
     raw = os.environ.get("MC_RESULTS_CACHE_TTL_SECONDS", "")
     if not raw:
-        return 0
+        return DEFAULT_CACHE_TTL_SECONDS
     try:
         value = int(raw)
     except (TypeError, ValueError):
-        return 0
+        return DEFAULT_CACHE_TTL_SECONDS
     if value <= 0:
         return 0
     return max(_MIN_TTL, min(_MAX_TTL, value))

@@ -96,6 +96,7 @@ class TestXhsAdapter:
         assert r.content_id == "abc123def"
         assert r.content_type == "note"
         assert r.title == "露营装备推荐｜新手入门必备清单"
+        assert r.snippet == "整理了20件露营必备装备..."
         assert r.author == "户外小白"
         assert r.url == "https://www.xiaohongshu.com/explore/abc123def"
         assert r.published_at is not None
@@ -192,6 +193,7 @@ class TestDouyinAdapter:
         assert r.content_id == "7123456789012345678"
         assert r.content_type == "video"
         assert r.title == "露营帐篷搭建教程 ⛺️ #露营 #户外"
+        assert r.snippet == "露营帐篷搭建教程 ⛺️ #露营 #户外"
         assert r.author == "野营老王"
         assert r.published_at is not None
         # Highest quality cover
@@ -215,6 +217,10 @@ class TestDouyinAdapter:
         results = adapter.adapt([{"aweme_id": "1", "desc": "Test", "create_time": 1736937000}])
         assert results[0].cover_url is None
 
+    def test_missing_snippet_fields_are_compatible(self):
+        result = DouyinAdapter().adapt([{"aweme_id": "1"}])[0]
+        assert result.snippet is None
+
     def test_author_privacy(self):
         """Verify no uid/sec_uid in output."""
         adapter = DouyinAdapter()
@@ -232,6 +238,7 @@ BILIBILI_VIDEO_FIXTURE = {
         "aid": 12345678,
         "bvid": "BV1xx411c7mD",
         "title": "【4K】川西露营｜雪山下的星空帐篷",
+        "description": "记录雪山下搭建帐篷、做饭和看星空的全过程。",
         "pic": "https://i0.hdslb.com/bfs/archive/abc123.jpg",
         "pubdate": 1736937000,
         "owner": {
@@ -273,6 +280,7 @@ class TestBilibiliAdapter:
         assert r.content_id == "BV1xx411c7mD"
         assert r.content_type == "video"
         assert r.title == "【4K】川西露营｜雪山下的星空帐篷"
+        assert r.snippet == "记录雪山下搭建帐篷、做饭和看星空的全过程。"
         assert r.author == "旅行摄影师小李"
         assert r.url == "https://www.bilibili.com/video/BV1xx411c7mD"
         assert r.published_at is not None
@@ -376,12 +384,24 @@ class TestZhihuAdapter:
         assert r.content_id == "9876543210"
         assert r.content_type == "answer"
         assert r.title == "新手露营需要准备哪些装备？"
+        assert r.snippet == "作为一个露营5年的老手，我来分享一些经验..."
         assert r.author == "户外装备控"  # PUBLIC nickname, not masked!
         assert "question/12345678/answer/9876543210" in r.url
         assert r.published_at is not None
         assert r.cover_url == "https://pic1.zhimg.com/80/thumb_abc.jpg"
         assert r.metrics["like_count"] == 3200
         assert r.metrics["comment_count"] == 180
+
+    def test_title_html_highlight_is_cleaned(self):
+        adapter = ZhihuAdapter()
+        results = adapter.adapt([{
+            "id": "html-title",
+            "type": "answer",
+            "title": "2026年（8月）1000元<em>以下人体工学椅</em>选购推荐",
+            "question": {"id": 1},
+            "author": {"name": "知乎用户"},
+        }])
+        assert results[0].title == "2026年（8月）1000元以下人体工学椅选购推荐"
 
     def test_article(self):
         adapter = ZhihuAdapter()
@@ -434,6 +454,7 @@ class TestZhihuAdapter:
             "comment_count": 0,
         }])
         assert results[0].cover_url is None
+        assert results[0].snippet is None
 
     def test_author_privacy_no_hash(self):
         """Author field should not contain hashed user IDs."""

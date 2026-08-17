@@ -35,7 +35,9 @@ from tools import utils
 if TYPE_CHECKING:
     from proxy.proxy_ip_pool import ProxyIpPool
 
-from .exception import DataFetchError, IPBlockError, NoteNotFoundError
+from .exception import (
+    DataFetchError, IPBlockError, NoteNotFoundError, XhsRateLimitError,
+)
 from .field import SearchNoteType, SearchSortType
 from .help import get_search_id
 from .extractor import XiaoHongShuExtractor
@@ -142,7 +144,12 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self.headers.update(headers)
         return self.headers
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), retry=retry_if_not_exception_type(NoteNotFoundError))
+    # Round 17.2: 461/471 是平台风控（验证码/访问限制）—— XhsRateLimitError
+    # 必须被排除在重试之外（只发 1 次请求，不重复触发风控）；NoteNotFoundError
+    # 原语义保持不重试。其余网络/临时错误仍按原样重试 3 次。
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1),
+           retry=retry_if_not_exception_type(
+               (NoteNotFoundError, XhsRateLimitError)))
     async def request(self, method, url, **kwargs) -> Union[str, Any]:
         """
         Wrapper for httpx common request method, processes request response
@@ -169,12 +176,13 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 response = await client.request(method, url, timeout=self.timeout, **kwargs)
 
         if response.status_code == 471 or response.status_code == 461:
-            # someday someone maybe will bypass captcha
-            verify_type = response.headers["Verifytype"]
-            verify_uuid = response.headers["Verifyuuid"]
-            msg = f"CAPTCHA appeared, request failed, Verifytype: {verify_type}, Verifyuuid: {verify_uuid}, Response: {response}"
-            utils.logger.error(msg)
-            raise Exception(msg)
+            # Round 17.2: 平台风控/验证码挑战 —— 立即抛专用异常，不读取
+            # Verifyuuid/Verifytype，不记录 response 对象或 body，日志只写
+            # 固定文案与状态码。XhsRateLimitError 被重试条件排除 → 只发 1 次。
+            utils.logger.error(
+                f"[XiaoHongShuClient.request] xhs rate-limited, "
+                f"http_status={response.status_code}")
+            raise XhsRateLimitError(http_status=response.status_code)
 
         if return_response:
             return response.text
@@ -279,6 +287,10 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         headers = await self._pre_headers(uri, params={})
         async with make_async_client(proxy=self.proxy) as client:
             response = await client.get(f"{self._host}{uri}", headers=headers)
+            # Round 17.2: 461/471 是平台风控（验证码/访问限制）—— 抛专用
+            # 异常（不读取 Verifyuuid/Verifytype、不记录 body/URL）。
+            if response.status_code in (461, 471):
+                raise XhsRateLimitError(http_status=response.status_code)
             if response.status_code == 200:
                 return response.json()
         return None
@@ -359,6 +371,11 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             "search_id": search_id,
             "sort": sort.value,
             "note_type": note_type.value,
+            # Round 17.1: 缺少 image_formats 时真实搜索响应里的 note_card.cover
+            # 与 image_list[] 只有 height/width 没有任何图片 URL；与详情接口
+            # 相同的 image_formats 参数让封面字段携带真实图片 URL（url_pre /
+            # url_default / image_list[].info_list[].url）。
+            "image_formats": ["jpg", "webp", "avif"],
         }
         return await self.post(uri, data)
 

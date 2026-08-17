@@ -16,7 +16,7 @@
 """
 Round 16 短内存结果缓存测试。
 
-- 默认 TTL=0（禁用）：不缓存，第二次搜索仍走 worker；
+- 默认 TTL=90 秒：普通重复搜索命中缓存；
 - 启用后：命中缓存不启动 worker，结果回放一致；
 - TTL 过期 → 未命中；账号代数变化（同步/失效/清除）→ 未命中；
 - bypass_cache 跳过查/写；limit/关键词不同 → 不同 key；
@@ -81,14 +81,15 @@ async def _run(manager, keyword="露营", platforms=None, limit=5,
 
 
 class TestResultCache:
-    def test_disabled_by_default(self, manager, monkeypatch):
-        """TTL=0（默认）：不缓存，第二次搜索仍启动 worker。"""
+    def test_enabled_by_default(self, manager, monkeypatch):
+        """默认 TTL=90 秒：普通重复搜索命中短缓存。"""
         mgr, calls = manager
+        assert result_cache.ttl_seconds() == result_cache.DEFAULT_CACHE_TTL_SECONDS
         first = asyncio.run(_run(mgr))
         assert first.platforms["xhs"].status == "succeeded"
         second = asyncio.run(_run(mgr))
         assert second.platforms["xhs"].status == "succeeded"
-        assert len(calls) == 2, "缓存禁用时每次都必须启动 worker"
+        assert len(calls) == 1, "默认缓存应复用短时间内的结果"
 
     def test_cache_hit_skips_worker(self, manager, monkeypatch):
         """启用后：第二次搜索命中缓存，不启动 worker，结果一致。"""
@@ -171,6 +172,24 @@ class TestResultCache:
         first = asyncio.run(_run(mgr))
         assert first.platforms["xhs"].status == "failed"
         assert result_cache._cache == {}, "failed 不得写入缓存"
+
+    def test_partial_job_is_not_cached(self, manager, monkeypatch):
+        """一个平台失败时，另一个平台的成功结果也不能单独落缓存。"""
+        _enable_cache(monkeypatch)
+        mgr, calls = manager
+
+        async def partial_run_worker(job, platform):
+            calls.append((job.job_id, platform))
+            if platform == "xhs":
+                job.add_result(platform, _make_result("partial-success"))
+                job.set_platform_status(platform, "succeeded")
+            else:
+                job.set_platform_status(platform, "failed", error_summary="boom")
+
+        monkeypatch.setattr(mgr, "_run_worker", partial_run_worker)
+        result = asyncio.run(_run(mgr, platforms=["xhs", "douyin"]))
+        assert result.overall == "partial"
+        assert result_cache._cache == {}, "partial 结果不得写入任何平台缓存"
 
     def test_empty_is_cached(self, manager, monkeypatch):
         """empty（无结果）也缓存，避免重复搜索空关键词。"""
@@ -273,7 +292,8 @@ class TestCacheCapacityAndEviction:
             result_cache.clear()
 
     def test_ttl_zero_stores_nothing(self, monkeypatch):
-        """TTL=0（默认）：完全不存，也不缓存空结果。"""
+        """显式 TTL=0 时完全禁用缓存。"""
+        monkeypatch.setattr(result_cache, "_CACHE_TTL_SECONDS", 0)
         result_cache.clear()
         try:
             assert result_cache.ttl_seconds() == 0

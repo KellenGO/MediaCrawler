@@ -48,7 +48,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from aggregate_search.models import UnifiedSearchResult, _parse_timestamp
+from aggregate_search.models import UnifiedSearchResult, _parse_timestamp, clean_snippet, clean_title
 
 from .base import BasePlatformAdapter
 
@@ -70,9 +70,9 @@ class ZhihuAdapter(BasePlatformAdapter):
             if not content_id:
                 continue
 
-            title = self._safe_str(item.get("title"))
+            title = clean_title(self._safe_str(item.get("title")))
             if not title:
-                title = self._safe_str(item.get("excerpt", ""))[:100]
+                title = clean_title(self._safe_str(item.get("excerpt", ""))[:100])
 
             # Extract PUBLIC nickname from raw author dict (NOT masked)
             author = self._get_public_author(item)
@@ -81,6 +81,11 @@ class ZhihuAdapter(BasePlatformAdapter):
 
             published_at = _parse_timestamp(
                 item.get("created_time") or item.get("created") or item.get("created_at")
+            )
+
+            # search_v3 已返回 excerpt；它是知乎回答/文章最适合的摘要字段。
+            snippet = clean_snippet(
+                item.get("excerpt") or item.get("description") or item.get("content")
             )
 
             cover_url = self._extract_cover_url(item)
@@ -93,6 +98,7 @@ class ZhihuAdapter(BasePlatformAdapter):
                     content_id=content_id,
                     content_type=content_type,
                     title=title,
+                    snippet=snippet,
                     author=author,
                     url=url,
                     published_at=published_at,

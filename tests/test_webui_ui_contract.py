@@ -26,7 +26,9 @@ _STATUS_DISPLAY = (_ROOT / "lib" / "statusDisplay.ts").read_text(encoding="utf-8
 _TYPES = (_ROOT / "types" / "search.ts").read_text(encoding="utf-8")
 _SEARCH_PAGE = (_ROOT / "components" / "search" / "SearchPage.tsx").read_text(encoding="utf-8")
 _HOOK = (_ROOT / "hooks" / "useAggregateSearch.ts").read_text(encoding="utf-8")
+_EXPERIENCE_HOOK = (_ROOT / "hooks" / "useSearchExperience.ts").read_text(encoding="utf-8")
 _ACCOUNTS = (_ROOT / "components" / "accounts" / "AccountsPage.tsx").read_text(encoding="utf-8")
+_RESULT_CARD = (_ROOT / "components" / "search" / "ResultCard.tsx").read_text(encoding="utf-8")
 
 
 # ── cancelling / cancelled UI text ──────────────────────────────────────
@@ -47,6 +49,19 @@ def test_platform_status_has_cancelled_case():
 
 def test_status_label_cancelled():
     assert 'cancelled: "已取消"' in _TYPES
+
+
+def test_result_card_renders_optional_snippet():
+    assert "result.snippet" in _RESULT_CARD
+    assert "line-clamp-3" in _RESULT_CARD
+
+
+def test_search_request_cache_bypass_is_wired():
+    assert "bypass_cache?: boolean" in _TYPES
+    assert "bypass_cache: bypassCache" in _HOOK
+    assert "bypassCache = false" in _HOOK
+    assert "handleRefresh" in _EXPERIENCE_HOOK
+    assert "current.keyword" in _EXPERIENCE_HOOK
 
 
 def test_platform_status_union_includes_cancelled():

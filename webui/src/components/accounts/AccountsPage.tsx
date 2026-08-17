@@ -97,6 +97,19 @@ const STATUS_TEXT: Record<string, string> = {
   unavailable: "验证暂不可用",
 };
 
+/** 账号卡状态文案（Round 17.2）：unavailable + 小红书风控（461/471）
+ *  → "验证请求受限"；其他 unavailable 仍为"验证暂不可用"。 */
+function accountStatusText(acc: {
+  status: string;
+  safe_error_code?: string | null;
+}): string {
+  if (acc.status === "unavailable"
+      && acc.safe_error_code === "login_verification_rate_limited") {
+    return "验证请求受限";
+  }
+  return STATUS_TEXT[acc.status] || acc.status;
+}
+
 /** 与后端 LOGIN_MARKER_NAMES 一致的白名单标记名（仅用于展示布尔值）。 */
 const LOGIN_MARKERS: Record<string, string[]> = {
   xhs: ["web_session"],
@@ -717,7 +730,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
                     <div className="flex items-center gap-2">
                       <span className="text-[14.5px] font-bold text-cyber-text-primary">{name}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10.5px] border ${TONE_BADGE[tone]}`}>
-                        {STATUS_TEXT[acc.status] || acc.status}
+                        {accountStatusText(acc)}
                         {acc.verified && <ShieldCheck className="w-3 h-3 inline ml-1" />}
                       </span>
                     </div>

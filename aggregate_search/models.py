@@ -25,7 +25,11 @@ and store layers continue to use their own native data structures.
 
 from __future__ import annotations
 
+import html
+import re
+import unicodedata
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -102,6 +106,7 @@ class UnifiedSearchResult(BaseModel):
     content_id: str
     content_type: str = "note"  # "note", "video", "answer", "article", "zvideo"
     title: str
+    snippet: Optional[str] = None  # cleaned description/excerpt, if available
     author: Optional[str] = None  # public display name only
     url: str
     published_at: Optional[str] = None  # ISO 8601
@@ -230,6 +235,259 @@ def make_dedup_key(platform: str, content_id: str) -> str:
     return f"{platform}:{content_id}"
 
 
+# ── Snippet cleaning ──────────────────────────────────────────────────
+
+_SNIPPET_TAG_RE = re.compile(r"<[^>]*>")
+_SNIPPET_SCRIPT_RE = re.compile(
+    r"<\s*(script|style)[^>]*>.*?<\s*/\s*\1\s*>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+SNIPPET_MAX_LENGTH = 180
+
+
+def _clean_html_text(value: Any, tag_replacement: str = " ") -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else str(value)
+    text = html.unescape(text)
+    text = _SNIPPET_SCRIPT_RE.sub(tag_replacement, text)
+    text = _SNIPPET_TAG_RE.sub(tag_replacement, text)
+    return re.sub(r"[\s\u200b\u200c\u200d\ufeff]+", " ", text).strip()
+
+
+def clean_snippet(value: Any, max_length: int = SNIPPET_MAX_LENGTH) -> Optional[str]:
+    """Clean a platform description/excerpt for a compact search snippet.
+
+    This deliberately performs no summarisation: it only decodes entities,
+    removes obvious HTML, collapses whitespace, and applies a length cap.
+    """
+    if value is None:
+        return None
+    text = _clean_html_text(value)
+    if not text:
+        return None
+    if max_length < 1:
+        return None
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
+def clean_title(value: Any) -> str:
+    """Clean a search title without truncating it."""
+    return _clean_html_text(value, tag_replacement="")
+
+
+# ── Cross-platform de-duplication V1 ──────────────────────────────────
+
+CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH = 6
+CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH = 4
+CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD = 0.90
+CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS = 30
+_DEDUP_TITLE_SUFFIX_RE = re.compile(
+    r"(?:附(?:完整)?(?:文档|资料|教程)|完整(?:版|文档)|完整版)$"
+)
+
+
+def normalize_dedup_text(value: Any) -> str:
+    """Normalize public text for conservative cross-platform comparison."""
+    if value is None:
+        return ""
+    text = html.unescape(str(value))
+    text = unicodedata.normalize("NFKC", text).lower()
+    text = re.sub(r"<[^>]*>", "", text)
+    # \w keeps Chinese letters/digits under Unicode; underscores are not
+    # meaningful for titles, so remove them as well.
+    return re.sub(r"[^\w]", "", text).replace("_", "")
+
+
+def _normalize_dedup_title(value: Any) -> str:
+    """Normalize a title and remove a small class of trailing add-ons."""
+    normalized = normalize_dedup_text(value)
+    return _DEDUP_TITLE_SUFFIX_RE.sub("", normalized)
+
+
+def _same_dedup_author(left: Any, right: Any) -> bool:
+    left_author = normalize_dedup_text(left)
+    right_author = normalize_dedup_text(right)
+    if not left_author or not right_author:
+        return False
+    if left_author == right_author:
+        return True
+    shorter, longer = sorted((left_author, right_author), key=len)
+    # 例如“秋芝”和“秋芝2046”；只接受明确的四位数字后缀。
+    return (
+        len(shorter) >= 2
+        and longer.startswith(shorter)
+        and bool(re.fullmatch(r"\d{4}", longer[len(shorter):]))
+    )
+
+
+def _title_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    return SequenceMatcher(None, left, right).ratio()
+
+
+def _published_at_close(left: Optional[str], right: Optional[str]) -> bool:
+    if not left or not right:
+        return False
+    try:
+        left_dt = datetime.fromisoformat(left.replace("Z", "+00:00"))
+        right_dt = datetime.fromisoformat(right.replace("Z", "+00:00"))
+        return abs((left_dt - right_dt).total_seconds()) \
+            <= CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS * 86400
+    except (TypeError, ValueError):
+        return False
+
+
+def _same_cross_platform_content(
+    left: UnifiedSearchResult,
+    right: UnifiedSearchResult,
+) -> bool:
+    if left.platform == right.platform:
+        return False
+
+    left_title = _normalize_dedup_title(left.title)
+    right_title = _normalize_dedup_title(right.title)
+    if min(len(left_title), len(right_title)) < CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH:
+        return False
+
+    # Exact normalized titles are the high-confidence V1 path. This covers
+    # differences in case, spaces, full-width characters and punctuation.
+    if left_title == right_title:
+        return True
+
+    if min(len(left_title), len(right_title)) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH:
+        return False
+
+    same_author = _same_dedup_author(left.author, right.author)
+
+    shorter_title, longer_title = sorted((left_title, right_title), key=len)
+    core_title_contained = (
+        len(shorter_title) >= CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH
+        and len(shorter_title) / len(longer_title) >= 0.65
+        and shorter_title in longer_title
+    )
+    title_similarity = _title_similarity(left_title, right_title)
+    if same_author and (core_title_contained or title_similarity >= 0.86):
+        return True
+
+    # Different authors keep the original conservative requirement: fuzzy
+    # title matching still needs an independent snippet/date signal.
+    if title_similarity < CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD:
+        return False
+
+    left_snippet = normalize_dedup_text(left.snippet)
+    right_snippet = normalize_dedup_text(right.snippet)
+    similar_snippet = (
+        bool(left_snippet and right_snippet)
+        and _title_similarity(left_snippet, right_snippet) >= 0.88
+    )
+    return same_author or similar_snippet or _published_at_close(
+        left.published_at, right.published_at)
+
+
+def _result_completeness_score(result: UnifiedSearchResult) -> float:
+    """Prefer a representative with more useful fields, not raw metrics."""
+    score = min(len(normalize_dedup_text(result.title)), 40) / 40
+    score += 3 if normalize_dedup_text(result.snippet) else 0
+    score += 2 if normalize_dedup_text(result.author) else 0
+    score += 1 if result.published_at else 0
+    score += 1 if result.cover_url else 0
+    score += min(sum(1 for value in result.metrics.values() if value > 0), 4) * 0.25
+    return score
+
+
+def _has_common_title_anchor(
+    indexes: List[int],
+    results: List[UnifiedSearchResult],
+) -> bool:
+    if len(indexes) <= 2:
+        return True
+    titles = [_normalize_dedup_title(results[index].title) for index in indexes]
+    for anchor in titles:
+        if len(anchor) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH:
+            continue
+        if all(
+            candidate == anchor
+            or (
+                len(anchor) / len(candidate) >= 0.65
+                and (anchor in candidate or _title_similarity(anchor, candidate) >= 0.86)
+            )
+            for candidate in titles
+        ):
+            return True
+    return False
+
+
+def deduplicate_cross_platform_results(
+    results: List[UnifiedSearchResult],
+    platform_order: Optional[List[str]] = None,
+) -> List[UnifiedSearchResult]:
+    """Keep one representative for conservative cross-platform duplicates.
+
+    Existing same-platform ``platform + content_id`` de-duplication remains
+    in ``interleave_results``. This function only compares different
+    platforms, so an equal ID with unrelated titles is retained.
+    """
+    if len(results) <= 1:
+        return list(results)
+
+    if platform_order is None:
+        platform_order = PLATFORM_SLUGS
+    platform_priority = {platform: index for index, platform in enumerate(platform_order)}
+    parent = list(range(len(results)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    def component_members(root: int) -> List[int]:
+        return [index for index in range(len(results)) if find(index) == root]
+
+    for left_index in range(len(results)):
+        for right_index in range(left_index + 1, len(results)):
+            if not _same_cross_platform_content(results[left_index], results[right_index]):
+                continue
+            left_root = find(left_index)
+            right_root = find(right_index)
+            if left_root == right_root:
+                continue
+            merged = component_members(left_root) + component_members(right_root)
+            # 两条结果保持原有 predicate 语义；三条以上还要共享一个标题核心，
+            # 防止 A~B、B~C 的弱链路把明显不同的 C 传递合并进来。
+            if _has_common_title_anchor(merged, results):
+                union(left_index, right_index)
+
+    groups: Dict[int, List[int]] = {}
+    for index in range(len(results)):
+        groups.setdefault(find(index), []).append(index)
+
+    representatives: List[tuple[int, int]] = []
+    for indexes in groups.values():
+        winner = max(
+            indexes,
+            key=lambda index: (
+                _result_completeness_score(results[index]),
+                -results[index].rank,
+                -platform_priority.get(results[index].platform, 10_000),
+                -index,
+            ),
+        )
+        representatives.append((min(indexes), winner))
+
+    representatives.sort(key=lambda pair: pair[0])
+    return [results[winner] for _, winner in representatives]
+
+
 # ── Interleaved merge ──────────────────────────────────────────────────
 
 def interleave_results(
@@ -262,7 +520,7 @@ def interleave_results(
                     merged.append(item)
                     changed = True
                     break
-    return merged
+    return deduplicate_cross_platform_results(merged, platform_order=platform_order)
 
 
 # ── Time parsing ───────────────────────────────────────────────────────

@@ -380,6 +380,16 @@ class SearchJobManager:
                  for p in job.platforms]
         await asyncio.gather(*tasks, return_exceptions=True)
         job.finalize()
+        # 只有整组搜索成功完成才写入缓存。平台级 succeeded/empty 在
+        # partial job 中不能单独落缓存，避免下次搜索复用不完整结果。
+        if not job.bypass_cache and job._compute_overall() == "completed":
+            for platform in job.platforms:
+                info = job.platforms_state.get(platform)
+                if info and info.status in ("succeeded", "empty"):
+                    result_cache.set(
+                        job.keyword, platform, job.limit_for(platform),
+                        job.platform_results.get(platform, []),
+                    )
 
     async def _run_platform(self, job: "_ActiveJob", platform: str) -> None:
         """单平台执行：命中内存结果缓存则直接回放（不启动 worker）。
@@ -402,11 +412,6 @@ class SearchJobManager:
                     "succeeded" if job.platform_results.get(platform) else "empty")
                 return
         await self._run_worker(job, platform)
-        info = job.platforms_state.get(platform)
-        if (not job.bypass_cache and info is not None
-                and info.status in ("succeeded", "empty")):
-            result_cache.set(job.keyword, platform, limit,
-                             job.platform_results.get(platform, []))
 
     def _build_request_json(self, job: "_ActiveJob", platform: str) -> bytes:
         request = WorkerRequest(

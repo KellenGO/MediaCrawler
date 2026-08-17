@@ -37,15 +37,11 @@ personal homepages / internal user IDs.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional
 
-from aggregate_search.models import UnifiedSearchResult, _parse_timestamp
+from aggregate_search.models import UnifiedSearchResult, _parse_timestamp, clean_snippet, clean_title
 
 from .base import BasePlatformAdapter
-
-_TAG_RE = re.compile(r"<[^>]+>")
-
 
 class BilibiliAdapter(BasePlatformAdapter):
     PLATFORM = "bilibili"
@@ -67,7 +63,7 @@ class BilibiliAdapter(BasePlatformAdapter):
                 continue
 
             # Search-list titles wrap keywords in <em class="keyword">…</em>
-            title = self._strip_html_tags(self._safe_str(view.get("title")))
+            title = clean_title(self._safe_str(view.get("title")))
             if not title:
                 title = "B站视频"
 
@@ -80,6 +76,12 @@ class BilibiliAdapter(BasePlatformAdapter):
             published_at = _parse_timestamp(
                 view.get("pubdate") if view.get("pubdate") else view.get("senddate"))
 
+            # 扁平搜索项与 View 详情均可能带 description/desc；仅使用已拿到的字段。
+            snippet = clean_snippet(
+                view.get("description") or view.get("desc")
+                or view.get("dynamic")
+            )
+
             cover_url = self._extract_cover_url(view)
 
             metrics = self._extract_metrics(view)
@@ -90,6 +92,7 @@ class BilibiliAdapter(BasePlatformAdapter):
                     content_id=content_id,
                     content_type="video",
                     title=title,
+                    snippet=snippet,
                     author=author,
                     url=url,
                     published_at=published_at,
@@ -99,12 +102,6 @@ class BilibiliAdapter(BasePlatformAdapter):
                 )
             )
         return results
-
-    @staticmethod
-    def _strip_html_tags(text: str) -> str:
-        """Remove <em class="keyword">…</em> highlight tags (and any other
-        HTML tags) from search-result titles."""
-        return _TAG_RE.sub("", text).strip()
 
     def _get_author(self, view: Dict) -> Optional[str]:
         # Detail shape: owner: {name, mid}. Flat search shape: author: "名".

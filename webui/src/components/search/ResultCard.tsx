@@ -147,6 +147,11 @@ export function ResultCard({ result }: ResultCardProps) {
           )}
           {result.published_at && <span className="flex-shrink-0">{formatTime(result.published_at)}</span>}
         </div>
+        {result.snippet && (
+          <p className="mt-1 text-[12.5px] leading-[1.55] text-cyber-text-secondary line-clamp-3">
+            {result.snippet}
+          </p>
+        )}
         {metrics.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11.5px] text-cyber-text-muted">
             {metrics.map(({ key, icon: Icon }) => (

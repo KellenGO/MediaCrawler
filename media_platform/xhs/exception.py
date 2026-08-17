@@ -31,3 +31,30 @@ class IPBlockError(RequestError):
 
 class NoteNotFoundError(RequestError):
     """Note does not exist or is abnormal"""
+
+
+class XhsRateLimitError(RequestError):
+    """小红书风控/验证码限制（HTTP 461/471）—— Round 17.2。
+
+    平台对请求发起验证码/访问限制挑战。这是平台明确的"受限"信号，不是
+    网络临时错误：461/471 只允许发起 1 次请求，绝不自动重试（重试会重复
+    触发风控）。
+
+    safe_code 固定为 "rate_limited"；safe_message 为固定中文文案。
+    str/repr 绝不包含：response body、URL、query、Cookie、header、
+    Verifyuuid、Verifytype、xsec_token —— 构造时只接收状态码。
+    """
+
+    def __init__(self, http_status: int):
+        self.safe_code = "rate_limited"
+        self.safe_message = "小红书触发验证码或访问限制，请稍后再试"
+        self.http_status = int(http_status)
+        super().__init__(self.safe_message)
+
+    def __str__(self) -> str:
+        return self.safe_message
+
+    def __repr__(self) -> str:
+        return (f"XhsRateLimitError(http_status={self.http_status}, "
+                f"safe_code={self.safe_code!r}, "
+                f"safe_message={self.safe_message!r})")

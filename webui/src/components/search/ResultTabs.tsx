@@ -6,6 +6,7 @@ import { ResultCard } from "./ResultCard";
 
 interface ResultTabsProps {
   results: UnifiedSearchResult[];
+  keyword?: string;
   overall: string;
   platforms: PlatformSlug[];
   sortMode?: SearchSortMode;
@@ -31,6 +32,7 @@ const SORT_MODES: { key: SearchSortMode; label: string }[] = [
 
 export function ResultTabs({
   results,
+  keyword = "",
   overall,
   sortMode = "default",
   onSortModeChange,
@@ -58,8 +60,8 @@ export function ResultTabs({
   // 先按当前标签筛选，再按所选模式排序（纯前端计算，不发任何请求）。
   const filteredResults = useMemo(() => {
     const scoped = effectiveTab === "all" ? results : results.filter((r) => r.platform === effectiveTab);
-    return sortResults(scoped, sortMode);
-  }, [results, effectiveTab, sortMode]);
+    return sortResults(scoped, sortMode, keyword);
+  }, [results, effectiveTab, sortMode, keyword]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: results.length };

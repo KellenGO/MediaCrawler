@@ -168,7 +168,8 @@ export function useAggregateSearch() {
       keyword: string,
       platforms: PlatformSlug[],
       limitPerPlatform?: number,
-      platformLimits?: Partial<Record<PlatformSlug, number>>
+      platformLimits?: Partial<Record<PlatformSlug, number>>,
+      bypassCache = false
     ): Promise<SearchJobResponse> => {
       generationRef.current += 1; // invalidate in-flight recovery responses
       setJobId(null);
@@ -184,6 +185,7 @@ export function useAggregateSearch() {
         ...(platformLimits && Object.keys(platformLimits).length > 0
           ? { platform_limits: platformLimits }
           : {}),
+        bypass_cache: bypassCache,
       };
       return createMutation.mutateAsync(req);
     },

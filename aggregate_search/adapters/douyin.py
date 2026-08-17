@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from aggregate_search.models import UnifiedSearchResult, _parse_timestamp
+from aggregate_search.models import UnifiedSearchResult, _parse_timestamp, clean_snippet, clean_title
 
 from .base import BasePlatformAdapter
 
@@ -60,9 +60,9 @@ class DouyinAdapter(BasePlatformAdapter):
                 continue
             seen_ids.add(aweme_id)
 
-            title = self._safe_str(item.get("desc") or item.get("title"))
+            title = clean_title(self._safe_str(item.get("desc") or item.get("title")))
             if not title:
-                title = self._safe_str(item.get("preview_title", ""))[:100]
+                title = clean_title(self._safe_str(item.get("preview_title", ""))[:100])
 
             author = self._get_author(item)
 
@@ -73,6 +73,16 @@ class DouyinAdapter(BasePlatformAdapter):
             )
 
             published_at = _parse_timestamp(item.get("create_time"))
+
+            # 抖音通常只有 desc（同时也是搜索标题）；若响应带有更独立的
+            # 描述字段则优先使用。绝不为 snippet 追加详情请求。
+            snippet = clean_snippet(
+                item.get("caption")
+                or item.get("description")
+                or item.get("video_description")
+                or item.get("text")
+                or item.get("desc")
+            )
 
             cover_url = self._extract_cover_url(item)
 
@@ -86,6 +96,7 @@ class DouyinAdapter(BasePlatformAdapter):
                     content_id=aweme_id,
                     content_type=content_type,
                     title=title,
+                    snippet=snippet,
                     author=author,
                     url=url,
                     published_at=published_at,

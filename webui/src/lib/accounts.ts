@@ -80,16 +80,26 @@ export function summarizeAccounts(
   };
 }
 
-/** 平台状态在浮层中的一行文案（"可公开搜索"保留，但不计入登录数量）。 */
+/** 平台状态在浮层中的一行文案（"可公开搜索"保留，但不计入登录数量）。
+ *  Round 17.2: unavailable + login_verification_rate_limited（小红书
+ *  461/471 风控）→ "验证受限"；普通 unavailable 仍为"验证暂不可用"。 */
 export function accountSummaryLabel(
-  acc: Pick<AccountStatusInfo, "status" | "verified" | "profile_exists">
+  acc: Pick<
+    AccountStatusInfo,
+    "status" | "verified" | "profile_exists" | "safe_error_code"
+  >
 ): string {
   if (acc.status === "connected" && acc.verified) return "已连接";
   if (acc.status === "unverified" && acc.profile_exists) return "可公开搜索";
   if (acc.status === "unverified") return "尚未验证";
   if (acc.status === "expired") return "会话失效";
   if (acc.status === "failed") return "同步失败";
-  if (acc.status === "unavailable") return "验证暂不可用";
+  if (acc.status === "unavailable") {
+    if (acc.safe_error_code === "login_verification_rate_limited") {
+      return "验证受限";
+    }
+    return "验证暂不可用";
+  }
   if (acc.status === "syncing") return "同步中…";
   if (acc.status === "verifying") return "验证中…";
   return "未同步";
