@@ -12,6 +12,7 @@ export type PlatformStatus =
   | "cancelled";
 
 export type OverallStatus = "running" | "completed" | "partial" | "failed" | "cancelling" | "cancelled";
+export type HydrationStatus = "not_started" | "running" | "completed";
 
 export interface UnifiedSearchResult {
   platform: PlatformSlug;
@@ -54,6 +55,7 @@ export interface SearchJobResponse {
   total_ms?: number | null;
   platforms: Record<PlatformSlug, PlatformStatusInfo>;
   results: UnifiedSearchResult[];
+  hydration_status?: HydrationStatus;
 }
 
 export interface SearchJobRequest {

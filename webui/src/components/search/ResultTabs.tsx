@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
 import type { SearchSortMode } from "@/lib/searchExperience";
 import { resolveActiveTab, sortResults } from "@/lib/searchExperience";
@@ -8,6 +8,8 @@ interface ResultTabsProps {
   results: UnifiedSearchResult[];
   keyword?: string;
   overall: string;
+  jobId?: string;
+  hydrationStatus?: "not_started" | "running" | "completed";
   platforms: PlatformSlug[];
   sortMode?: SearchSortMode;
   onSortModeChange?: (mode: SearchSortMode) => void;
@@ -34,6 +36,8 @@ export function ResultTabs({
   results,
   keyword = "",
   overall,
+  jobId,
+  hydrationStatus = "not_started",
   sortMode = "default",
   onSortModeChange,
 }: ResultTabsProps) {
@@ -57,11 +61,33 @@ export function ResultTabs({
     }
   }, [activeTab, effectiveTab]);
 
+  const hydrationOrderRef = useRef<{ signature: string; keys: string[] } | null>(null);
+
   // 先按当前标签筛选，再按所选模式排序（纯前端计算，不发任何请求）。
   const filteredResults = useMemo(() => {
     const scoped = effectiveTab === "all" ? results : results.filter((r) => r.platform === effectiveTab);
-    return sortResults(scoped, sortMode, keyword);
-  }, [results, effectiveTab, sortMode, keyword]);
+    const sorted = sortResults(scoped, sortMode, keyword);
+    const resultKey = (r: UnifiedSearchResult) => `${r.platform}|${r.content_id}`;
+    const signature = [
+      jobId ?? "",
+      effectiveTab,
+      sortMode,
+      keyword,
+      scoped.map(resultKey).sort().join(","),
+    ].join("\u0001");
+    if (hydrationStatus === "not_started") {
+      hydrationOrderRef.current = { signature, keys: sorted.map(resultKey) };
+      return sorted;
+    }
+    if (hydrationOrderRef.current?.signature !== signature) {
+      hydrationOrderRef.current = { signature, keys: sorted.map(resultKey) };
+      return sorted;
+    }
+    const byKey = new Map(sorted.map((result) => [resultKey(result), result]));
+    return hydrationOrderRef.current.keys
+      .map((key) => byKey.get(key))
+      .filter((result): result is UnifiedSearchResult => Boolean(result));
+  }, [results, effectiveTab, sortMode, keyword, hydrationStatus, jobId]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: results.length };

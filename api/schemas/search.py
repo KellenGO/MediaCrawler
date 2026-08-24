@@ -22,7 +22,7 @@ Pydantic schemas for the aggregate search API.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -124,3 +124,5 @@ class SearchJobResponse(BaseModel):
     total_ms: Optional[int] = None  # job 级总耗时（毫秒）
     platforms: Dict[str, PlatformStatusInfo] = Field(default_factory=dict)
     results: List[UnifiedSearchResult] = Field(default_factory=list)
+    # Search is terminal before best-effort description hydration finishes.
+    hydration_status: Literal["not_started", "running", "completed"] = "not_started"

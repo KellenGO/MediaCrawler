@@ -148,7 +148,7 @@ export function useAggregateSearch() {
       const data = query.state.data;
       if (!data) return 800;
       const terminal = ["completed", "partial", "failed", "cancelled"];
-      if (terminal.includes(data.overall)) return false;
+      if (terminal.includes(data.overall) && data.hydration_status !== "running") return false;
       return 800;
     },
     staleTime: 500,

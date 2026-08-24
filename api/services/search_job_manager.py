@@ -22,6 +22,7 @@ from aggregate_search.models import (
     UnifiedSearchResult, interleave_results, make_dedup_key,
     is_valid_platform,
 )
+from aggregate_search.hydration import hydration_candidates
 from aggregate_search.protocol import parse_event_line, WorkerRequest
 from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
@@ -29,6 +30,7 @@ from ..schemas.search import (
 )
 from .accounts import mark_login_required_from_search, get_session_snapshot
 from . import result_cache
+from .result_hydration import ResultHydrator
 
 WORKER_TIMEOUT_SECONDS = 100
 GRACE_PERIOD_SECONDS = 5.0
@@ -383,13 +385,43 @@ class SearchJobManager:
         # 只有整组搜索成功完成才写入缓存。平台级 succeeded/empty 在
         # partial job 中不能单独落缓存，避免下次搜索复用不完整结果。
         if not job.bypass_cache and job._compute_overall() == "completed":
-            for platform in job.platforms:
-                info = job.platforms_state.get(platform)
-                if info and info.status in ("succeeded", "empty"):
-                    result_cache.set(
-                        job.keyword, platform, job.limit_for(platform),
-                        job.platform_results.get(platform, []),
-                    )
+            self._cache_job_results(job)
+
+        # Hydration is intentionally detached from the original search task:
+        # overall becomes terminal immediately, while GET /jobs keeps polling
+        # only for the lightweight snippet updates.
+        if hydration_candidates(job.response_results()):
+            job.hydration_status = "running"
+            job.hydration_task = asyncio.create_task(
+                self._run_hydration(job), name=f"hydrate-{job.job_id}")
+
+    def _cache_job_results(self, job: "_ActiveJob") -> None:
+        if job.bypass_cache or job._compute_overall() != "completed":
+            return
+        for platform in job.platforms:
+            info = job.platforms_state.get(platform)
+            if info and info.status in ("succeeded", "empty"):
+                result_cache.set(
+                    job.keyword, platform, job.limit_for(platform),
+                    job.platform_results.get(platform, []),
+                )
+
+    async def _run_hydration(self, job: "_ActiveJob") -> None:
+        hydrator = ResultHydrator()
+        try:
+            updates = await hydrator.hydrate(
+                job.response_results(), job.hydration_cancel_event)
+            if not job.hydration_cancel_event.is_set():
+                for update in updates:
+                    job.update_snippet(update.result, update.snippet)
+                self._cache_job_results(job)
+        except asyncio.CancelledError:
+            job.hydration_cancel_event.set()
+        except Exception as exc:
+            logger.warning("result hydration failed for %s: %s",
+                           job.job_id, type(exc).__name__)
+        finally:
+            job.hydration_status = "completed"
 
     async def _run_platform(self, job: "_ActiveJob", platform: str) -> None:
         """单平台执行：命中内存结果缓存则直接回放（不启动 worker）。
@@ -772,6 +804,15 @@ class SearchJobManager:
         job = self._active_job
         if job is None or job.job_id != job_id:
             return False
+        if job.hydration_task is not None and not job.hydration_task.done():
+            job.hydration_cancel_event.set()
+            job.hydration_task.cancel()
+            try:
+                await asyncio.wait_for(job.hydration_task, timeout=GRACE_PERIOD_SECONDS)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                pass
+            job.hydration_status = "completed"
+            return True
         if job.is_terminal():
             # 已取消的 job 重复取消 → 幂等成功；正常终态 → 无可取消。
             return job._cancelled
@@ -875,12 +916,24 @@ class SearchJobManager:
                     job.set_platform_status(p, "cancelled", error_summary="服务已停止")
             await self._cleanup_job_processes(job)
             await self._stop_job_task(job)
+            await self._stop_hydration_task(job)
             job._cancelled = True
             job.finalize()
             job.cancel_done.set()
         await self.supervisor.stop_all()
         # Round 16：shutdown 清空内存结果缓存。
         result_cache.clear()
+
+    async def _stop_hydration_task(self, job: "_ActiveJob") -> None:
+        task = job.hydration_task
+        if task is None or task.done():
+            return
+        job.hydration_cancel_event.set()
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=GRACE_PERIOD_SECONDS)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            pass
 
 
 # ── Active Job ──────────────────────────────────────────────────────────
@@ -928,6 +981,10 @@ class _ActiveJob:
         # cancel_done: 清理完成信号（重复取消等待它即可，幂等）。
         self.cancel_lock = asyncio.Lock()
         self.cancel_done = asyncio.Event()
+        self.hydration_status = "not_started"
+        self.hydration_task: Optional[asyncio.Task] = None
+        self.hydration_cancel_event = asyncio.Event()
+        self._final_results: Optional[List[UnifiedSearchResult]] = None
 
     def _ms_since(self, start_ts: float) -> int:
         return int((time.perf_counter() - start_ts) * 1000)
@@ -1028,6 +1085,17 @@ class _ActiveJob:
                 info.status = "succeeded" if results else "empty"
                 info.result_count = len(results)
                 self.mark_platform_total(p)
+        self._final_results = interleave_results(
+            self.platform_results, platform_order=self.platforms)
+
+    def response_results(self) -> List[UnifiedSearchResult]:
+        if self._final_results is not None:
+            return self._final_results
+        return interleave_results(self.platform_results, platform_order=self.platforms)
+
+    def update_snippet(self, result: UnifiedSearchResult, snippet: str) -> None:
+        """Update text in place without rebuilding/deduplicating the order."""
+        result.snippet = snippet
 
     def _compute_overall(self) -> str:
         if self._cancelled:
@@ -1048,8 +1116,7 @@ class _ActiveJob:
         return "failed"
 
     def to_response(self) -> SearchJobResponse:
-        all_results = interleave_results(
-            self.platform_results, platform_order=self.platforms)
+        all_results = self.response_results()
         pdict: Dict[str, PlatformStatusInfo] = {}
         for p in self.platforms:
             info = self.platforms_state.get(p)
@@ -1071,7 +1138,8 @@ class _ActiveJob:
             job_id=self.job_id, overall=overall,
             keyword=self.keyword, created_at=self.created_at,
             completed_at=self.completed_at, total_ms=job_total,
-            platforms=pdict, results=all_results)
+            platforms=pdict, results=all_results,
+            hydration_status=self.hydration_status)
 
 
 class JobConflictError(Exception):

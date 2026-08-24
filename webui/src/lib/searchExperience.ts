@@ -1002,8 +1002,21 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
       if (d.awaitingJobAcceptance) return state;
       if (d.activeJobId === null) return state;
       if (job.job_id !== d.activeJobId) return state;
-      // 已应用过的 job_id 不重复提交：原引用返回。
-      if (d.appliedJobIds.has(job.job_id)) return state;
+      // 终态提交后，后台 hydration 仍会重复返回同一个 job_id；只替换
+      // 结果文本/状态，不重复写历史或改变任务身份。
+      if (d.appliedJobIds.has(job.job_id)) {
+        if (d.jobResponse && (job.hydration_status === "running" ||
+            job.hydration_status === "completed")) {
+          return {
+            ...state,
+            display: {
+              ...d,
+              jobResponse: job,
+            },
+          };
+        }
+        return state;
+      }
       if (!TERMINAL_OVERALLS.has(job.overall)) return state;
 
       if (job.overall === "cancelled") {

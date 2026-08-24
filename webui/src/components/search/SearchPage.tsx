@@ -320,6 +320,8 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             results={displayJobResponse.results}
             keyword={displayJobResponse.keyword}
             overall={displayJobResponse.overall}
+            jobId={displayJobResponse.job_id}
+            hydrationStatus={displayJobResponse.hydration_status}
             platforms={Object.keys(displayJobResponse.platforms) as PlatformSlug[]}
             sortMode={sortMode}
             onSortModeChange={setSortMode}
