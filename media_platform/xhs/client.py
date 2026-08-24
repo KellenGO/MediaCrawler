@@ -19,6 +19,7 @@
 
 import asyncio
 import json
+import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from urllib.parse import quote
 
@@ -42,6 +43,19 @@ from .field import SearchNoteType, SearchSortType
 from .help import get_search_id
 from .extractor import XiaoHongShuExtractor
 from .playwright_sign import sign_with_xhshow
+
+
+def _safe_debug_message(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value:
+        return None
+    message = re.sub(r"https?://[^\s]+", "[URL]", value)
+    message = re.sub(
+        r"(?i)(xsec[_-]?token|cookie|authorization|access[_-]?token|refresh[_-]?token)"
+        r"\s*[:=]\s*[^\s,;}]+'?",
+        r"\1=[REDACTED]",
+        message,
+    )
+    return message[:120]
 
 
 class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
@@ -77,6 +91,11 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
+        # Diagnostic-only response metadata for aggregate hydration. Never
+        # store response bodies, URLs, cookies, or tokens here.
+        self.last_response_status: Optional[int] = None
+        self.last_business_code: Any = None
+        self.last_business_msg: Optional[str] = None
         self._extractor = XiaoHongShuExtractor()
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
@@ -175,6 +194,11 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             async with make_async_client(proxy=self.proxy) as client:
                 response = await client.request(method, url, timeout=self.timeout, **kwargs)
 
+        # Keep only safe response metadata for the hydration diagnostic log.
+        self.last_response_status = response.status_code
+        self.last_business_code = None
+        self.last_business_msg = None
+
         if response.status_code == 471 or response.status_code == 461:
             # Round 17.2: 平台风控/验证码挑战 —— 立即抛专用异常，不读取
             # Verifyuuid/Verifytype，不记录 response 对象或 body，日志只写
@@ -187,6 +211,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         if return_response:
             return response.text
         data: Dict = response.json()
+        self.last_business_code = data.get("code")
+        msg = data.get("msg")
+        self.last_business_msg = _safe_debug_message(msg)
         if data["success"]:
             return data.get("data", data.get("success", {}))
         elif data["code"] == self.IP_ERROR_CODE:

@@ -91,6 +91,19 @@ def test_adapter_result_url_domain_always_official():
     assert host in XHS_ALLOWED_HOSTS
 
 
+def test_existing_official_note_url_keeps_search_context_for_hydration():
+    adapter = XhsAdapter()
+    results = adapter.adapt([{
+        "id": "n1",
+        "note_url": "https://www.xiaohongshu.com/explore/n1",
+        "xsec_token": "tok",
+        "xsec_source": "pc_search",
+        "note_card": {"display_title": "标题"},
+    }])
+    assert "xsec_token=tok" in results[0].url
+    assert "xsec_source=pc_search" in results[0].url
+
+
 # ── get_note_detail_async_task RetryError fallback (production) ─────────
 
 class _FakeClient:

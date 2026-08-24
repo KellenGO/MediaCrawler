@@ -9,6 +9,7 @@ from aggregate_search.hydration import (
     needs_hydration,
 )
 from aggregate_search.models import UnifiedSearchResult
+from api.services.result_hydration import ResultHydrator, extract_xhs_snippet
 
 
 def result(title="Claude Code 教程", snippet=None, index=0):
@@ -28,6 +29,74 @@ def test_normal_snippet_is_not_hydrated():
     assert not needs_hydration(result(
         snippet="从安装、配置到实际项目使用，整理了完整操作流程和常见问题。"
     ))
+
+
+def test_xhs_detail_snippet_supports_unwrapped_and_nested_shapes():
+    assert extract_xhs_snippet({"desc": "直接描述"}) == "直接描述"
+    assert extract_xhs_snippet({"note_card": {"desc": "卡片描述"}}) == "卡片描述"
+    assert extract_xhs_snippet({
+        "data": {"items": [{"note_card": {"desc": "嵌套描述"}}]}
+    }) == "嵌套描述"
+    assert extract_xhs_snippet({"desc": "   <br>  "}) is None
+
+
+class _FakeXhsDetailClient:
+    def __init__(self, detail=None, error=None):
+        self.detail = detail
+        self.error = error
+        self.calls = []
+
+    async def get_note_by_id(self, note_id, xsec_source, xsec_token):
+        self.calls.append((note_id, xsec_source, xsec_token))
+        if self.error:
+            raise self.error
+        return self.detail
+
+
+class _TestXhsHydrator(ResultHydrator):
+    def __init__(self, client):
+        super().__init__()
+        self.client = client
+
+    async def _get_xhs(self, snapshot):
+        return self.client
+
+
+@pytest.mark.asyncio
+async def test_xhs_hydration_passes_existing_token_and_updates_snippet(monkeypatch):
+    client = _FakeXhsDetailClient({"note_card": {"desc": "详情正文简介"}})
+    monkeypatch.setattr(
+        "api.services.result_hydration.get_session_snapshot", lambda _: None)
+    item = UnifiedSearchResult(
+        platform="xhs", content_id="n1", title="标题", snippet=None,
+        url="https://www.xiaohongshu.com/explore/n1?xsec_token=tok&xsec_source=pc_search",
+    )
+    hydrator = _TestXhsHydrator(client)
+    updates = await hydrate_results([item], hydrator.fetch_snippet)
+    assert item.snippet == "详情正文简介"
+    assert len(updates) == 1
+    assert client.calls == [("n1", "pc_search", "tok")]
+
+
+@pytest.mark.asyncio
+async def test_xhs_hydration_missing_token_or_empty_desc_is_safe(monkeypatch):
+    client = _FakeXhsDetailClient({"desc": ""})
+    monkeypatch.setattr(
+        "api.services.result_hydration.get_session_snapshot", lambda _: {})
+    no_token = UnifiedSearchResult(
+        platform="xhs", content_id="n1", title="标题", snippet=None,
+        url="https://www.xiaohongshu.com/explore/n1",
+    )
+    empty_desc = UnifiedSearchResult(
+        platform="xhs", content_id="n2", title="标题", snippet=None,
+        url="https://www.xiaohongshu.com/explore/n2?xsec_token=tok",
+    )
+    hydrator = _TestXhsHydrator(client)
+    updates = await hydrate_results([no_token, empty_desc], hydrator.fetch_snippet)
+    assert updates == []
+    assert client.calls == [("n2", "pc_search", "tok")]
+    assert no_token.snippet is None
+    assert empty_desc.snippet is None
 
 
 @pytest.mark.asyncio

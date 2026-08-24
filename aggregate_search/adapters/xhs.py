@@ -37,7 +37,7 @@ and similar methods. Typical fields:
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aggregate_search.models import UnifiedSearchResult, _parse_timestamp, clean_snippet, clean_title
 
@@ -82,6 +82,17 @@ def build_note_url(
     never in logs, error_summary, or separate API fields.
     """
     if note_url and isinstance(note_url, str) and _is_allowed_xhs_host(note_url):
+        # Search responses may provide an official note_url alongside the
+        # opaque search token. Keep that context on the navigation URL so a
+        # later best-effort hydration can call the existing detail API.
+        if xsec_token and isinstance(xsec_token, str):
+            parts = urlsplit(note_url)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            if not query.get("xsec_token"):
+                query["xsec_token"] = xsec_token
+            if not query.get("xsec_source"):
+                query["xsec_source"] = xsec_source or "pc_search"
+            return urlunsplit(parts._replace(query=urlencode(query)))
         return note_url
 
     base = XHS_EXPLORE_URL.format(note_id=note_id)

@@ -8,12 +8,83 @@ starts a browser and it is independent from the resident search workers.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from typing import Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from aggregate_search.hydration import hydrate_results
 from aggregate_search.models import UnifiedSearchResult, clean_snippet
 from .accounts import get_session_snapshot
+
+logger = logging.getLogger(__name__)
+
+
+def _bool_text(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _safe_source(value: str) -> str:
+    source = value if isinstance(value, str) else ""
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", source):
+        return source
+    return "[redacted]"
+
+
+def _safe_exception_message(exc: BaseException) -> str:
+    """Keep useful exception context while removing URL/body credentials."""
+    message = str(exc)
+    message = re.sub(r"https?://[^\s]+", "[URL]", message)
+    message = re.sub(
+        r"(?i)(xsec[_-]?token|cookie|authorization|access[_-]?token|refresh[_-]?token)"
+        r"\s*[:=]\s*[^\s,;}]+'?",
+        r"\1=[REDACTED]",
+        message,
+    )
+    return message[:160] or "[empty]"
+
+
+def _safe_business_msg(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "[none]"
+    return _safe_exception_message(Exception(value))
+
+
+def extract_xhs_snippet(detail: object) -> Optional[str]:
+    """Extract description from the known XHS detail response shapes.
+
+    ``get_note_by_id`` normally unwraps ``data.items[0].note_card`` to the
+    note-card dict, while fixtures and compatible clients may return one of
+    those outer shapes directly. Values are cleaned only after a candidate
+    field is found.
+    """
+    if not isinstance(detail, dict):
+        return None
+    candidates = [detail.get("desc"), detail.get("description")]
+    note_card = detail.get("note_card")
+    if isinstance(note_card, dict):
+        candidates.extend([note_card.get("desc"), note_card.get("description")])
+    note = detail.get("note")
+    if isinstance(note, dict):
+        candidates.extend([note.get("desc"), note.get("description")])
+    data = detail.get("data")
+    if isinstance(data, dict):
+        candidates.extend([data.get("desc"), data.get("description")])
+        items = data.get("items")
+        if isinstance(items, list) and items:
+            first = items[0]
+            if isinstance(first, dict):
+                nested_card = first.get("note_card")
+                if isinstance(nested_card, dict):
+                    candidates.extend([
+                        nested_card.get("desc"),
+                        nested_card.get("description"),
+                    ])
+    for candidate in candidates:
+        snippet = clean_snippet(candidate)
+        if snippet:
+            return snippet
+    return None
 
 
 class ResultHydrator:
@@ -70,14 +141,83 @@ class ResultHydrator:
         query = parse_qs(urlsplit(result.url).query)
         token = (query.get("xsec_token") or [""])[0]
         source = (query.get("xsec_source") or ["pc_search"])[0]
-        snapshot = get_session_snapshot("xhs")
-        if not token or not snapshot:
+        raw_snapshot = get_session_snapshot("xhs")
+        has_snapshot = raw_snapshot is not None
+        cookie_present = bool(raw_snapshot)
+        source_value = _safe_source(source)
+        diagnostic_prefix = (
+            "[XHS hydration] note_id=%s has_xsec_token=%s xsec_source=%s "
+            "has_session_snapshot=%s snapshot_cookie_present=%s"
+        )
+        if not token:
+            logger.debug(
+                diagnostic_prefix + " client_created=false request_started=false "
+                "request_status=skipped exception_type=missing_xsec_token",
+                result.content_id, _bool_text(False), source_value,
+                _bool_text(has_snapshot), _bool_text(cookie_present),
+            )
             return None
-        client = await self._get_xhs(snapshot)
-        detail = await client.get_note_by_id(result.content_id, source, token)
-        if not isinstance(detail, dict):
-            return None
-        return clean_snippet(detail.get("desc") or detail.get("description"))
+        # A browser search can succeed without an account snapshot in the API
+        # process. The existing HTTP client can still make the token-scoped
+        # request with an empty cookie set; let the request decide and log a
+        # safe failure instead of silently skipping it here.
+        snapshot = raw_snapshot or {}
+        try:
+            client = await self._get_xhs(snapshot)
+        except Exception as exc:
+            logger.debug(
+                diagnostic_prefix + " client_created=false request_started=false "
+                "request_status=client_create_exception exception_type=%s "
+                "exception_message=%s",
+                result.content_id, _bool_text(True), source_value,
+                _bool_text(has_snapshot), _bool_text(cookie_present),
+                type(exc).__name__, _safe_exception_message(exc),
+            )
+            raise
+        logger.debug(
+            diagnostic_prefix + " client_created=%s request_started=false",
+            result.content_id, _bool_text(True), source_value,
+            _bool_text(has_snapshot), _bool_text(cookie_present),
+            _bool_text(client is not None),
+        )
+        try:
+            logger.debug(
+                diagnostic_prefix + " client_created=true request_started=true",
+                result.content_id, _bool_text(True), source_value,
+                _bool_text(has_snapshot), _bool_text(cookie_present),
+            )
+            detail = await client.get_note_by_id(result.content_id, source, token)
+        except Exception as exc:
+            logger.debug(
+                diagnostic_prefix + " client_created=true request_started=true "
+                "request_status=exception exception_type=%s exception_message=%s "
+                "http_status=%s business_code=%s business_msg=%s",
+                result.content_id, _bool_text(True), source_value,
+                _bool_text(has_snapshot), _bool_text(cookie_present),
+                type(exc).__name__, _safe_exception_message(exc),
+                getattr(client, "last_response_status", None),
+                getattr(client, "last_business_code", None),
+                _safe_business_msg(getattr(client, "last_business_msg", None)),
+            )
+            raise
+        if isinstance(detail, dict):
+            response_keys = sorted(str(key) for key in detail.keys())[:20]
+        else:
+            response_keys = [f"<payload:{type(detail).__name__}>"]
+        snippet = extract_xhs_snippet(detail)
+        logger.debug(
+            diagnostic_prefix + " client_created=true request_started=true "
+            "request_status=success http_status=%s business_code=%s "
+            "business_msg=%s response_top_level_keys=%s "
+            "extracted_snippet_length=%s",
+            result.content_id, _bool_text(True), source_value,
+            _bool_text(has_snapshot), _bool_text(cookie_present),
+            getattr(client, "last_response_status", None),
+            getattr(client, "last_business_code", None),
+            _safe_business_msg(getattr(client, "last_business_msg", None)),
+            response_keys, len(snippet or ""),
+        )
+        return snippet
 
     async def _fetch_zhihu(self, result: UnifiedSearchResult) -> Optional[str]:
         snapshot = get_session_snapshot("zhihu")
