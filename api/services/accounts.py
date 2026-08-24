@@ -501,6 +501,86 @@ def get_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
     return dict(snap) if snap else None
 
 
+async def ensure_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
+    """Restore an in-memory snapshot from an existing browser profile.
+
+    This is intentionally a best-effort session bridge, not account
+    verification.  In particular, XHS may be searchable through the browser
+    fallback even when an imported Cookie cannot pass the API client's pong:
+    opening the official page can initialize browser-managed cookies such as
+    ``a1``.  Only the browser profile persists; the captured snapshot remains
+    in API memory and is never returned through a worker or API response.
+
+    The shared profile lock makes concurrent hydration candidates re-check
+    the snapshot after the first restore, so one job opens the profile at most
+    once.  A missing profile or missing ``a1`` is a normal best-effort miss.
+    """
+    if platform != "xhs":
+        return get_session_snapshot(platform)
+
+    current = get_session_snapshot(platform)
+    if current is not None:
+        return current
+
+    if not profile_dir_for(platform).is_dir():
+        return None
+
+    async with _profile_lock(platform):
+        # Another hydration task may have restored it while this task waited.
+        current = get_session_snapshot(platform)
+        if current is not None:
+            return current
+
+        playwright = context = None
+        try:
+            playwright, context, _ = await _launch_profile_context(platform)
+            cookies = await context.cookies(PLATFORM_COOKIE_URLS[platform])
+            cookie_dict = _capture_cookie_dict(cookies)
+
+            # A browser-created a1 may not exist until the official page has
+            # initialized.  Do this at most once per restore attempt; never
+            # invent a value and never call account pong here.
+            if not cookie_dict.get("a1"):
+                stealth_path = _PROJECT_ROOT / "libs" / "stealth.min.js"
+                add_init_script = getattr(context, "add_init_script", None)
+                if add_init_script is not None and stealth_path.is_file():
+                    await add_init_script(path=str(stealth_path))
+                page = await context.new_page()
+                try:
+                    await page.goto(
+                        PLATFORM_HOME_URLS[platform],
+                        wait_until="domcontentloaded",
+                        timeout=15_000,
+                    )
+                    await page.wait_for_timeout(1_000)
+                finally:
+                    await page.close()
+                cookies = await context.cookies(PLATFORM_COOKIE_URLS[platform])
+                cookie_dict = _capture_cookie_dict(cookies)
+
+            if not cookie_dict.get("a1"):
+                return None
+
+            await set_session_snapshot(platform, cookie_dict)
+            return dict(cookie_dict)
+        except Exception:
+            # Hydration is best effort.  Do not turn profile/browser failures
+            # into a search failure, and do not log the exception because it
+            # may contain browser or request details.
+            return None
+        finally:
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            if playwright is not None:
+                try:
+                    await playwright.stop()
+                except Exception:
+                    pass
+
+
 def mark_login_required_from_search(platform: str) -> None:
     """Search worker reported ``login_required`` for this platform — downgrade
     the in-memory account state WITHOUT launching a browser, touching the

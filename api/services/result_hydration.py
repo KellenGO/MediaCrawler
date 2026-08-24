@@ -9,15 +9,48 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from typing import Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from aggregate_search.hydration import hydrate_results
 from aggregate_search.models import UnifiedSearchResult, clean_snippet
-from .accounts import get_session_snapshot
+from .accounts import ensure_session_snapshot, get_session_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_hydration_debug_logging() -> None:
+    """Install an opt-in handler because uvicorn may filter module loggers.
+
+    The handler is intentionally scoped to this diagnostic module and writes
+    only the already-sanitized messages emitted below. Normal startup keeps
+    the existing logging configuration unchanged.
+    """
+    if os.environ.get("MC_HYDRATION_DEBUG") != "1":
+        return
+
+    logger.setLevel(logging.DEBUG)
+    for handler in logger.handlers:
+        if getattr(handler, "_mc_hydration_debug", False):
+            return
+
+    handler = logging.StreamHandler()
+    handler._mc_hydration_debug = True  # type: ignore[attr-defined]
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(handler)
+    # Prevent uvicorn/root logger filtering or duplicate propagation from
+    # hiding the diagnostic line or printing it twice.
+    logger.propagate = False
+    logger.debug("[XHS hydration] diagnostic logger enabled")
+
+
+_configure_hydration_debug_logging()
 
 
 def _bool_text(value: bool) -> str:
@@ -157,11 +190,22 @@ class ResultHydrator:
                 _bool_text(has_snapshot), _bool_text(cookie_present),
             )
             return None
-        # A browser search can succeed without an account snapshot in the API
-        # process. The existing HTTP client can still make the token-scoped
-        # request with an empty cookie set; let the request decide and log a
-        # safe failure instead of silently skipping it here.
-        snapshot = raw_snapshot or {}
+        # Browser search can succeed without an API snapshot.  Recover the
+        # existing persistent profile once before constructing the HTTP client;
+        # an empty snapshot cannot satisfy XHS signing because it lacks a1.
+        snapshot = raw_snapshot
+        if snapshot is None:
+            snapshot = await ensure_session_snapshot("xhs")
+        has_snapshot = snapshot is not None
+        cookie_present = bool(snapshot)
+        if snapshot is None:
+            logger.debug(
+                diagnostic_prefix + " client_created=false request_started=false "
+                "request_status=snapshot_restore_failed exception_type=none",
+                result.content_id, _bool_text(False), source_value,
+                _bool_text(False), _bool_text(False),
+            )
+            return None
         try:
             client = await self._get_xhs(snapshot)
         except Exception as exc:

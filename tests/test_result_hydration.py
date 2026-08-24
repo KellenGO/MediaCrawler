@@ -67,6 +67,10 @@ async def test_xhs_hydration_passes_existing_token_and_updates_snippet(monkeypat
     client = _FakeXhsDetailClient({"note_card": {"desc": "详情正文简介"}})
     monkeypatch.setattr(
         "api.services.result_hydration.get_session_snapshot", lambda _: None)
+    monkeypatch.setattr(
+        "api.services.result_hydration.ensure_session_snapshot",
+        lambda _: asyncio.sleep(0, result={"a1": "restored"}),
+    )
     item = UnifiedSearchResult(
         platform="xhs", content_id="n1", title="标题", snippet=None,
         url="https://www.xiaohongshu.com/explore/n1?xsec_token=tok&xsec_source=pc_search",
