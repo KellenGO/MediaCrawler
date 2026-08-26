@@ -22,6 +22,7 @@ Pydantic schemas for the aggregate search API.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -113,6 +114,25 @@ class PlatformStatusInfo(BaseModel):
     result_count: int = 0
     error_summary: Optional[str] = None
     timings: Optional[PlatformTimingInfo] = None
+
+
+class PlatformDiagnostic(BaseModel):
+    """Small, safe capability summary for the account settings page."""
+
+    platform: PlatformSlug
+    search_available: bool
+    search_mode: Optional[Literal[
+        "fast_path", "browser_fallback", "api", "page", "unavailable"
+    ]] = None
+    account_state: str
+    # User-visible snippet capability is separate from detail hydration.
+    snippet_available: Optional[bool] = None
+    hydration_available: Optional[bool] = None
+    fallback_active: bool = False
+    limitation_code: Optional[str] = None
+    user_message: Optional[str] = None
+    recommended_action: Optional[str] = None
+    checked_at: Optional[datetime] = None
 
 
 class SearchJobResponse(BaseModel):

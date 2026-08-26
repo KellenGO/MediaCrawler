@@ -7,7 +7,15 @@ import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { PlatformSlug } from "@/types/search";
 import { invalidateAccounts, useAccounts } from "@/hooks/useAccounts";
 import { usePlatformLimits } from "@/hooks/usePlatformLimits";
-import { accountTone, type AccountTone } from "@/lib/accounts";
+import {
+  accountTone,
+  diagnosticAccountStateLabel,
+  diagnosticSearchModeLabel,
+  diagnosticTone,
+  diagnosticToneLabel,
+  type AccountTone,
+  type DiagnosticTone,
+} from "@/lib/accounts";
 import { MAX_PLATFORM_LIMIT, MIN_PLATFORM_LIMIT, PLATFORM_ORDER, parsePlatformLimitInput } from "@/lib/platformLimits";
 import {
   buildBulkBlockedMessage,
@@ -139,6 +147,33 @@ const TONE_BADGE: Record<AccountTone, string> = {
   bad: "bg-danger-soft text-danger border-danger/40",
   idle: "bg-cyber-bg-tertiary text-cyber-text-muted border-cyber-border-subtle",
 };
+
+const DOCTOR_TONE_BADGE: Record<DiagnosticTone, string> = {
+  normal: "bg-ok-soft text-[#3d7d60] border-ok/40",
+  available: "bg-brand-soft text-brand-strong border-brand/40",
+  limited: "bg-warn-soft text-warn border-warn/40",
+  unavailable: "bg-danger-soft text-danger border-danger/40",
+};
+
+function DoctorCapabilityChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "ok" | "limited" | "muted";
+}) {
+  const styles = tone === "ok"
+    ? "bg-ok-soft border-ok/30 text-[#3d7d60]"
+    : tone === "limited"
+      ? "bg-warn-soft border-warn/30 text-warn"
+      : "bg-cyber-bg-tertiary border-cyber-border-subtle text-cyber-text-muted";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-medium ${styles}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${tone === "ok" ? "bg-ok" : tone === "limited" ? "bg-warn" : "bg-cyber-text-muted"}`} />
+      {label}
+    </span>
+  );
+}
 
 /**
  * 单个平台的搜索数量设置行（Round 15）：
@@ -714,7 +749,14 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
           const name = PLATFORM_LABELS[acc.platform as keyof typeof PLATFORM_LABELS] || acc.platform;
           const color = PLATFORM_COLORS[acc.platform as keyof typeof PLATFORM_COLORS] || "#4ca4dc";
           const tone = accountTone(acc);
-          const hasDiag = !!lastDiag[acc.platform];
+          const diagnostic = acc.diagnostic;
+          const doctorTone = diagnostic ? diagnosticTone(diagnostic) : null;
+          const hasDiag = !!diagnostic || !!lastDiag[acc.platform];
+          const snippetLabel = diagnostic?.snippet_available === true
+            ? "简介可用"
+            : diagnostic?.snippet_available === false
+              ? "简介暂不可用"
+              : "简介状态未知";
           return (
             <div key={acc.platform} className="rounded-[16px] border border-cyber-border-subtle bg-cyber-bg-secondary p-4 sm:p-5">
               {/* 头部：平台标记 + 名称 + 状态徽章 + busy */}
@@ -736,14 +778,21 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
                     </div>
                   </div>
                 </div>
-                {busyLabel && (
-                  <span className="flex items-center gap-1.5 text-xs text-brand-strong">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    {busyLabel === "syncing" && "同步中…"}
-                    {busyLabel === "verifying" && "验证中…"}
-                    {busyLabel === "deleting" && "清除中…"}
-                  </span>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {doctorTone && (
+                    <span className={`px-2 py-0.5 rounded-full text-[10.5px] border ${DOCTOR_TONE_BADGE[doctorTone]}`}>
+                      {diagnosticToneLabel(doctorTone)}
+                    </span>
+                  )}
+                  {busyLabel && (
+                    <span className="flex items-center gap-1.5 text-xs text-brand-strong">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      {busyLabel === "syncing" && "同步中…"}
+                      {busyLabel === "verifying" && "验证中…"}
+                      {busyLabel === "deleting" && "清除中…"}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* 概要信息 */}
@@ -753,6 +802,22 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
                 <div>昵称：{acc.display_name || "—"}</div>
                 <div>上次验证：{acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString("zh-CN") : "—"}</div>
               </div>
+
+              {diagnostic && (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-brand-soft/35 px-2.5 py-2">
+                  <DoctorCapabilityChip
+                    label={diagnostic.search_available ? "搜索可用" : "搜索不可用"}
+                    tone={diagnostic.search_available ? "ok" : "limited"}
+                  />
+                  <DoctorCapabilityChip
+                    label={snippetLabel}
+                    tone={diagnostic.snippet_available === false ? "limited" : "ok"}
+                  />
+                  {diagnostic.fallback_active && (
+                    <DoctorCapabilityChip label="Browser fallback" tone="ok" />
+                  )}
+                </div>
+              )}
 
               {acc.safe_message && (
                 <div className="mb-3 px-3.5 py-2 rounded-lg bg-warn-soft border border-warn/30 text-xs text-warn">
@@ -769,33 +834,48 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
                     className="flex items-center gap-1 text-[11.5px] text-cyber-text-muted hover:text-brand-strong transition-colors"
                   >
                     {openDiag[acc.platform] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                    {openDiag[acc.platform] ? "收起诊断" : "查看诊断"}
+                    {openDiag[acc.platform] ? "收起平台诊断" : "平台诊断"}
                   </button>
                   {openDiag[acc.platform] && (
                     <div className="mt-2 px-3.5 py-2.5 rounded-lg bg-cyber-bg-tertiary border border-cyber-border-subtle text-[11px] text-cyber-text-secondary">
-                      <div className="text-cyber-text-primary mb-1 font-semibold">最近一次同步诊断</div>
-                      <div>
-                        阶段：{SYNC_STAGE_TEXT[lastDiag[acc.platform].sync_stage] || lastDiag[acc.platform].sync_stage || "—"}
-                        {" · "}读取 {lastDiag[acc.platform].received_cookie_count ?? "—"} 条
-                        {" / 接受 "}{lastDiag[acc.platform].accepted_cookie_count ?? "—"} 条
-                        {" / 跳过 "}{lastDiag[acc.platform].skipped_cookie_count ?? "—"} 条
-                      </div>
-                      <div>
-                        登录标记：
-                        {(LOGIN_MARKERS[acc.platform] || []).map((m) => {
-                          const v = lastDiag[acc.platform].login_marker_presence?.[m];
-                          return v === undefined ? null : `${m} ${v ? "✓" : "✗"}`;
-                        }).filter(Boolean).join(" · ") || "—"}
-                      </div>
-                      <div>
-                        标记判定（启发式，非登录结论）：{lastDiag[acc.platform].required_cookie_present === null
-                          ? "—" : lastDiag[acc.platform].required_cookie_present ? "有" : "无"}
-                        {" · 已验证（真实验证）："}{lastDiag[acc.platform].verified ? "是" : "否"}
-                      </div>
-                      {lastDiag[acc.platform].safe_error_code && (
-                        <div>
-                          错误码：{lastDiag[acc.platform].safe_error_code}
-                          {lastDiag[acc.platform].safe_message && ` · ${lastDiag[acc.platform].safe_message}`}
+                      {diagnostic && (
+                        <>
+                          <div className="text-cyber-text-primary mb-1 font-semibold">平台诊断</div>
+                          <div>当前路径：{diagnosticSearchModeLabel(diagnostic.search_mode)}</div>
+                          <div>账号状态：{diagnosticAccountStateLabel(diagnostic.account_state)}</div>
+                          <div>备用路径：{diagnostic.fallback_active ? "正在使用" : "未启用"}</div>
+                          <div>简介能力：{snippetLabel}</div>
+                          <div>最近问题：{diagnostic.user_message || "无致命错误"}</div>
+                          <div>建议：{diagnostic.recommended_action || "当前无需处理"}</div>
+                        </>
+                      )}
+                      {lastDiag[acc.platform] && (
+                        <div className={`${diagnostic ? "mt-2 pt-2 border-t border-cyber-border-subtle" : ""}`}>
+                          <div className="text-cyber-text-primary mb-1 font-semibold">最近一次同步细节</div>
+                          <div>
+                            阶段：{SYNC_STAGE_TEXT[lastDiag[acc.platform].sync_stage] || lastDiag[acc.platform].sync_stage || "—"}
+                            {" · "}读取 {lastDiag[acc.platform].received_cookie_count ?? "—"} 条
+                            {" / 接受 "}{lastDiag[acc.platform].accepted_cookie_count ?? "—"} 条
+                            {" / 跳过 "}{lastDiag[acc.platform].skipped_cookie_count ?? "—"} 条
+                          </div>
+                          <div>
+                            登录标记：
+                            {(LOGIN_MARKERS[acc.platform] || []).map((m) => {
+                              const v = lastDiag[acc.platform].login_marker_presence?.[m];
+                              return v === undefined ? null : `${m} ${v ? "✓" : "✗"}`;
+                            }).filter(Boolean).join(" · ") || "—"}
+                          </div>
+                          <div>
+                            标记判定（启发式，非登录结论）：{lastDiag[acc.platform].required_cookie_present === null
+                              ? "—" : lastDiag[acc.platform].required_cookie_present ? "有" : "无"}
+                            {" · 已验证（真实验证）："}{lastDiag[acc.platform].verified ? "是" : "否"}
+                          </div>
+                          {lastDiag[acc.platform].safe_error_code && (
+                            <div>
+                              错误码：{lastDiag[acc.platform].safe_error_code}
+                              {lastDiag[acc.platform].safe_message && ` · ${lastDiag[acc.platform].safe_message}`}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

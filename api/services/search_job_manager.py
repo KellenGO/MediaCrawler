@@ -28,7 +28,11 @@ from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
     PlatformTimingInfo,
 )
-from .accounts import mark_login_required_from_search, get_session_snapshot
+from .accounts import (
+    get_session_snapshot,
+    mark_login_required_from_search,
+    record_search_outcome,
+)
 from . import result_cache
 from .result_hydration import ResultHydrator
 
@@ -1085,6 +1089,10 @@ class _ActiveJob:
                 info.status = "succeeded" if results else "empty"
                 info.result_count = len(results)
                 self.mark_platform_total(p)
+            if info:
+                # Platform Doctor consumes safe local metadata only; this does
+                # not alter the search result or worker decision path.
+                record_search_outcome(p, info.status, self.timings.get(p))
         self._final_results = interleave_results(
             self.platform_results, platform_order=self.platforms)
 

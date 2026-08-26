@@ -18,6 +18,10 @@ import {
   accountSummaryLabel,
   accountTone,
   consumeUnverifiedWarning,
+  diagnosticAccountStateLabel,
+  diagnosticSearchModeLabel,
+  diagnosticTone,
+  diagnosticToneLabel,
   isAccountVerified,
   loginBadgeFrom,
   loginExpiryEvents,
@@ -29,6 +33,7 @@ import {
   unverifiedWarningCount,
   wasLoginExpiryNotified,
   type AccountStatusInfo,
+  type PlatformDiagnostic,
 } from "../src/lib/accounts.js";
 
 function acc(overrides: Partial<AccountStatusInfo>): AccountStatusInfo {
@@ -45,6 +50,61 @@ function acc(overrides: Partial<AccountStatusInfo>): AccountStatusInfo {
     ...overrides,
   };
 }
+
+function diagnostic(overrides: Partial<PlatformDiagnostic>): PlatformDiagnostic {
+  return {
+    platform: "xhs",
+    search_available: true,
+    search_mode: "browser_fallback",
+    account_state: "unverified",
+    snippet_available: true,
+    hydration_available: true,
+    fallback_active: true,
+    limitation_code: "account_unverified",
+    user_message: "搜索正常，当前正在使用浏览器备用路径。",
+    recommended_action: null,
+    checked_at: null,
+    ...overrides,
+  };
+}
+
+test("Platform Doctor: XHS 未验证但 fallback 可用仍显示搜索可用", () => {
+  const value = diagnostic({});
+  assert.equal(diagnosticTone(value), "available");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "搜索可用");
+  assert.equal(diagnosticSearchModeLabel(value.search_mode), "浏览器备用路径");
+  assert.equal(diagnosticAccountStateLabel(value.account_state), "未验证");
+});
+
+test("Platform Doctor: 抖音搜索结果自带简介，不因没有 hydrator 显示受限", () => {
+  const value = diagnostic({
+    platform: "douyin",
+    search_mode: "page",
+    account_state: "connected",
+    snippet_available: true,
+    hydration_available: false,
+    fallback_active: false,
+    limitation_code: null,
+  });
+  assert.equal(diagnosticTone(value), "normal");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "正常");
+  assert.equal(diagnosticSearchModeLabel(value.search_mode), "页面路径");
+  assert.equal(diagnosticAccountStateLabel(value.account_state), "已验证");
+});
+
+test("Platform Doctor: 搜索失败显示不可用", () => {
+  const value = diagnostic({
+    search_available: false,
+    search_mode: "unavailable",
+    snippet_available: false,
+    hydration_available: false,
+    fallback_active: false,
+    limitation_code: "platform_unavailable",
+  });
+  assert.equal(diagnosticTone(value), "unavailable");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "不可用");
+  assert.equal(diagnosticSearchModeLabel(value.search_mode), "当前不可用");
+});
 
 // ── 登录数量定义：仅 connected + verified ──────────────────────────────
 

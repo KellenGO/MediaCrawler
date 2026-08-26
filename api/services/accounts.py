@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..schemas.search import PlatformDiagnostic
+
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 BROWSER_DATA_DIR = _PROJECT_ROOT / "browser_data"
 
@@ -450,6 +452,10 @@ _session_snapshots: Dict[str, Dict[str, str]] = {}
 # 聚合搜索结果缓存以它为 key 组成部分，实现"账号操作后缓存自动失效"。
 _account_generation: Dict[str, int] = {}
 
+# 只保留最近一次搜索的安全状态与路径信息，绝不保存异常文本、请求体或
+# Cookie。Platform Doctor 读取它做本地状态汇总，不参与搜索决策。
+_last_search_outcomes: Dict[str, Dict[str, Any]] = {}
+
 
 def get_account_generation(platform: str) -> int:
     """当前账号代数（无任何变更时 0）。缓存 key 的一部分。"""
@@ -499,6 +505,26 @@ def get_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
     """
     snap = _session_snapshots.get(platform)
     return dict(snap) if snap else None
+
+
+def record_search_outcome(platform: str, status: str, timings: Any = None) -> None:
+    """Store only safe, terminal search metadata for Platform Doctor."""
+    if platform not in PLATFORM_PROFILE_DIRS:
+        return
+    safe_statuses = {
+        "succeeded", "empty", "login_required", "rate_limited",
+        "timed_out", "failed", "cancelled",
+    }
+    if status not in safe_statuses:
+        return
+    fast_path_used = getattr(timings, "fast_path_used", None)
+    fallback_reason = getattr(timings, "fallback_reason", None)
+    _last_search_outcomes[platform] = {
+        "status": status,
+        "fast_path_used": fast_path_used if isinstance(fast_path_used, bool) else None,
+        "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else None,
+        "checked_at": datetime.now(timezone.utc),
+    }
 
 
 async def ensure_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
@@ -740,6 +766,112 @@ operation_coordinator = OperationCoordinator()
 
 # ── Public operations ───────────────────────────────────────────────────
 
+def _platform_diagnostic(platform: str) -> PlatformDiagnostic:
+    """Build a safe, local capability summary; never probes a platform."""
+    st = _state_of(platform)
+    profile_exists = profile_dir_for(platform).is_dir()
+    snapshot = get_session_snapshot(platform)
+    outcome = _last_search_outcomes.get(platform)
+    outcome_status = outcome.get("status") if outcome else None
+    unavailable_statuses = {"login_required", "rate_limited", "timed_out", "failed"}
+    search_available = outcome_status not in unavailable_statuses
+    # Every current search adapter can expose a user-visible snippet from its
+    # search response. Detail hydration is a separate best-effort path.
+    snippet_available: Optional[bool] = bool(search_available)
+
+    if outcome_status in unavailable_statuses:
+        search_mode = "unavailable"
+        fallback_active = False
+    elif outcome and outcome.get("fast_path_used") is True:
+        search_mode = "fast_path"
+        fallback_active = False
+    elif outcome and outcome.get("fast_path_used") is False:
+        search_mode = "browser_fallback" if platform in ("xhs", "bilibili") else "page"
+        fallback_active = platform in ("xhs", "bilibili")
+    elif platform in ("xhs", "bilibili"):
+        search_mode = "fast_path" if snapshot else "browser_fallback"
+        fallback_active = not bool(snapshot)
+    elif platform in ("douyin", "zhihu"):
+        search_mode = "page"
+        fallback_active = False
+    else:  # pragma: no cover - platform whitelist guards this branch
+        search_mode = None
+        fallback_active = False
+
+    if platform == "xhs":
+        # XHS detail hydration can restore its API snapshot from the existing
+        # browser profile; account verification is not required for this.
+        hydration_available: Optional[bool] = True
+    elif platform == "bilibili":
+        hydration_available = True
+    elif platform == "douyin":
+        # Douyin does not use ResultHydrator, but DouyinAdapter already maps
+        # caption/description/video_description/text/desc from search data.
+        hydration_available = False
+    else:
+        # Zhihu V1 detail clients require the in-memory d_c0 session.
+        hydration_available = bool(snapshot and snapshot.get("d_c0"))
+
+    limitation_code: Optional[str] = None
+    user_message: Optional[str] = None
+    recommended_action: Optional[str] = None
+    if outcome_status == "rate_limited":
+        limitation_code = "rate_limited"
+        user_message = "平台请求暂时受限，可稍后重试。"
+        recommended_action = "稍后重试，避免连续请求。"
+    elif outcome_status == "login_required":
+        limitation_code = "login_required"
+        user_message = "当前会话不足，请重新同步账号。"
+        recommended_action = "重新同步该平台账号。"
+    elif outcome_status in ("failed", "timed_out"):
+        limitation_code = "platform_unavailable"
+        user_message = "当前无法完成搜索，请稍后重试。"
+        recommended_action = "稍后重试；如果持续失败，再重新验证账号。"
+    elif platform == "zhihu" and not hydration_available:
+        limitation_code = "hydration_unavailable"
+        user_message = "搜索结果可提供简介；详情补全需要有效会话。"
+        recommended_action = "当前无需处理；需要补抓缺失片段时再同步账号。"
+    elif platform == "xhs" and st["status"] == "unverified":
+        limitation_code = "account_unverified"
+        if fallback_active:
+            user_message = "搜索正常，当前正在使用浏览器备用路径。账号未验证不影响当前公开搜索。"
+        else:
+            user_message = "搜索正常，账号尚未验证，不影响当前公开搜索。"
+        recommended_action = "当前无需处理；如平台要求登录，再重新同步账号。"
+    elif platform == "xhs" and fallback_active:
+        limitation_code = "browser_fallback_active"
+        user_message = "搜索正常，当前正在使用浏览器备用路径。"
+        recommended_action = "当前无需处理。"
+    elif search_available and hydration_available:
+        user_message = "搜索和简介补全均可用。"
+        recommended_action = "当前无需处理。"
+    elif search_available and snippet_available:
+        user_message = "搜索结果可提供简介。"
+        recommended_action = "当前无需处理。"
+    else:
+        user_message = "当前搜索可用。"
+        recommended_action = "当前无需处理。"
+
+    return PlatformDiagnostic(
+        platform=platform,
+        search_available=search_available,
+        search_mode=search_mode,
+        account_state=st["status"],
+        snippet_available=snippet_available,
+        hydration_available=hydration_available,
+        fallback_active=fallback_active,
+        limitation_code=limitation_code,
+        user_message=user_message,
+        recommended_action=recommended_action,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+
+def get_platform_diagnostic(platform: str) -> Dict[str, Any]:
+    """Return the redacted JSON-ready Platform Doctor payload."""
+    return _platform_diagnostic(platform).model_dump(mode="json")
+
+
 def get_accounts() -> List[Dict[str, Any]]:
     """Per-platform account status — never includes secrets or paths."""
     out: List[Dict[str, Any]] = []
@@ -755,6 +887,7 @@ def get_accounts() -> List[Dict[str, Any]]:
             "safe_error_code": st["safe_error_code"],
             "safe_message": st["safe_message"],
             "browser_backend": st["browser_backend"],
+            "diagnostic": get_platform_diagnostic(platform),
         })
     return out
 

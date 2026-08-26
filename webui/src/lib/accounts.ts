@@ -21,6 +21,21 @@
 import { PLATFORM_LABELS } from "../types/search.js";
 import type { PlatformSlug } from "../types/search.js";
 
+export interface PlatformDiagnostic {
+  platform: PlatformSlug;
+  search_available: boolean;
+  search_mode: "fast_path" | "browser_fallback" | "api" | "page" | "unavailable" | null;
+  account_state: string;
+  /** User-visible snippet capability; separate from detail hydration. */
+  snippet_available?: boolean | null;
+  hydration_available: boolean | null;
+  fallback_active: boolean;
+  limitation_code: string | null;
+  user_message: string | null;
+  recommended_action: string | null;
+  checked_at: string | null;
+}
+
 /** 与后端 GET /api/search/accounts 返回的账号条目字段一致（窄接口）。 */
 export interface AccountStatusInfo {
   platform: string;
@@ -32,6 +47,50 @@ export interface AccountStatusInfo {
   safe_error_code: string | null;
   safe_message: string | null;
   browser_backend: string | null;
+  diagnostic?: PlatformDiagnostic | null;
+}
+
+export type DiagnosticTone = "normal" | "available" | "limited" | "unavailable";
+
+export function diagnosticTone(
+  diagnostic: Pick<PlatformDiagnostic, "search_available" | "snippet_available" | "hydration_available" | "fallback_active">,
+): DiagnosticTone {
+  if (!diagnostic.search_available) return "unavailable";
+  // A search-time snippet is enough for the user-facing capability. Do not
+  // label a platform as limited merely because it has no detail hydrator.
+  if (diagnostic.snippet_available === false) return "limited";
+  if (diagnostic.fallback_active) return "available";
+  return "normal";
+}
+
+export function diagnosticToneLabel(tone: DiagnosticTone): string {
+  if (tone === "normal") return "正常";
+  if (tone === "available") return "搜索可用";
+  if (tone === "limited") return "部分能力受限";
+  return "不可用";
+}
+
+export function diagnosticSearchModeLabel(mode: PlatformDiagnostic["search_mode"]): string {
+  if (mode === "fast_path") return "快速路径";
+  if (mode === "browser_fallback") return "浏览器备用路径";
+  if (mode === "api") return "接口路径";
+  if (mode === "page") return "页面路径";
+  if (mode === "unavailable") return "当前不可用";
+  return "—";
+}
+
+export function diagnosticAccountStateLabel(state: string): string {
+  const labels: Record<string, string> = {
+    connected: "已验证",
+    unverified: "未验证",
+    expired: "会话失效",
+    failed: "同步失败",
+    unavailable: "验证暂不可用",
+    verifying: "验证中",
+    syncing: "同步中",
+    disconnected: "未同步",
+  };
+  return labels[state] || "状态未知";
 }
 
 export type AccountTone = "ok" | "warn" | "bad" | "idle";
