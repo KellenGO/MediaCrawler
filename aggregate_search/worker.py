@@ -40,6 +40,11 @@ from aggregate_search.protocol import (
     emit_metrics,
 )
 from aggregate_search.models import agg_to_core_platform
+from aggregate_search.provider_chain import (
+    ProviderChainTrace,
+    SearchProvider,
+    run_provider_chain,
+)
 from aggregate_search.adapters import (
     XhsAdapter, DouyinAdapter, BilibiliAdapter, ZhihuAdapter,
 )
@@ -135,6 +140,12 @@ def _safe_error_message(exc: Exception) -> str:
     return type(exc).__name__
 
 
+class _ZhihuLoginRequired(Exception):
+    """Safe internal terminal error for the last Zhihu provider."""
+
+    safe_message = "知乎搜索需要登录会话，请前往账号设置重新同步"
+
+
 # ── Standard search (xhs, douyin, bilibili) ─────────────────────────────
 
 async def _run_standard_search(
@@ -203,7 +214,27 @@ async def _run_standard_search(
     if core_platform == "bili":
         config.BILI_SEARCH_MODE = "normal"
 
-    crawler = None
+    fast_crawler_holder: List[Any] = [None]
+    browser_crawler_holder: List[Any] = [None]
+
+    def emit_provider_metrics(trace: ProviderChainTrace) -> None:
+        """Emit provider execution metadata using IDs only."""
+        fallback_active = trace.fallback_active or (
+            trace.provider_used == "browser" and core_platform in ("xhs", "bili"))
+        metrics: Dict[str, Any] = {
+            "provider_used": trace.provider_used,
+            "provider_attempt_count": trace.provider_attempt_count,
+            "provider_attempts": list(trace.provider_attempts),
+            "fallback_active": fallback_active,
+        }
+        if trace.fallback_reason:
+            metrics["fallback_reason"] = trace.fallback_reason
+        if any(p in trace.provider_attempts
+               for p in ("session_api", "light_api")):
+            metrics["fast_path_used"] = trace.provider_used in (
+                "session_api", "light_api")
+        emit_metrics(job_id, platform, metrics)
+
     try:
         from main import CrawlerFactory
 
@@ -217,65 +248,93 @@ async def _run_standard_search(
             # 只上报数字；manager 端白名单字段合并进 timings。
             emit_metrics(job_id, platform, {f"{phase}_ms": elapsed_ms})
 
-        # Round 16: 无浏览器快速路径（xhs 需快照；bilibili 轻量列表可无登录
-        # 直搜；douyin 无 fast path）。首条结果 emit 前失败 → 安全回退浏览器
-        # 路径；已 emit 结果后失败 → 不重跑（避免重复）。
-        if core_platform in ("xhs", "bili") and \
-                (session_snapshot or core_platform == "bili"):
-            try:
-                await _run_fast_standard_search(
-                    job_id, platform, core_platform, keyword, limit,
-                    handle_results, session_snapshot or {}, _phase_metric,
-                )
-                if total_emitted == 0:
-                    emit_status(job_id, platform, "empty",
-                                {"message": "No results found."})
-                else:
-                    emit_status(job_id, platform, "succeeded")
-                emit_done(job_id, platform)
-                return
-            except Exception as exc:
-                if total_emitted > 0:
-                    # 已有结果：不完整重跑（防重复），按错误上报。
-                    error_type = _classify_error(exc)
-                    safe_msg = _safe_error_message(exc)
-                    emit_error(job_id, platform, error_type, safe_msg)
-                    emit_done(job_id, platform)
-                    return
-                # 尚无结果 → 记录回退原因并走浏览器路径。
-                emit_metrics(job_id, platform, {
-                    "fast_path_used": False,
-                    "fallback_reason": "fast_path_failed"})
+        async def run_fast_provider() -> int:
+            await _run_fast_standard_search(
+                job_id, platform, core_platform, keyword, limit,
+                handle_results, session_snapshot or {}, _phase_metric,
+                fast_crawler_holder,
+            )
+            return total_emitted
 
-        crawler = CrawlerFactory.create_crawler(platform=core_platform)
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_sink=handle_results,
-            persist_results=False,
-            login_policy="fail_fast",
-            enable_comments=False,
-            enable_media=False,
-            result_limit=limit,
-            strict_errors=True,
-            headless=True,
-            # Round 17: xhs/bilibili 搜索列表已含 MVP 字段，跳过逐条详情
-            # API（轻量列表模式，复用 fetch_details 通用选项）。
-            fetch_details=(core_platform not in ("xhs", "bili")),
-            # douyin: pong 未确认登录时仍尝试公开搜索（登录门禁不适用公开 API）
-            allow_public_search=(core_platform == "dy"),
-            # xhs: 详情按原始顺序逐条 sink + 复用单个 httpx client（Phase 3）
-            stream_results=(core_platform == "xhs"),
-            reuse_http_client=True,
-            light_page=True,
-            metrics_cb=_phase_metric,
-        )
+        async def cleanup_fast_provider() -> None:
+            crawler = fast_crawler_holder[0]
+            fast_crawler_holder[0] = None
+            await _cleanup_crawler(crawler)
 
-        emit_status(job_id, platform, "running")
-        await asyncio.wait_for(crawler.start(), timeout=WORKER_TIMEOUT_SECONDS)
+        async def run_browser_provider() -> int:
+            crawler = CrawlerFactory.create_crawler(platform=core_platform)
+            browser_crawler_holder[0] = crawler
+            crawler.runtime_options = CrawlerRuntimeOptions(
+                result_sink=handle_results,
+                persist_results=False,
+                login_policy="fail_fast",
+                enable_comments=False,
+                enable_media=False,
+                result_limit=limit,
+                strict_errors=True,
+                headless=True,
+                # Round 17: xhs/bilibili search lists already contain the MVP
+                # fields, so do not add per-result detail requests.
+                fetch_details=(core_platform not in ("xhs", "bili")),
+                allow_public_search=(core_platform == "dy"),
+                stream_results=(core_platform == "xhs"),
+                reuse_http_client=True,
+                light_page=True,
+                metrics_cb=_phase_metric,
+            )
+            emit_status(job_id, platform, "running")
+            await asyncio.wait_for(crawler.start(), timeout=WORKER_TIMEOUT_SECONDS)
+            return total_emitted
 
-        if total_emitted == 0:
-            emit_status(job_id, platform, "empty", {"message": "No results found."})
-        else:
-            emit_status(job_id, platform, "succeeded")
+        async def cleanup_browser_provider() -> None:
+            crawler = browser_crawler_holder[0]
+            browser_crawler_holder[0] = None
+            await _cleanup_crawler(crawler)
+
+        providers: List[SearchProvider] = []
+        if core_platform == "xhs" and session_snapshot:
+            providers.append(SearchProvider(
+                id="session_api",
+                run=run_fast_provider,
+                cleanup=cleanup_fast_provider,
+                emitted_count=lambda: total_emitted,
+                fallback_reason="fast_path_failed",
+            ))
+        elif core_platform == "bili":
+            providers.append(SearchProvider(
+                id="light_api",
+                run=run_fast_provider,
+                cleanup=cleanup_fast_provider,
+                emitted_count=lambda: total_emitted,
+                fallback_reason="fast_path_failed",
+            ))
+
+        providers.append(SearchProvider(
+            id="public_search" if core_platform == "dy" else "browser",
+            run=run_browser_provider,
+            cleanup=cleanup_browser_provider,
+            emitted_count=lambda: total_emitted,
+        ))
+
+        trace = ProviderChainTrace()
+        try:
+            chain_result = await run_provider_chain(providers, trace=trace)
+            emit_provider_metrics(trace)
+            if chain_result.emitted_count == 0:
+                emit_status(job_id, platform, "empty",
+                            {"message": "No results found."})
+            else:
+                emit_status(job_id, platform, "succeeded")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # The chain has already cleaned the failed provider. Preserve the
+            # old error semantics, including the no-rerun-after-first-result
+            # rule, while reporting only safe provider IDs in metrics.
+            emit_provider_metrics(trace)
+            error_type = _classify_error(exc)
+            safe_msg = _safe_error_message(exc)
+            emit_error(job_id, platform, error_type, safe_msg)
 
     except asyncio.TimeoutError:
         emit_error(job_id, platform, "timed_out", f"Search timed out after {WORKER_TIMEOUT_SECONDS}s")
@@ -284,10 +343,13 @@ async def _run_standard_search(
         safe_msg = _safe_error_message(exc)
         emit_error(job_id, platform, error_type, safe_msg)
     finally:
-        try:
-            await _cleanup_crawler(crawler)
-        except Exception:
-            pass
+        for holder in (fast_crawler_holder, browser_crawler_holder):
+            crawler = holder[0]
+            holder[0] = None
+            try:
+                await _cleanup_crawler(crawler)
+            except Exception:
+                pass
 
     emit_done(job_id, platform)
 
@@ -297,6 +359,7 @@ async def _run_standard_search(
 async def _run_fast_standard_search(
     job_id: str, platform: str, core_platform: str, keyword: str, limit: int,
     handle_results, session_snapshot: Dict[str, str], phase_metric,
+    crawler_holder: Optional[List[Any]] = None,
 ) -> None:
     """无浏览器快速路径：从内存会话快照构造 client，直接跑搜索（不启动
     浏览器）。只在 aggregate 模式调用；任何异常向上传播，由调用方决定
@@ -306,8 +369,9 @@ async def _run_fast_standard_search(
     """
     from main import CrawlerFactory
 
-    emit_metrics(job_id, platform, {"fast_path_used": True})
     crawler = CrawlerFactory.create_crawler(platform=core_platform)
+    if crawler_holder is not None:
+        crawler_holder[0] = crawler
     crawler.runtime_options = CrawlerRuntimeOptions(
         result_sink=handle_results,
         persist_results=False,
@@ -323,22 +387,16 @@ async def _run_fast_standard_search(
         reuse_http_client=True,
         metrics_cb=phase_metric,
     )
-    try:
-        if core_platform == "xhs":
-            crawler.xhs_client = await crawler.create_xhs_client_from_snapshot(
-                session_snapshot)
-            await crawler.search()
-        elif core_platform == "bili":
-            crawler.bili_client = await crawler.create_bilibili_client_from_snapshot(
-                session_snapshot)
-            await crawler.search_by_keywords()
-        else:  # pragma: no cover — douyin 不走 fast path
-            raise RuntimeError("fast path not supported")
-    finally:
-        try:
-            await _cleanup_crawler(crawler)
-        except Exception:
-            pass
+    if core_platform == "xhs":
+        crawler.xhs_client = await crawler.create_xhs_client_from_snapshot(
+            session_snapshot)
+        await crawler.search()
+    elif core_platform == "bili":
+        crawler.bili_client = await crawler.create_bilibili_client_from_snapshot(
+            session_snapshot)
+        await crawler.search_by_keywords()
+    else:  # pragma: no cover — douyin 不走 fast path
+        raise RuntimeError("fast path not supported")
 
 
 # ── Zhihu search ────────────────────────────────────────────────────────
@@ -360,7 +418,6 @@ async def _run_zhihu_search(
 
     core_platform = agg_to_core_platform(platform)
     adapter = _ADAPTERS["zhihu"]
-    browser_context = None
     total_emitted = 0
     seen_ids: set = set()
     next_rank = 0
@@ -403,82 +460,66 @@ async def _run_zhihu_search(
             r_data.pop("job_id", None)
             emit_result(job_id, platform, r_data)
 
-    try:
-        emit_status(job_id, platform, "running")
-        emit_metrics(job_id, platform, {
-            "worker_ready_ms": _PROCESS_READY_MS,
+    def emit_provider_metrics(trace: ProviderChainTrace) -> None:
+        fallback_active = trace.fallback_active or (
+            trace.provider_used == "browser" and core_platform in ("xhs", "bili"))
+        metrics: Dict[str, Any] = {
+            "provider_used": trace.provider_used,
+            "provider_attempt_count": trace.provider_attempt_count,
+            "provider_attempts": list(trace.provider_attempts),
+            "fallback_active": fallback_active,
+        }
+        if trace.fallback_reason:
+            metrics["fallback_reason"] = trace.fallback_reason
+        if "session_api" in trace.provider_attempts:
+            metrics["fast_path_used"] = trace.provider_used == "session_api"
+        emit_metrics(job_id, platform, metrics)
+
+    async def run_fast_provider() -> int:
+        _fp_cookie_str = "; ".join(
+            f"{k}={v}" for k, v in session_snapshot.items())
+        fp_client = ZhiHuClient(
+            proxy=None,
+            headers={
+                "accept": "*/*",
+                "accept-language": "zh-CN,zh;q=0.9",
+                "cookie": _fp_cookie_str,
+                "priority": "u=1, i",
+                "referer": "https://www.zhihu.com/search?q=python&time_interval=a_year&type=content",
+                "user-agent": _ZHIHU_USER_AGENT,
+                "x-api-version": "3.0.91",
+                "x-app-za": "OS=Web",
+                "x-requested-with": "fetch",
+                "x-zse-93": "101_3_3.0",
+            },
+            playwright_page=None,
+            cookie_dict=dict(session_snapshot),
+            reuse_http_client=True,
+        )
+        search_res = await fp_client.get("/api/v4/search_v3", {
+            "gk_version": "gz-gaokao",
+            "t": "general",
+            "q": keyword,
+            "correction": 1,
+            "offset": 0,
+            "limit": min(limit + 5, 20),
+            "filter_fields": "",
+            "lc_idx": 0,
+            "show_all_topics": 0,
+            "search_source": "Filter",
         })
-        _zh_phase = time.perf_counter()
+        emit_metrics(job_id, platform, {
+            "search_api_ms": int((time.perf_counter() - _zh_phase) * 1000)})
+        _zh_emit(search_res)
+        return total_emitted
 
-        # ── Round 16 fast path：快照含有效 d_c0 → 无浏览器直搜 ──────────
-        # 零页面导航、不做 pong 门禁（搜索响应本身能分类错误）；失败且
-        # 尚无结果 → 安全回退下方浏览器路径；已有结果 → 不重跑。
-        if session_snapshot and _snapshot_has_dc0(session_snapshot):
-            emit_metrics(job_id, platform, {"fast_path_used": True})
-            _fp_cookie_str = "; ".join(
-                f"{k}={v}" for k, v in session_snapshot.items())
-            fp_client = ZhiHuClient(
-                proxy=None,
-                headers={
-                    "accept": "*/*",
-                    "accept-language": "zh-CN,zh;q=0.9",
-                    "cookie": _fp_cookie_str,  # lowercase, matching _pre_headers
-                    "priority": "u=1, i",
-                    "referer": "https://www.zhihu.com/search?q=python&time_interval=a_year&type=content",
-                    "user-agent": _ZHIHU_USER_AGENT,
-                    "x-api-version": "3.0.91",
-                    "x-app-za": "OS=Web",
-                    "x-requested-with": "fetch",
-                    "x-zse-93": "101_3_3.0",
-                },
-                playwright_page=None,
-                cookie_dict=dict(session_snapshot),
-                reuse_http_client=True,
-            )
-            try:
-                search_res = await fp_client.get("/api/v4/search_v3", {
-                    "gk_version": "gz-gaokao",
-                    "t": "general",
-                    "q": keyword,
-                    "correction": 1,
-                    "offset": 0,
-                    "limit": min(limit + 5, 20),
-                    "filter_fields": "",
-                    "lc_idx": 0,
-                    "show_all_topics": 0,
-                    "search_source": "Filter",
-                })
-                emit_metrics(job_id, platform, {
-                    "search_api_ms": int(
-                        (time.perf_counter() - _zh_phase) * 1000)})
-                _zh_emit(search_res)
-                if total_emitted == 0:
-                    emit_status(job_id, platform, "empty",
-                                {"message": "No results found."})
-                else:
-                    emit_status(job_id, platform, "succeeded")
-                emit_done(job_id, platform)
-                return
-            except Exception as exc:
-                if total_emitted > 0:
-                    # 已有结果：不完整重跑（防重复），按错误上报。
-                    error_type = _classify_error(exc)
-                    safe_msg = _safe_error_message(exc)
-                    emit_error(job_id, platform, error_type, safe_msg)
-                    emit_done(job_id, platform)
-                    return
-                emit_metrics(job_id, platform, {
-                    "fast_path_used": False,
-                    "fallback_reason": "fast_path_failed"})
-                # 无结果 → 回退浏览器路径（继续执行下方代码）。
-
+    async def run_browser_provider() -> int:
         async with async_playwright() as playwright:
             user_data_dir = os.path.join(
                 os.getcwd(), "browser_data",
                 config.USER_DATA_DIR % core_platform
             )
             user_agent = _ZHIHU_USER_AGENT
-            # Resolve browser: CUSTOM_BROWSER_PATH > Chrome > Edge > bundled Chromium
             executable_path, channel, backend = resolve_playwright_browser()
             if backend == "playwright-chromium":
                 bundled_path = playwright.chromium.executable_path
@@ -497,118 +538,119 @@ async def _run_zhihu_search(
                 launch_kwargs["executable_path"] = executable_path
             elif channel:
                 launch_kwargs["channel"] = channel
-            browser_context = await playwright.chromium.launch_persistent_context(
+            context = await playwright.chromium.launch_persistent_context(
                 **launch_kwargs,
             )
-            await browser_context.add_init_script(path="libs/stealth.min.js")
-            # Round 16 轻量页面：拦截 image/media/font/analytics，导航用
-            # domcontentloaded；route 随 context 关闭自动清理。
-            from tools.light_page import install_light_page_routes, light_goto_kwargs
-            await install_light_page_routes(browser_context)
-            emit_metrics(job_id, platform, {
-                "browser_launch_ms": int((time.perf_counter() - _zh_phase) * 1000)})
-
-            page = await browser_context.new_page()
-            await page.goto("https://www.zhihu.com", **light_goto_kwargs())
-
-            # 先访问搜索页 —— 知乎的 d_c0 等会话 Cookie 往往只在真实访问
-            # 搜索页后由浏览器生成/刷新；pong 与搜索 API 都必须用它签名。
-            await page.goto(
-                "https://www.zhihu.com/search?q=python&search_source=Guess"
-                "&utm_content=search_hot&type=content",
-                **light_goto_kwargs(),
-            )
-            # Phase 3.4: 有界条件等待 d_c0（最迟 3s），不再固定 sleep(3)。
-            await _wait_for_zhihu_dc0(browser_context)
-            emit_metrics(job_id, platform, {
-                "navigation_ms": int((time.perf_counter() - _zh_phase) * 1000)})
-
-            # Build client with cookies REFRESHED after the search-page
-            # navigation (must contain d_c0 when the page generated it).
-            cookie_str, cookie_dict = await _get_browser_cookies(
-                browser_context, ["https://www.zhihu.com"]
-            )
-
-            zhihu_client = ZhiHuClient(
-                proxy=None,
-                headers={
-                    "accept": "*/*",
-                    "accept-language": "zh-CN,zh;q=0.9",
-                    "cookie": cookie_str,  # lowercase, matching ZhiHuClient._pre_headers
-                    "priority": "u=1, i",
-                    "referer": "https://www.zhihu.com/search?q=python&time_interval=a_year&type=content",
-                    "user-agent": user_agent,
-                    "x-api-version": "3.0.91",
-                    "x-app-za": "OS=Web",
-                    "x-requested-with": "fetch",
-                    "x-zse-93": "101_3_3.0",
-                },
-                playwright_page=page,
-                cookie_dict=cookie_dict,
-                reuse_http_client=True,
-            )
-
-            # pong 只是诊断，不是门禁：公开搜索 API 不确认登录也可能返回
-            # 合法结果 —— pong 失败仍继续尝试搜索。
-            logged_in = await zhihu_client.pong()
-            utils.logger.info(
-                f"[worker._run_zhihu_search] zhihu pong logged_in={logged_in}, "
-                f"d_c0_present={'d_c0' in cookie_dict}")
-            emit_metrics(job_id, platform, {
-                "preflight_ms": int((time.perf_counter() - _zh_phase) * 1000)})
-
-            # Direct search API call (bypass extractor for public nicknames)
-            page_size = min(limit + 5, 20)
             try:
-                search_res = await zhihu_client.get("/api/v4/search_v3", {
-                    "gk_version": "gz-gaokao",
-                    "t": "general",
-                    "q": keyword,
-                    "correction": 1,
-                    "offset": 0,
-                    "limit": page_size,
-                    "filter_fields": "",
-                    "lc_idx": 0,
-                    "show_all_topics": 0,
-                    "search_source": "Filter",
-                })
-            except Exception as exc:
-                # 搜索 API 明确无法签名（d_c0 缺失）= 需要登录会话；403/风控
-                # 由 _classify_error 归为 rate_limited，不在这里吞掉。
-                if "d_c0" in str(exc):
-                    emit_error(job_id, platform, "login_required",
-                               "知乎搜索需要登录会话，请前往账号设置重新同步")
-                    emit_done(job_id, platform)
-                    return
-                raise
+                await context.add_init_script(path="libs/stealth.min.js")
+                from tools.light_page import install_light_page_routes, light_goto_kwargs
+                await install_light_page_routes(context)
+                emit_metrics(job_id, platform, {
+                    "browser_launch_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
-            if not isinstance(search_res, dict):
-                emit_status(job_id, platform, "empty",
-                           {"message": "No results found."})
-                emit_done(job_id, platform)
-                return
-            emit_metrics(job_id, platform, {
-                "search_api_ms": int((time.perf_counter() - _zh_phase) * 1000)})
+                page = await context.new_page()
+                await page.goto("https://www.zhihu.com", **light_goto_kwargs())
+                await page.goto(
+                    "https://www.zhihu.com/search?q=python&search_source=Guess"
+                    "&utm_content=search_hot&type=content",
+                    **light_goto_kwargs(),
+                )
+                await _wait_for_zhihu_dc0(context)
+                emit_metrics(job_id, platform, {
+                    "navigation_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
-            _zh_emit(search_res)
+                cookie_str, cookie_dict = await _get_browser_cookies(
+                    context, ["https://www.zhihu.com"])
+                zhihu_client = ZhiHuClient(
+                    proxy=None,
+                    headers={
+                        "accept": "*/*",
+                        "accept-language": "zh-CN,zh;q=0.9",
+                        "cookie": cookie_str,
+                        "priority": "u=1, i",
+                        "referer": "https://www.zhihu.com/search?q=python&time_interval=a_year&type=content",
+                        "user-agent": user_agent,
+                        "x-api-version": "3.0.91",
+                        "x-app-za": "OS=Web",
+                        "x-requested-with": "fetch",
+                        "x-zse-93": "101_3_3.0",
+                    },
+                    playwright_page=page,
+                    cookie_dict=cookie_dict,
+                    reuse_http_client=True,
+                )
+                logged_in = await zhihu_client.pong()
+                utils.logger.info(
+                    f"[worker._run_zhihu_search] zhihu pong logged_in={logged_in}, "
+                    f"d_c0_present={'d_c0' in cookie_dict}")
+                emit_metrics(job_id, platform, {
+                    "preflight_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
-            if total_emitted == 0:
-                emit_status(job_id, platform, "empty")
-            else:
-                emit_status(job_id, platform, "succeeded")
+                page_size = min(limit + 5, 20)
+                try:
+                    search_res = await zhihu_client.get("/api/v4/search_v3", {
+                        "gk_version": "gz-gaokao",
+                        "t": "general",
+                        "q": keyword,
+                        "correction": 1,
+                        "offset": 0,
+                        "limit": page_size,
+                        "filter_fields": "",
+                        "lc_idx": 0,
+                        "show_all_topics": 0,
+                        "search_source": "Filter",
+                    })
+                except Exception as exc:
+                    if "d_c0" in str(exc):
+                        raise _ZhihuLoginRequired() from None
+                    raise
+                if not isinstance(search_res, dict):
+                    return 0
+                emit_metrics(job_id, platform, {
+                    "search_api_ms": int((time.perf_counter() - _zh_phase) * 1000)})
+                _zh_emit(search_res)
+                return total_emitted
+            finally:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
+    trace = ProviderChainTrace()
+    try:
+        _zh_phase = time.perf_counter()
+        emit_status(job_id, platform, "running")
+        emit_metrics(job_id, platform, {"worker_ready_ms": _PROCESS_READY_MS})
+        providers = [SearchProvider(
+            id="session_api",
+            run=run_fast_provider,
+            eligible=bool(session_snapshot and _snapshot_has_dc0(session_snapshot)),
+            emitted_count=lambda: total_emitted,
+            fallback_reason="fast_path_failed",
+        ), SearchProvider(
+            id="browser",
+            run=run_browser_provider,
+            emitted_count=lambda: total_emitted,
+        )]
+        chain_result = await run_provider_chain(providers, trace=trace)
+        emit_provider_metrics(trace)
+        if chain_result.emitted_count == 0:
+            emit_status(job_id, platform, "empty", {"message": "No results found."})
+        else:
+            emit_status(job_id, platform, "succeeded")
+    except asyncio.CancelledError:
+        raise
     except asyncio.TimeoutError:
+        emit_provider_metrics(trace)
         emit_error(job_id, platform, "timed_out", "Search timed out")
+    except _ZhihuLoginRequired as exc:
+        emit_provider_metrics(trace)
+        emit_error(job_id, platform, "login_required", _safe_error_message(exc))
     except Exception as exc:
+        emit_provider_metrics(trace)
         error_type = _classify_error(exc)
         safe_msg = _safe_error_message(exc)
         emit_error(job_id, platform, error_type, safe_msg)
-    finally:
-        if browser_context:
-            try:
-                await browser_context.close()
-            except Exception:
-                pass
 
     emit_done(job_id, platform)
 

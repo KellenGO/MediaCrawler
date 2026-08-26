@@ -51,6 +51,12 @@ export interface PlatformTimingInfo {
   first_result_ms: number | null;
   /** 平台进入终态的总耗时（毫秒） */
   total_ms: number | null;
+  /** 实际完成搜索的安全 provider slug；旧响应可能缺失 */
+  provider_used?: "session_api" | "light_api" | "browser" | "page_api" | "public_search" | null;
+  provider_attempt_count?: number | null;
+  provider_attempts?: Array<"session_api" | "light_api" | "browser" | "page_api" | "public_search"> | null;
+  fallback_active?: boolean | null;
+  fallback_reason?: string | null;
 }
 
 export interface PlatformStatusInfo {

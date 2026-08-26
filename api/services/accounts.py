@@ -479,6 +479,46 @@ def _capture_cookie_dict(cookies: List[Dict[str, Any]]) -> Dict[str, str]:
     return out
 
 
+async def _ensure_xhs_signing_cookies(
+    context,
+) -> Optional[Dict[str, str]]:
+    """Read XHS cookies and initialize the official page once when a1 is absent.
+
+    ``a1`` is signing material for the HTTP client, not a login marker.  The
+    returned dictionary is always the latest context state, so callers must
+    construct clients from it rather than from a pre-navigation cookie read.
+    """
+    try:
+        cookies = await context.cookies(PLATFORM_COOKIE_URLS["xhs"])
+        cookie_dict = _capture_cookie_dict(cookies)
+        if cookie_dict.get("a1"):
+            return cookie_dict
+
+        stealth_path = _PROJECT_ROOT / "libs" / "stealth.min.js"
+        add_init_script = getattr(context, "add_init_script", None)
+        if add_init_script is not None and stealth_path.is_file():
+            await add_init_script(path=str(stealth_path))
+
+        page = await context.new_page()
+        try:
+            await page.goto(
+                PLATFORM_HOME_URLS["xhs"],
+                wait_until="domcontentloaded",
+                timeout=15_000,
+            )
+            await page.wait_for_timeout(1_000)
+        finally:
+            await page.close()
+
+        # The page may have created a1.  Re-read and return this refreshed
+        # state; never continue with the pre-navigation cookie dictionary.
+        cookies = await context.cookies(PLATFORM_COOKIE_URLS["xhs"])
+        cookie_dict = _capture_cookie_dict(cookies)
+        return cookie_dict if cookie_dict.get("a1") else None
+    except Exception:
+        return None
+
+
 async def set_session_snapshot(platform: str, cookie_dict: Dict[str, str]) -> None:
     if platform not in PLATFORM_PROFILE_DIRS:
         return
@@ -518,10 +558,25 @@ def record_search_outcome(platform: str, status: str, timings: Any = None) -> No
     if status not in safe_statuses:
         return
     fast_path_used = getattr(timings, "fast_path_used", None)
+    allowed_providers = {
+        "session_api", "light_api", "browser", "page_api", "public_search"
+    }
+    provider_used = getattr(timings, "provider_used", None)
+    provider_attempts = getattr(timings, "provider_attempts", None)
+    if provider_used not in allowed_providers:
+        provider_used = None
+    if (not isinstance(provider_attempts, list) or
+            not all(isinstance(item, str) and item in allowed_providers
+                    for item in provider_attempts[:10])):
+        provider_attempts = None
+    fallback_active = getattr(timings, "fallback_active", None)
     fallback_reason = getattr(timings, "fallback_reason", None)
     _last_search_outcomes[platform] = {
         "status": status,
         "fast_path_used": fast_path_used if isinstance(fast_path_used, bool) else None,
+        "provider_used": provider_used,
+        "provider_attempts": list(provider_attempts[:10]) if provider_attempts is not None else None,
+        "fallback_active": fallback_active if isinstance(fallback_active, bool) else None,
         "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else None,
         "checked_at": datetime.now(timezone.utc),
     }
@@ -560,31 +615,8 @@ async def ensure_session_snapshot(platform: str) -> Optional[Dict[str, str]]:
         playwright = context = None
         try:
             playwright, context, _ = await _launch_profile_context(platform)
-            cookies = await context.cookies(PLATFORM_COOKIE_URLS[platform])
-            cookie_dict = _capture_cookie_dict(cookies)
-
-            # A browser-created a1 may not exist until the official page has
-            # initialized.  Do this at most once per restore attempt; never
-            # invent a value and never call account pong here.
-            if not cookie_dict.get("a1"):
-                stealth_path = _PROJECT_ROOT / "libs" / "stealth.min.js"
-                add_init_script = getattr(context, "add_init_script", None)
-                if add_init_script is not None and stealth_path.is_file():
-                    await add_init_script(path=str(stealth_path))
-                page = await context.new_page()
-                try:
-                    await page.goto(
-                        PLATFORM_HOME_URLS[platform],
-                        wait_until="domcontentloaded",
-                        timeout=15_000,
-                    )
-                    await page.wait_for_timeout(1_000)
-                finally:
-                    await page.close()
-                cookies = await context.cookies(PLATFORM_COOKIE_URLS[platform])
-                cookie_dict = _capture_cookie_dict(cookies)
-
-            if not cookie_dict.get("a1"):
+            cookie_dict = await _ensure_xhs_signing_cookies(context)
+            if not cookie_dict:
                 return None
 
             await set_session_snapshot(platform, cookie_dict)
@@ -779,9 +811,19 @@ def _platform_diagnostic(platform: str) -> PlatformDiagnostic:
     # search response. Detail hydration is a separate best-effort path.
     snippet_available: Optional[bool] = bool(search_available)
 
+    provider_used = outcome.get("provider_used") if outcome else None
     if outcome_status in unavailable_statuses:
         search_mode = "unavailable"
         fallback_active = False
+    elif provider_used == "session_api" or provider_used == "light_api":
+        search_mode = "fast_path"
+        fallback_active = bool(outcome.get("fallback_active")) if outcome else False
+    elif provider_used == "browser":
+        search_mode = "browser_fallback" if platform in ("xhs", "bilibili") else "page"
+        fallback_active = bool(outcome.get("fallback_active")) if outcome else False
+    elif provider_used == "public_search" or provider_used == "page_api":
+        search_mode = "page" if platform in ("douyin", "zhihu") else "api"
+        fallback_active = bool(outcome.get("fallback_active")) if outcome else False
     elif outcome and outcome.get("fast_path_used") is True:
         search_mode = "fast_path"
         fallback_active = False
@@ -839,6 +881,10 @@ def _platform_diagnostic(platform: str) -> PlatformDiagnostic:
             user_message = "搜索正常，账号尚未验证，不影响当前公开搜索。"
         recommended_action = "当前无需处理；如平台要求登录，再重新同步账号。"
     elif platform == "xhs" and fallback_active:
+        limitation_code = "browser_fallback_active"
+        user_message = "搜索正常，当前正在使用浏览器备用路径。"
+        recommended_action = "当前无需处理。"
+    elif platform == "bilibili" and fallback_active:
         limitation_code = "browser_fallback_active"
         user_message = "搜索正常，当前正在使用浏览器备用路径。"
         recommended_action = "当前无需处理。"
@@ -1388,15 +1434,25 @@ async def _pong_with_profile(
     urls = PLATFORM_COOKIE_URLS.get(platform)
     if not urls:
         return "unavailable"
-    try:
-        cookies = await context.cookies(urls)
-    except Exception:
-        # cookie 读取本身失败（浏览器/context 技术问题）→ 无法验证
-        return "unavailable"
-    if not cookies:
-        return "not_logged_in"
-    cookie_dict = {c["name"]: c["value"] for c in cookies}
-    cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+    if platform == "xhs":
+        # XHS HTTP signing needs browser-managed a1.  The helper may perform
+        # one official-homepage initialization and always returns the latest
+        # cookies, so the client is never built from stale pre-navigation data.
+        cookie_dict = await _ensure_xhs_signing_cookies(context)
+        if not cookie_dict:
+            return "unavailable"
+        cookie_str = "; ".join(
+            f"{name}={value}" for name, value in cookie_dict.items())
+    else:
+        try:
+            cookies = await context.cookies(urls)
+        except Exception:
+            # cookie 读取本身失败（浏览器/context 技术问题）→ 无法验证
+            return "unavailable"
+        if not cookies:
+            return "not_logged_in"
+        cookie_dict = {c["name"]: c["value"] for c in cookies}
+        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
     light_routes_installed = False
 
     async def _install_light_routes() -> None:

@@ -1009,6 +1009,23 @@ class _ActiveJob:
                 setattr(info, key, int(value))
         if metrics.get("fast_path_used") is True or metrics.get("fast_path_used") is False:
             info.fast_path_used = bool(metrics["fast_path_used"])
+        provider_used = metrics.get("provider_used")
+        if isinstance(provider_used, str) and provider_used in {
+                "session_api", "light_api", "browser", "page_api", "public_search"}:
+            info.provider_used = provider_used
+        attempt_count = metrics.get("provider_attempt_count")
+        if isinstance(attempt_count, int) and not isinstance(attempt_count, bool):
+            info.provider_attempt_count = max(0, min(attempt_count, 10))
+        attempts = metrics.get("provider_attempts")
+        allowed_providers = {
+            "session_api", "light_api", "browser", "page_api", "public_search"
+        }
+        if isinstance(attempts, list) and all(
+                isinstance(item, str) and item in allowed_providers
+                for item in attempts[:10]):
+            info.provider_attempts = list(attempts[:10])
+        if metrics.get("fallback_active") is True or metrics.get("fallback_active") is False:
+            info.fallback_active = bool(metrics["fallback_active"])
         reason = metrics.get("fallback_reason")
         if isinstance(reason, str) and reason:
             info.fallback_reason = reason[:50]

@@ -297,6 +297,27 @@ class TestInternalMetrics:
         job.apply_metrics("xhs", {"fallback_reason": "x" * 500})
         assert len(job.timings["xhs"].fallback_reason) <= 50
 
+    def test_apply_provider_metrics_accepts_safe_ids_only(self, clock):
+        job = _make_job(clock)
+        job.apply_metrics("xhs", {
+            "provider_used": "browser",
+            "provider_attempt_count": 2,
+            "provider_attempts": ["session_api", "browser"],
+            "fallback_active": True,
+        })
+        timing = job.timings["xhs"]
+        assert timing.provider_used == "browser"
+        assert timing.provider_attempt_count == 2
+        assert timing.provider_attempts == ["session_api", "browser"]
+        assert timing.fallback_active is True
+
+        job.apply_metrics("xhs", {
+            "provider_used": "cookie-secret",
+            "provider_attempts": ["session_api", "cookie-secret"],
+        })
+        assert timing.provider_used == "browser"
+        assert timing.provider_attempts == ["session_api", "browser"]
+
     def test_metrics_never_in_response_leak_check(self, clock):
         job = _make_job(clock)
         job.apply_metrics("xhs", {"worker_ready_ms": 100, "fallback_reason": "no_browser"})

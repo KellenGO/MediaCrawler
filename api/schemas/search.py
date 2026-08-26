@@ -91,6 +91,9 @@ class PlatformTimingInfo(BaseModel):
     - first_result_ms     从 job 开始到首条合法结果；
     - total_ms            平台进入终态的总耗时；
     - fast_path_used      是否命中无浏览器快速路径；
+    - provider_used       实际完成搜索的安全 provider slug；
+    - provider_attempts   本次串行尝试过的安全 provider slug；
+    - fallback_active     是否发生过 provider 回退；
     - fallback_reason     回退原因安全枚举（无响应体）。
 
     只包含耗时数字与安全枚举，绝不包含 Cookie/URL/响应体等敏感信息。
@@ -106,6 +109,10 @@ class PlatformTimingInfo(BaseModel):
     first_result_ms: Optional[int] = None     # 从 job 开始到首条合法结果
     total_ms: Optional[int] = None            # 平台进入终态的总耗时
     fast_path_used: Optional[bool] = None     # 是否命中无浏览器快速路径
+    provider_used: Optional[str] = None       # 实际完成搜索的安全 provider slug
+    provider_attempt_count: Optional[int] = None
+    provider_attempts: Optional[List[str]] = None
+    fallback_active: Optional[bool] = None
     fallback_reason: Optional[str] = None     # 回退原因安全枚举（无响应体）
 
 

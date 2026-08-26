@@ -12,8 +12,15 @@ def _prepare(monkeypatch, tmp_path):
     return profile_root
 
 
-def _timing(fast_path_used=None):
-    return SimpleNamespace(fast_path_used=fast_path_used, fallback_reason=None)
+def _timing(fast_path_used=None, provider_used=None, provider_attempts=None,
+            fallback_active=None):
+    return SimpleNamespace(
+        fast_path_used=fast_path_used,
+        provider_used=provider_used,
+        provider_attempts=provider_attempts,
+        fallback_active=fallback_active,
+        fallback_reason=None,
+    )
 
 
 def test_xhs_unverified_browser_fallback_remains_search_available(monkeypatch, tmp_path):
@@ -41,6 +48,31 @@ def test_bilibili_normal_fast_path_supports_hydration(monkeypatch, tmp_path):
     assert diagnostic["search_mode"] == "fast_path"
     assert diagnostic["fallback_active"] is False
     assert diagnostic["hydration_available"] is True
+
+
+def test_doctor_prefers_real_browser_provider_metadata(monkeypatch, tmp_path):
+    _prepare(monkeypatch, tmp_path)
+    acc.record_search_outcome(
+        "xhs", "succeeded",
+        _timing(provider_used="browser", provider_attempts=["session_api", "browser"],
+                fallback_active=True),
+    )
+
+    diagnostic = acc.get_platform_diagnostic("xhs")
+    assert diagnostic["search_mode"] == "browser_fallback"
+    assert diagnostic["fallback_active"] is True
+
+
+def test_doctor_prefers_real_session_provider_metadata(monkeypatch, tmp_path):
+    _prepare(monkeypatch, tmp_path)
+    acc.record_search_outcome(
+        "bilibili", "succeeded",
+        _timing(provider_used="light_api", provider_attempts=["light_api"]),
+    )
+
+    diagnostic = acc.get_platform_diagnostic("bilibili")
+    assert diagnostic["search_mode"] == "fast_path"
+    assert diagnostic["fallback_active"] is False
 
 
 def test_douyin_search_snippet_is_available_without_detail_hydration(monkeypatch, tmp_path):

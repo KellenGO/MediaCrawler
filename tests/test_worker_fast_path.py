@@ -211,6 +211,9 @@ class TestXhsFastPath:
         assert crawler.browser_path_used is False
         metrics = _metrics(events)
         assert any(m.get("fast_path_used") is True for m in metrics)
+        assert any(m.get("provider_used") == "session_api" and
+                   m.get("provider_attempts") == ["session_api"]
+                   for m in metrics)
         assert not any(m.get("fallback_reason") for m in metrics)
         results = _results(events)
         assert len(results) == 1
@@ -236,6 +239,10 @@ class TestXhsFastPath:
         assert any(m.get("fast_path_used") is False for m in metrics)
         assert any(m.get("fallback_reason") == "fast_path_failed"
                    for m in metrics)
+        assert any(m.get("provider_used") == "browser" and
+                   m.get("provider_attempts") == ["session_api", "browser"] and
+                   m.get("fallback_active") is True
+                   for m in metrics)
         assert len(_results(events)) == 1
         assert "done" in _event_type(events)
         assert "error" not in _event_type(events)
@@ -253,6 +260,10 @@ class TestXhsFastPath:
 
         assert crawler.browser_path_used is False
         assert len(_results(events)) == 1, "不得重复请求已成功的数据"
+        assert any(m.get("provider_used") == "session_api" and
+                   m.get("provider_attempts") == ["session_api"] and
+                   m.get("fallback_active") is False
+                   for m in _metrics(events))
         assert "error" in _event_type(events)
         assert "done" in _event_type(events)
 
@@ -348,6 +359,9 @@ class TestBiliDouyinFastPath:
         assert len(results) == 1
         assert results[0]["platform"] == "bilibili"
         assert results[0]["content_id"] == "BV1yy411c8nE"
+        assert any(m.get("provider_used") == "light_api" and
+                   m.get("provider_attempts") == ["light_api"]
+                   for m in _metrics(events))
         assert "succeeded" in [e.data.get("status") for e in events
                                if e.event == "status"]
 
@@ -364,6 +378,9 @@ class TestBiliDouyinFastPath:
         assert crawler.browser_path_used is True
         assert crawler.created_from_snapshot is False
         assert not any(m.get("fast_path_used") for m in _metrics(events))
+        assert any(m.get("provider_used") == "public_search" and
+                   m.get("provider_attempts") == ["public_search"]
+                   for m in _metrics(events))
         assert "empty" in [e.data.get("status") for e in events
                            if e.event == "status"]
         assert "done" in _event_type(events)
@@ -440,6 +457,9 @@ class TestZhihuFastPath:
         metrics = _metrics(events)
         assert any(m.get("fast_path_used") is False for m in metrics)
         assert any(m.get("fallback_reason") == "fast_path_failed"
+                   for m in metrics)
+        assert any(m.get("provider_used") == "browser" and
+                   m.get("provider_attempts") == ["session_api", "browser"]
                    for m in metrics)
         assert "error" in _event_type(events)
         assert "done" in _event_type(events)
