@@ -17,6 +17,5 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-from .jishu_http_proxy import new_jisu_http_proxy
 from .kuaidl_proxy import new_kuai_daili_proxy
 from .wandou_http_proxy import new_wandou_http_proxy

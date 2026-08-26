@@ -21,13 +21,12 @@
 # -*- coding: utf-8 -*-
 import json
 from typing import Dict, List, Optional
-from urllib.parse import parse_qs, urlparse
 
 import execjs
 from parsel import Selector
 
 from constant import zhihu as zhihu_constant
-from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
+from model.m_zhihu import ZhihuContent, ZhihuCreator
 from tools import utils
 from tools.crawler_util import extract_text_from_html
 from tools.user_hash import anonymize_user_id, mask_nickname
@@ -207,130 +206,6 @@ class ZhihuExtractor:
                 f"[ZhihuExtractor._extract_content_or_comment_author] User Maybe Blocked. {e}"
             )
         return res
-
-    def extract_comments(self, page_content: ZhihuContent, comments: List[Dict]) -> List[ZhihuComment]:
-        """
-        extract zhihu comments
-        Args:
-            page_content: zhihu content object
-            comments: zhihu comments
-
-        Returns:
-
-        """
-        if not comments:
-            return []
-        res: List[ZhihuComment] = []
-        for comment in comments:
-            if comment.get("type") != "comment":
-                continue
-            res.append(self._extract_comment(page_content, comment))
-        return res
-
-    def _extract_comment(self, page_content: ZhihuContent, comment: Dict) -> ZhihuComment:
-        """
-        extract zhihu comment
-        Args:
-            page_content: comment with content object
-            comment: zhihu comment
-
-        Returns:
-
-        """
-        res = ZhihuComment()
-        res.comment_id = str(comment.get("id", ""))
-        res.parent_comment_id = comment.get("reply_comment_id")
-        res.content = extract_text_from_html(comment.get("content"))
-        res.publish_time = comment.get("created_time")
-        res.sub_comment_count = comment.get("child_comment_count")
-        res.like_count = comment.get("like_count") if comment.get("like_count") else 0
-        res.dislike_count = comment.get("dislike_count") if comment.get("dislike_count") else 0
-        res.content_id = page_content.content_id
-        res.content_type = page_content.content_type
-
-        # extract author info
-        author_info = self._extract_content_or_comment_author(comment.get("author"))
-        res.creator_hash = author_info.creator_hash
-        res.user_nickname = author_info.user_nickname
-        return res
-
-    @staticmethod
-    def extract_offset(paging_info: Dict) -> str:
-        """
-        extract offset
-        Args:
-            paging_info:
-
-        Returns:
-
-        """
-        # https://www.zhihu.com/api/v4/comment_v5/zvideos/1424368906836807681/root_comment?limit=10&offset=456770961_10125996085_0&order_by=score
-        next_url = paging_info.get("next")
-        if not next_url:
-            return ""
-
-        parsed_url = urlparse(next_url)
-        query_params = parse_qs(parsed_url.query)
-        offset = query_params.get('offset', [""])[0]
-        return offset
-
-
-    def extract_creator(self, user_url_token: str, html_content: str) -> Optional[ZhihuCreator]:
-        """
-        extract zhihu creator
-        Args:
-            user_url_token : zhihu creator url token
-            html_content: zhihu creator html content
-
-        Returns:
-
-        """
-        if not html_content:
-            return None
-
-        js_init_data = Selector(text=html_content).xpath("//script[@id='js-initialData']/text()").get(default="").strip()
-        if not js_init_data:
-            return None
-
-        js_init_data_dict: Dict = json.loads(js_init_data)
-        users_info: Dict = js_init_data_dict.get("initialState", {}).get("entities", {}).get("users", {})
-        if not users_info:
-            return None
-
-        creator_info: Dict = users_info.get(user_url_token)
-        if not creator_info:
-            return None
-
-        res = ZhihuCreator()
-        res.creator_hash = anonymize_user_id(creator_info.get("id"))
-        res.user_nickname = mask_nickname(creator_info.get("name"))
-        res.follows = creator_info.get("followingCount")
-        res.fans = creator_info.get("followerCount")
-        res.anwser_count = creator_info.get("answerCount")
-        res.video_count = creator_info.get("zvideoCount")
-        res.question_count = creator_info.get("questionCount")
-        res.article_count = creator_info.get("articlesCount")
-        res.column_count = creator_info.get("columnsCount")
-        res.get_voteup_count = creator_info.get("voteupCount")
-        return res
-
-
-    def extract_content_list_from_creator(self, anwser_list: List[Dict]) -> List[ZhihuContent]:
-        """
-        extract content list from creator
-        Args:
-            anwser_list:
-
-        Returns:
-
-        """
-        if not anwser_list:
-            return []
-
-        return self._extract_content_list(anwser_list)
-
-
-
 
     def extract_answer_content_from_html(self, html_content: str) -> Optional[ZhihuContent]:
         """

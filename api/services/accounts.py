@@ -438,7 +438,7 @@ def _set_state(platform: str, **kw: Any) -> Dict[str, Any]:
     return st
 
 
-# ── In-memory session snapshot (Round 16) ───────────────────────────────
+# ── In-memory session snapshot ──────────────────────────────────────────
 # 同步/验证成功后在 API 进程内存中保存该平台的 Cookie 会话快照，供聚合搜索
 # worker 通过 stdin 使用。约束：
 # - 只存在内存，绝不写入磁盘/数据库；
@@ -448,8 +448,8 @@ def _set_state(platform: str, **kw: Any) -> Dict[str, Any]:
 
 _session_snapshots: Dict[str, Dict[str, str]] = {}
 
-# Round 16：账号代数 —— 会话快照每次变更（同步/失效/清除/shutdown）自增，
-# 聚合搜索结果缓存以它为 key 组成部分，实现"账号操作后缓存自动失效"。
+# Increment the account generation whenever a snapshot changes so result
+# cache entries become invalid after account operations.
 _account_generation: Dict[str, int] = {}
 
 # 只保留最近一次搜索的安全状态与路径信息，绝不保存异常文本、请求体或
@@ -644,8 +644,8 @@ def mark_login_required_from_search(platform: str) -> None:
     the in-memory account state WITHOUT launching a browser, touching the
     profile, or reading cookies.
 
-    Round 14.2: this is the ONLY search→account state write, keeping the
-    accounts service the single source of truth for account status.
+    This is the only search→account state write; the accounts service remains
+    the single source of truth for account status.
 
     Rules:
     - a local profile exists (previously imported) or the platform was
@@ -670,8 +670,8 @@ def mark_login_required_from_search(platform: str) -> None:
     st["safe_error_code"] = "login_required"
     name = PLATFORM_DISPLAY_NAMES.get(platform, platform)
     st["safe_message"] = f"{name}登录状态已失效，请前往账号设置重新同步"
-    # Round 16：登录失效 → 内存会话快照一并清除（绝不残留旧 Cookie 快照），
-    # 账号代数推进 → 结果缓存自动失效。
+    # Clear the in-memory snapshot with the account state so stale cookies
+    # cannot survive a login-expiry transition.
     _clear_snapshot_sync(platform)
 
 
@@ -733,7 +733,7 @@ def _profile_lock(platform: str) -> asyncio.Lock:
     return lock
 
 
-# ── Operation coordinator (Phase 4.2) ───────────────────────────────────
+# ── Operation coordinator ───────────────────────────────────────────────
 
 class OperationCoordinator:
     """搜索 / 可见登录 / 账号操作的最小互斥协调（无任务队列框架）。
@@ -973,12 +973,12 @@ async def sync_platform_cookies(
     # verify 都读不到 "connected"（已被覆盖）。显式传给本次验证，绝不依赖
     # 已被覆盖的全局状态，并发时也不会串用其他平台/上一任务的状态。
     previous_status = _state_of(platform).get("status")
-    # Round 16：重新同步前清除旧的内存会话快照（导入失败/验证不通过时
+    # Clear the old in-memory snapshot before resync (an import or verification
     # 不残留旧 Cookie 快照；验证通过后再重新写入）；账号代数推进 →
     # 结果缓存自动失效。
     _clear_snapshot_sync(platform)
 
-    # Phase 4.1：导入 + 验证合并为单任务/单浏览器上下文。
+    # Import and verification share one task and one browser context.
     result = await _bounded_verify(
         platform, diag, previous_status=previous_status, mapped=mapped)
     counts = {k: diag[k] for k in (
@@ -986,7 +986,7 @@ async def sync_platform_cookies(
         "skipped_cookie_count", "rejected_cookie_count",
         "required_cookie_present", "login_marker_presence",
         "browser_cookie_store_count", "sync_stage")}
-    # Round 16.1: 阶段耗时（只含整数毫秒，无任何敏感信息）。
+    # Stage timings contain integer milliseconds only; no sensitive data.
     sync_timings = result.get("sync_timings_ms") if result else None
     _timings = ({"sync_timings_ms": sync_timings}
                 if sync_timings else {})
@@ -1115,7 +1115,7 @@ async def _sync_and_verify_platform(
                 except Exception:
                     pass
         _set_state(platform, browser_backend=backend)
-        # Round 16：只有真实验证通过才保留内存快照；其余情况清除旧快照。
+        # Keep a snapshot only after real verification succeeds.
         if verdict is True or verdict == "verified":
             await set_session_snapshot(platform, snapshot_cookies or {})
         else:
@@ -1178,7 +1178,7 @@ async def _bounded_verify(
     previous_status: Optional[str] = None,
     mapped: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """在单一后台任务中完成"导入 + 验证"（单次浏览器上下文，Phase 4.1），
+    """在单一后台任务中完成"导入 + 验证"（单次浏览器上下文），
     有界等待 SYNC_VERIFY_TIMEOUT_SECONDS。
 
     Returns the full result dict; None when the bound expired (the task keeps
@@ -1226,7 +1226,7 @@ def _make_verify_done_cb(platform: str):
 def is_verify_active(platform: str) -> bool:
     """该平台是否存在仍在运行的后台验证任务。
 
-    Round 11 竞态防护：有界验证超时（30s）后任务在后台继续跑，期间再次
+    竞态防护：有界验证超时（30s）后任务在后台继续跑，期间再次
     sync / verify / delete 同一平台会与后台任务并发操作同一 profile ——
     路由必须返回 409 verification_in_progress，不允许两个任务顺序覆盖
     同一个平台 profile。任务完成（done callback 弹出）后恢复可操作。
@@ -1242,9 +1242,9 @@ async def cancel_verify_tasks() -> None:
         t.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
-    # Phase 4.2: shutdown 清理协调状态。
+    # Clear coordination state during shutdown.
     await operation_coordinator.clear()
-    # Round 16: shutdown 清除全部内存会话快照。
+    # Shutdown also clears all in-memory session snapshots.
     await clear_all_session_snapshots()
 
 
@@ -1313,7 +1313,7 @@ async def verify_platform(platform: str, previous_status: Optional[str] = None) 
                     await playwright.stop()
                 except Exception:
                     pass
-        # Round 16：验证通过才保留内存快照；否则清除旧快照。
+        # Keep a snapshot only after real verification succeeds.
         if verdict is True or verdict == "verified":
             await set_session_snapshot(platform, snapshot_cookies or {})
         else:

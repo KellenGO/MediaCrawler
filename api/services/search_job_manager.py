@@ -45,7 +45,7 @@ _MAX_STDERR_TAIL = 40
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 
-# Round 16: 生产默认使用常驻 worker supervisor；一次性模式保留给测试与
+# Production defaults to resident worker supervisors; one-shot mode remains for
 # 手工调试（tests/conftest.py 会把默认置为 oneshot，新增 supervisor 测试
 # 单独开启）。用环境变量也可覆盖：MC_SEARCH_WORKER_MODE=oneshot。
 SEARCH_WORKER_MODE = os.environ.get("MC_SEARCH_WORKER_MODE", "supervisor")
@@ -53,7 +53,7 @@ SEARCH_WORKER_MODE = os.environ.get("MC_SEARCH_WORKER_MODE", "supervisor")
 logger = logging.getLogger(__name__)
 
 
-# ── Resident platform worker supervisor (Round 16) ──────────────────────
+# ── Resident platform worker supervisor ─────────────────────────────────
 
 class PlatformWorkerSupervisor:
     """懒启动、可回收的平台 worker supervisor。
@@ -81,7 +81,7 @@ class PlatformWorkerSupervisor:
             self._reaper_task = asyncio.create_task(self._idle_reaper())
 
     async def _spawn(self, platform: str) -> "_ResidentWorker":
-        # Round 16.2: supervisor 是 max-request 生命周期的单一事实来源 ——
+        # The supervisor is the single source of truth for the max-request
         # 把上限写进子进程 env，worker 与 supervisor 绝不各自维护不一致的上限。
         env = {**os.environ, "PYTHONUTF8": "1",
                "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
@@ -155,7 +155,7 @@ class PlatformWorkerSupervisor:
     def is_at_max_requests(self, worker: "_ResidentWorker") -> bool:
         """该 worker 是否已达到 max-request 上限（当前请求即最后一个）。
 
-        Round 16.2: supervisor 是上限的单一事实来源（_spawn 会把该值写入
+        The supervisor is the single source of truth for the limit (_spawn
         子进程 env），因此这里用 supervisor 自己的计数判断，绝不靠等待/
         轮询进程退出。
         """
@@ -164,7 +164,7 @@ class PlatformWorkerSupervisor:
     async def retire_after_last_request(
         self, platform: str, worker: "_ResidentWorker",
     ) -> None:
-        """最后一个请求完成后的确定性退役（Round 16.2）。
+        """最后一个请求完成后的确定性退役。
 
         1. 先从注册表移除 —— 此后该平台的任何新请求必然新建 worker，
            绝不写入正在退出的旧 stdin；
@@ -305,7 +305,7 @@ class _ResidentWorker:
         self.last_used_at: float = time.monotonic()
         self.request_count: int = 0
         self.busy: bool = False
-        # Round 16.1: 本次请求是否复用了既有进程（timing.reused_worker）。
+        # Record whether this request reused an existing worker.
         self.reused: bool = False
 
 # ── Stderr safety ───────────────────────────────────────────────────────
@@ -326,7 +326,7 @@ class SearchJobManager:
         self._lock = asyncio.Lock()
         self._active_job: Optional[_ActiveJob] = None
         self._recent_job: Optional[_ActiveJob] = None
-        # Round 16: 常驻平台 worker supervisor（懒启动/可回收）。
+        # Resident platform workers start lazily and are reclaimed when idle.
         self.supervisor = PlatformWorkerSupervisor()
 
     def is_search_active(self) -> bool:
@@ -430,7 +430,7 @@ class SearchJobManager:
     async def _run_platform(self, job: "_ActiveJob", platform: str) -> None:
         """单平台执行：命中内存结果缓存则直接回放（不启动 worker）。
 
-        缓存边界（Round 16）：只有平台终态 succeeded/empty 才写入；key 含
+        缓存边界：只有平台终态 succeeded/empty 才写入；key 含
         账号代数（账号操作后自动失效）；用户主动"重新搜索"（bypass_cache）
         跳过查/写。未命中 → 走常驻/一次性 worker。
         """
@@ -453,7 +453,7 @@ class SearchJobManager:
         request = WorkerRequest(
             job_id=job.job_id, mode="search", platform=platform,
             keyword=job.keyword, limit=job.limit_for(platform),
-            # Round 16: 内存会话快照（经 stdin 传输，无快照则 worker
+            # In-memory session snapshot (sent through stdin; without one the worker
             # 自动回退浏览器路径）；fast path 由 worker 安全回退兜底。
             session_snapshot=get_session_snapshot(platform),
             fast_path=True,
@@ -468,7 +468,7 @@ class SearchJobManager:
             await self._run_worker_oneshot(job, platform)
 
     async def _run_worker_supervisor(self, job: "_ActiveJob", platform: str) -> None:
-        """常驻 supervisor 模式（Round 16）：复用平台 worker 进程。"""
+        """常驻 supervisor 模式：复用平台 worker 进程。"""
         job.set_platform_status(platform, "running", 0)
         done_received = False
         try:
@@ -476,7 +476,7 @@ class SearchJobManager:
             job.mark_spawn_start(platform)
             worker = await self.supervisor.submit(platform, request_json)
             job.mark_spawn_end(platform)  # 已有驻留进程时几乎为 0
-            # Round 16.1: 明确记录本次是否复用了既有 worker 进程。
+            # Record whether this request reused an existing worker process.
             job.timings[platform].reused_worker = bool(worker.reused)
             proc = worker.proc
             job.procs.append(proc)
@@ -504,7 +504,7 @@ class SearchJobManager:
             # 请求处理已结束（成功/失败/空）：刷新空闲计时，防长任务误回收。
             await self.supervisor.touch(platform)
 
-            # Round 16.2 确定性退役（取代 16.1 的 50ms 时间启发式）：
+            # Deterministic retirement replaces the old time-based heuristic:
             # supervisor 通过 request_count 明确知道当前请求是不是该 worker
             # 的最后一个 —— 达到上限则确定性关闭 stdin、等待退出并移除旧
             # worker（等待是 event-driven，进程真正退出才返回）；未达上限
@@ -520,7 +520,7 @@ class SearchJobManager:
                 except asyncio.TimeoutError:
                     pass
 
-            # Round 16.1 严格语义（与 one-shot 路径一致）：
+            # Keep the same terminal semantics as the one-shot path:
             #   done + exit0（驻留进程保留/优雅退役）        → 成功/空
             #   done + nonzero（done 后崩溃）                → failed
             #   无 done + exit0 / 无 done + nonzero（中途退出）→ failed

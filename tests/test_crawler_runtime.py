@@ -52,15 +52,11 @@ class TestCrawlerRuntimeOptionsDefaults:
 
     def test_default_attributes(self):
         opts = CrawlerRuntimeOptions()
-        assert opts.persist_results is True
         assert opts.login_policy == "interactive"
         assert opts.result_limit == 20
         assert opts.strict_errors is False
-        assert opts.enable_comments is False  # aggregate-search default
-        assert opts.enable_media is False
         assert opts.result_sink is None
         assert opts.headless is None
-        assert opts.fetch_details is True      # Round 9: 默认保留详情路径
         assert opts.allow_public_search is False  # Round 9: 默认保留登录门禁
         assert opts.extra == {}
 
@@ -68,23 +64,17 @@ class TestCrawlerRuntimeOptionsDefaults:
         results = []
         opts = CrawlerRuntimeOptions(
             result_sink=lambda items: results.extend(items),
-            persist_results=False,
             login_policy="fail_fast",
             result_limit=10,
             strict_errors=True,
-            enable_comments=False,
-            enable_media=False,
             headless=True,
-            fetch_details=False,          # Round 9: B站轻量列表模式
             allow_public_search=True,     # Round 9: 抖音公开搜索
         )
-        assert opts.persist_results is False
         assert opts.login_policy == "fail_fast"
         assert opts.result_limit == 10
         assert opts.strict_errors is True
         assert opts.result_sink is not None
         assert opts.headless is True
-        assert opts.fetch_details is False
         assert opts.allow_public_search is True
 
 
@@ -96,15 +86,6 @@ class TestAbstractCrawlerHooks:
         return _DummyCrawler()
 
     # ── Default behaviour (no runtime_options) ────────────────
-
-    def test_should_persist_default(self, crawler):
-        assert crawler._should_persist() is True
-
-    def test_should_fetch_comments_default(self, crawler):
-        assert crawler._should_fetch_comments() is True
-
-    def test_should_fetch_media_default(self, crawler):
-        assert crawler._should_fetch_media() is True
 
     def test_login_fail_fast_default(self, crawler):
         assert crawler._login_fail_fast() is False
@@ -122,10 +103,6 @@ class TestAbstractCrawlerHooks:
 
     # ── Aggregate-search mode ────────────────────────────────
 
-    def test_persist_false(self, crawler):
-        crawler.runtime_options = CrawlerRuntimeOptions(persist_results=False)
-        assert crawler._should_persist() is False
-
     def test_login_fail_fast(self, crawler):
         crawler.runtime_options = CrawlerRuntimeOptions(login_policy="fail_fast")
         assert crawler._login_fail_fast() is True
@@ -138,17 +115,10 @@ class TestAbstractCrawlerHooks:
         crawler.runtime_options = CrawlerRuntimeOptions(strict_errors=True)
         assert crawler._strict_errors() is True
 
-    # ── Round 9: fetch_details / allow_public_search ─────────────────
-
-    def test_fetch_details_default(self, crawler):
-        assert crawler._fetch_details() is True
+    # ── Public-search mode ─────────────────
 
     def test_allow_public_search_default(self, crawler):
         assert crawler._allow_public_search() is False
-
-    def test_fetch_details_false(self, crawler):
-        crawler.runtime_options = CrawlerRuntimeOptions(fetch_details=False)
-        assert crawler._fetch_details() is False
 
     def test_allow_public_search_true(self, crawler):
         crawler.runtime_options = CrawlerRuntimeOptions(allow_public_search=True)
@@ -159,21 +129,12 @@ class TestAbstractCrawlerHooks:
         received = []
         crawler.runtime_options = CrawlerRuntimeOptions(
             result_sink=lambda items: received.extend(items),
-            persist_results=False,
         )
         test_data = [{"id": "1"}, {"id": "2"}]
         crawler._result_sink_call(test_data)
         assert len(received) == 2
         assert received[0] == {"id": "1"}
         assert received[1] == {"id": "2"}
-
-    def test_enable_comments_false(self, crawler):
-        crawler.runtime_options = CrawlerRuntimeOptions(enable_comments=False)
-        assert crawler._should_fetch_comments() is False
-
-    def test_enable_media_false(self, crawler):
-        crawler.runtime_options = CrawlerRuntimeOptions(enable_media=False)
-        assert crawler._should_fetch_media() is False
 
 
 class TestBackwardCompatibility:
@@ -183,25 +144,21 @@ class TestBackwardCompatibility:
         from media_platform.xhs.core import XiaoHongShuCrawler
         c = XiaoHongShuCrawler()
         assert c.runtime_options is None
-        assert c._should_persist() is True
 
     def test_douyin_crawler_has_runtime_attr(self):
         from media_platform.douyin.core import DouYinCrawler
         c = DouYinCrawler()
         assert c.runtime_options is None
-        assert c._should_persist() is True
 
     def test_bilibili_crawler_has_runtime_attr(self):
         from media_platform.bilibili.core import BilibiliCrawler
         c = BilibiliCrawler()
         assert c.runtime_options is None
-        assert c._should_persist() is True
 
     def test_zhihu_crawler_has_runtime_attr(self):
         from media_platform.zhihu.core import ZhihuCrawler
         c = ZhihuCrawler()
         assert c.runtime_options is None
-        assert c._should_persist() is True
 
     def test_all_crawlers_accept_runtime_options(self):
         """Set runtime_options on each crawler and verify it sticks."""
@@ -212,7 +169,6 @@ class TestBackwardCompatibility:
 
         for crawler_cls in [XiaoHongShuCrawler, DouYinCrawler, BilibiliCrawler, ZhihuCrawler]:
             c = crawler_cls()
-            opts = CrawlerRuntimeOptions(persist_results=False, result_limit=5)
+            opts = CrawlerRuntimeOptions(result_limit=5)
             c.runtime_options = opts
-            assert c._should_persist() is False
             assert c._result_limit() == 5

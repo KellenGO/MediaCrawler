@@ -4,30 +4,21 @@
 # This file is part of MediaCrawler project.
 # Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 
-"""XHS note URL construction and RetryError HTML fallback — production
-functions ``aggregate_search.adapters.xhs.build_note_url`` /
-``XhsAdapter.adapt`` and ``media_platform.xhs.core.XiaoHongShuCrawler.
-get_note_detail_async_task``.
-"""
+"""XHS note URL construction and safe adapter URL handling."""
 
-import asyncio
 import os
 import sys
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from tenacity import RetryError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
-from base.crawler_runtime import CrawlerRuntimeOptions
 from aggregate_search.adapters import XhsAdapter
 from aggregate_search.adapters.xhs import (
     XHS_ALLOWED_HOSTS, XHS_EXPLORE_URL, build_note_url,
 )
-from media_platform.xhs.core import XiaoHongShuCrawler
-from media_platform.xhs.exception import DataFetchError
 
 # ── build_note_url (production function) ────────────────────────────────
 
@@ -102,96 +93,3 @@ def test_existing_official_note_url_keeps_search_context_for_hydration():
     }])
     assert "xsec_token=tok" in results[0].url
     assert "xsec_source=pc_search" in results[0].url
-
-
-# ── get_note_detail_async_task RetryError fallback (production) ─────────
-
-class _FakeClient:
-    """Pluggable xhs client for the production crawler method."""
-
-    def __init__(self, api_impl, html_impl):
-        self._api = api_impl
-        self._html = html_impl
-
-    async def get_note_by_id(self, note_id, xsec_source, xsec_token):
-        return await self._api(note_id, xsec_source, xsec_token)
-
-    async def get_note_by_id_from_html(self, note_id, xsec_source,
-                                       xsec_token, enable_cookie=True):
-        return await self._html(note_id, xsec_source, xsec_token)
-
-
-def _make_crawler(monkeypatch, api_impl, html_impl, strict):
-    monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)
-    crawler = XiaoHongShuCrawler()
-    crawler.xhs_client = _FakeClient(api_impl, html_impl)
-    crawler.runtime_options = CrawlerRuntimeOptions(strict_errors=strict)
-    return crawler
-
-
-def _retry_error():
-    return RetryError(last_attempt=None)
-
-
-async def _run(crawler, note_id="n1"):
-    return await crawler.get_note_detail_async_task(
-        note_id, "pc_search", "tok", asyncio.Semaphore(1))
-
-
-def test_retry_error_then_html_success(monkeypatch):
-    """RetryError from API + successful HTML fallback → note returned
-    (with xsec fields merged) — the RetryError must NOT kill the note."""
-    async def api(*a):
-        raise _retry_error()
-
-    async def html(*a):
-        return {"note_id": "n1", "title": "From HTML"}
-
-    crawler = _make_crawler(monkeypatch, api, html, strict=True)
-    result = asyncio.run(_run(crawler))
-    assert result is not None
-    assert result["title"] == "From HTML"
-    assert result["xsec_token"] == "tok"
-    assert result["xsec_source"] == "pc_search"
-
-
-def test_retry_error_html_empty_strict_raises(monkeypatch):
-    """RetryError + empty HTML + strict_errors=True → DataFetchError."""
-    async def api(*a):
-        raise _retry_error()
-
-    async def html(*a):
-        return None
-
-    crawler = _make_crawler(monkeypatch, api, html, strict=True)
-    with pytest.raises(DataFetchError):
-        asyncio.run(_run(crawler))
-
-
-def test_retry_error_html_empty_lenient_returns_none(monkeypatch):
-    """RetryError + empty HTML + strict_errors=False → None (skip)."""
-    async def api(*a):
-        raise _retry_error()
-
-    async def html(*a):
-        return None
-
-    crawler = _make_crawler(monkeypatch, api, html, strict=False)
-    assert asyncio.run(_run(crawler)) is None
-
-
-def test_api_empty_still_tries_html(monkeypatch):
-    """Empty API result (no exception) must still hit the HTML fallback."""
-    calls = []
-
-    async def api(*a):
-        return None
-
-    async def html(*a):
-        calls.append(a)
-        return {"note_id": "n1", "title": "T"}
-
-    crawler = _make_crawler(monkeypatch, api, html, strict=True)
-    result = asyncio.run(_run(crawler))
-    assert result is not None
-    assert calls, "HTML fallback was never attempted"

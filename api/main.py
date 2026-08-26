@@ -21,23 +21,15 @@ MediaCrawler WebUI API Server
 Start command: uvicorn api.main:app --port 8080 --reload
 Or: python -m api.main
 """
-import asyncio
 import os
-import sys
-import subprocess
-from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from .routers import crawler_router, data_router, websocket_router
 from .routers.search import search_router
 from .services.search_job_manager import search_job_manager
-
-# Project root directory (used for running subprocesses like uv run main.py)
-PROJECT_ROOT = Path(__file__).parent.parent
 
 app = FastAPI(
     title="MediaCrawler WebUI API",
@@ -51,31 +43,13 @@ WEBUI_DIR = os.path.join(os.path.dirname(__file__), "webui")
 
 @app.on_event("shutdown")
 async def _shutdown_cleanup():
-    """Kill all child worker, login, and legacy crawler processes on shutdown."""
+    """Stop aggregate search and login workers on shutdown."""
     from .routers.search import _cleanup_login_on_shutdown
     from .services.accounts import cancel_verify_tasks
-    from .services.crawler_manager import crawler_manager
 
     await search_job_manager.cleanup()
     await _cleanup_login_on_shutdown()
     await cancel_verify_tasks()
-
-    # Stop legacy crawler_manager subprocess
-    if crawler_manager.process and crawler_manager.process.poll() is None:
-        try:
-            crawler_manager.process.terminate()
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(
-                    None, crawler_manager.process.wait),
-                timeout=3)
-        except (asyncio.TimeoutError, Exception):
-            try:
-                crawler_manager.process.kill()
-            except Exception:
-                pass
 
 # CORS configuration - allow frontend dev server access
 app.add_middleware(
@@ -94,9 +68,6 @@ app.add_middleware(
 
 # Register routers
 app.include_router(search_router)  # search router includes its own /api/search prefix
-app.include_router(crawler_router, prefix="/api")
-app.include_router(data_router, prefix="/api")
-app.include_router(websocket_router, prefix="/api")
 
 
 @app.get("/")
@@ -116,107 +87,6 @@ async def serve_frontend():
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
-
-
-@app.get("/api/env/check")
-async def check_environment():
-    """Check if MediaCrawler environment is configured correctly"""
-    try:
-        if sys.platform == "win32":
-            loop = asyncio.get_running_loop()
-            process = await loop.run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    [sys.executable, "main.py", "--help"],
-                    capture_output=True,
-                    timeout=30.0,
-                    cwd=str(PROJECT_ROOT)
-                )
-            )
-            stdout, stderr = process.stdout, process.stderr  # bytes
-        else:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, "main.py", "--help",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(PROJECT_ROOT)
-            )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=30.0
-            )
-        if process.returncode == 0:
-            return {
-                "success": True,
-                "message": "MediaCrawler environment configured correctly",
-                "output": stdout.decode("utf-8", errors="ignore")[:500]
-            }
-        else:
-            error_msg = stderr.decode("utf-8", errors="ignore") or stdout.decode("utf-8", errors="ignore")
-            return {
-                "success": False,
-                "message": "Environment check failed",
-                "error": error_msg[:500]
-            }
-    except asyncio.TimeoutError:
-        return {
-            "success": False,
-            "message": "Environment check timeout",
-            "error": "Command execution exceeded 30 seconds"
-        }
-    except FileNotFoundError:
-        return {
-            "success": False,
-            "message": "Python command not found",
-            "error": "Please ensure Python is installed and configured in system PATH"
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": "Environment check error",
-            "error": f"{type(e).__name__}: {str(e) or 'Unknown'}"
-        }
-
-
-@app.get("/api/config/platforms")
-async def get_platforms():
-    """Get list of supported platforms"""
-    return {
-        "platforms": [
-            {"value": "xhs", "label": "Xiaohongshu", "icon": "book-open"},
-            {"value": "dy", "label": "Douyin", "icon": "music"},
-            {"value": "ks", "label": "Kuaishou", "icon": "video"},
-            {"value": "bili", "label": "Bilibili", "icon": "tv"},
-            {"value": "wb", "label": "Weibo", "icon": "message-circle"},
-            {"value": "tieba", "label": "Baidu Tieba", "icon": "messages-square"},
-            {"value": "zhihu", "label": "Zhihu", "icon": "help-circle"},
-        ]
-    }
-
-
-@app.get("/api/config/options")
-async def get_config_options():
-    """Get all configuration options"""
-    return {
-        "login_types": [
-            {"value": "qrcode", "label": "QR Code Login"},
-            {"value": "cookie", "label": "Cookie Login"},
-        ],
-        "crawler_types": [
-            {"value": "search", "label": "Search Mode"},
-            {"value": "detail", "label": "Detail Mode"},
-            {"value": "creator", "label": "Creator Mode"},
-        ],
-        "save_options": [
-            {"value": "jsonl", "label": "JSONL File"},
-            {"value": "json", "label": "JSON File"},
-            {"value": "csv", "label": "CSV File"},
-            {"value": "excel", "label": "Excel File"},
-            {"value": "sqlite", "label": "SQLite Database"},
-            {"value": "db", "label": "MySQL Database"},
-            {"value": "mongodb", "label": "MongoDB Database"},
-        ],
-    }
 
 
 # Mount static resources - must be placed after all routes

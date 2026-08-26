@@ -53,7 +53,7 @@ export interface AccountStatusInfo {
 export type DiagnosticTone = "normal" | "available" | "limited" | "unavailable";
 
 export function diagnosticTone(
-  diagnostic: Pick<PlatformDiagnostic, "search_available" | "snippet_available" | "hydration_available" | "fallback_active">,
+  diagnostic: Pick<PlatformDiagnostic, "search_available" | "snippet_available" | "fallback_active">,
 ): DiagnosticTone {
   if (!diagnostic.search_available) return "unavailable";
   // A search-time snippet is enough for the user-facing capability. Do not

@@ -28,8 +28,8 @@ class AbstractCrawler(ABC):
     """Base crawler with optional runtime behaviour overrides.
 
     Attach a ``CrawlerRuntimeOptions`` instance before ``start()`` to
-    control result sinking, persistence, login policy, and error handling.
-    Default (None) preserves 100% backward-compatible behaviour.
+    control result sinking, login policy, and error handling.
+    ``None`` means the crawler is running outside aggregate search.
     """
 
     def __init__(self) -> None:
@@ -88,27 +88,6 @@ class AbstractCrawler(ABC):
         return await self.launch_browser(playwright.chromium, playwright_proxy, user_agent, headless)
 
 
-    def _should_persist(self) -> bool:
-        """Return True if results should be written to the store layer."""
-        opts = self.runtime_options
-        if opts is None:
-            return True
-        return getattr(opts, "persist_results", True)
-
-    def _should_fetch_comments(self) -> bool:
-        """Return True if comments should be fetched."""
-        opts = self.runtime_options
-        if opts is None:
-            return True
-        return getattr(opts, "enable_comments", True)
-
-    def _should_fetch_media(self) -> bool:
-        """Return True if media (images/video) should be downloaded."""
-        opts = self.runtime_options
-        if opts is None:
-            return True
-        return getattr(opts, "enable_media", True)
-
     def _result_sink_call(self, items: List[Dict]) -> None:
         """Invoke the result sink callback if configured."""
         opts = self.runtime_options
@@ -139,27 +118,12 @@ class AbstractCrawler(ABC):
             return False
         return getattr(opts, "strict_errors", False)
 
-    def _fetch_details(self) -> bool:
-        """Return True if per-item detail fetching is enabled (Bilibili)."""
-        opts = self.runtime_options
-        if opts is None:
-            return True
-        return getattr(opts, "fetch_details", True)
-
     def _allow_public_search(self) -> bool:
         """Return True if search may proceed without a confirmed login."""
         opts = self.runtime_options
         if opts is None:
             return False
         return getattr(opts, "allow_public_search", False)
-
-    def _stream_results(self) -> bool:
-        """Return True if each detail should be pushed to the sink as soon as
-        it is fetched (in original order) instead of after the whole batch."""
-        opts = self.runtime_options
-        if opts is None:
-            return False
-        return getattr(opts, "stream_results", False)
 
     def _reuse_http_client(self) -> bool:
         """Return True if the platform client should reuse one httpx client."""
@@ -204,39 +168,6 @@ class AbstractLogin(ABC):
 
     @abstractmethod
     async def login_by_cookies(self):
-        pass
-
-
-class AbstractStore(ABC):
-
-    @abstractmethod
-    async def store_content(self, content_item: Dict):
-        pass
-
-    @abstractmethod
-    async def store_comment(self, comment_item: Dict):
-        pass
-
-    # TODO support all platform
-    # only xhs is supported, so @abstractmethod is commented
-    @abstractmethod
-    async def store_creator(self, creator: Dict):
-        pass
-
-
-class AbstractStoreImage(ABC):
-    # TODO: support all platform
-    # only weibo is supported
-    # @abstractmethod
-    async def store_image(self, image_content_item: Dict):
-        pass
-
-
-class AbstractStoreVideo(ABC):
-    # TODO: support all platform
-    # only weibo is supported
-    # @abstractmethod
-    async def store_video(self, video_content_item: Dict):
         pass
 
 

@@ -4,9 +4,8 @@
 # This file is part of MediaCrawler project.
 # Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 
-"""Round 9 — B站轻量列表模式（fetch_details=False）生产路径测试。
 
-调用真实的 ``BilibiliCrawler.search_by_keywords``（fetch_details=False 时
+"""
 直接把 /search/type 扁平列表项交给 result_sink，绝不调用
 ``get_video_info`` 详情 API）；真实 ``BilibiliAdapter`` 提取扁平字段；
 真实 ``worker._classify_error`` 分类 B站错误 metadata。
@@ -85,19 +84,15 @@ class _FakeBiliClient:
         }}
 
 
-def _make_crawler(fake_client, sink_list, limit=10, fetch_details=False):
+def _make_crawler(fake_client, sink_list, limit=10):
     crawler = BilibiliCrawler()
     crawler.bili_client = fake_client
     crawler.runtime_options = CrawlerRuntimeOptions(
         result_sink=lambda items: sink_list.extend(items),
-        persist_results=False,
         login_policy="fail_fast",
-        enable_comments=False,
-        enable_media=False,
         result_limit=limit,
         strict_errors=False,
         headless=True,
-        fetch_details=fetch_details,
     )
     return crawler
 
@@ -105,22 +100,17 @@ def _make_crawler(fake_client, sink_list, limit=10, fetch_details=False):
 def _configure_config(monkeypatch):
     monkeypatch.setattr(config, "KEYWORDS", "露营")
     monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0.01)
-    monkeypatch.setattr(config, "ENABLE_GET_COMMENTS", False)
-    monkeypatch.setattr(config, "ENABLE_GET_MEIDAS", False)
-    monkeypatch.setattr(config, "BILI_SEARCH_MODE", "normal")
 
 
 # ── 轻量列表模式：真实 crawler 路径，0 次详情 API ────────────────────────
 
 def test_light_list_mode_never_calls_detail_api(monkeypatch):
-    """fetch_details=False：真实 BilibiliCrawler.search_by_keywords 把 10 个
-    扁平列表项直接交给 sink，get_video_info 调用次数必须为 0（详情 API
-    tripwire 不触发）。"""
+    """扁平列表项直接交给 sink，不调用详情 API。"""
     _configure_config(monkeypatch)
     pages = [{"result": [_flat_item(i) for i in range(10)]}]
     fake = _FakeBiliClient(pages)
     sink = []
-    crawler = _make_crawler(fake, sink, limit=10, fetch_details=False)
+    crawler = _make_crawler(fake, sink, limit=10)
 
     asyncio.run(crawler.search_by_keywords())
 
@@ -130,29 +120,13 @@ def test_light_list_mode_never_calls_detail_api(monkeypatch):
     assert [r["bvid"] for r in sink] == [f"BV1fake{i:02d}" for i in range(10)]
 
 
-def test_legacy_detail_mode_still_calls_detail_api(monkeypatch):
-    """fetch_details=True（默认）保留原行为：逐条调用 get_video_info，
-    sink 收到带 View 的详情 dict。"""
-    _configure_config(monkeypatch)
-    pages = [{"result": [_flat_item(i) for i in range(10)]}]
-    fake = _FakeBiliClient(pages, raise_on_detail=False)
-    sink = []
-    crawler = _make_crawler(fake, sink, limit=10, fetch_details=True)
-
-    asyncio.run(crawler.search_by_keywords())
-
-    assert fake.detail_calls == 10, "legacy 模式必须调用 10 次详情 API"
-    assert len(sink) == 10
-    assert all("View" in item for item in sink)
-
-
 def test_light_list_limits_output(monkeypatch):
     """轻量模式按 result_limit 精确裁剪 remaining，不多输出。"""
     _configure_config(monkeypatch)
     pages = [{"result": [_flat_item(i) for i in range(10)]}]
     fake = _FakeBiliClient(pages)
     sink = []
-    crawler = _make_crawler(fake, sink, limit=3, fetch_details=False)
+    crawler = _make_crawler(fake, sink, limit=3)
 
     asyncio.run(crawler.search_by_keywords())
 
@@ -186,14 +160,13 @@ def test_adapter_extracts_flat_fields():
 
 def test_end_to_end_crawler_sink_adapter_full_dto(monkeypatch):
     """Round 10 端到端：真实 BilibiliCrawler.search_by_keywords
-    （fetch_details=False）→ result_sink → 真实 BilibiliAdapter.adapt
     （worker handle_results 的 dict 化路径）→ DTO 字段完整，且详情 API
     调用为 0 —— 整条链路只走轻量列表。"""
     _configure_config(monkeypatch)
     pages = [{"result": [_flat_item(i) for i in range(3)]}]
     fake = _FakeBiliClient(pages)
     sink = []
-    crawler = _make_crawler(fake, sink, limit=3, fetch_details=False)
+    crawler = _make_crawler(fake, sink, limit=3)
 
     asyncio.run(crawler.search_by_keywords())
 

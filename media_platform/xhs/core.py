@@ -19,9 +19,7 @@
 
 import asyncio
 import os
-import random
 import time
-from asyncio import Task
 from typing import Dict, List, Optional
 
 from playwright.async_api import (
@@ -31,21 +29,16 @@ from playwright.async_api import (
     Playwright,
     async_playwright,
 )
-from tenacity import RetryError
-
 import config
 from base.base_crawler import AbstractCrawler
-from model.m_xiaohongshu import NoteUrlInfo, CreatorUrlInfo
-from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
-from store import xhs as xhs_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
 from var import crawler_type_var, source_keyword_var
 
 from .client import XiaoHongShuClient
-from .exception import DataFetchError, NoteNotFoundError
+from .exception import DataFetchError
 from .field import SearchSortType
-from .help import parse_note_info_from_note_url, parse_creator_info_from_url, get_search_id
+from .help import get_search_id
 from .login import XiaoHongShuLogin
 
 
@@ -68,6 +61,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self._begin_phase_timing()
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
+            from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
@@ -127,21 +121,14 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
-                # Search for notes and retrieve their comment information.
                 await self.search()
-            elif config.CRAWLER_TYPE == "detail":
-                # Get the information and comments of the specified post
-                await self.get_specified_notes()
-            elif config.CRAWLER_TYPE == "creator":
-                # Get creator's information and their notes and comments
-                await self.get_creators_and_notes()
             else:
                 pass
 
             utils.logger.info("[XiaoHongShuCrawler.start] Xhs Crawler finished ...")
 
     async def search(self) -> None:
-        """Search for notes and retrieve their comment information."""
+        """Search notes through the lightweight list API used by aggregation."""
         utils.logger.info("[XiaoHongShuCrawler.search] Begin search Xiaohongshu keywords")
         xhs_limit_count = 20  # Xiaohongshu limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < xhs_limit_count:
@@ -157,8 +144,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
             page = 1
             search_id = get_search_id()
             source_offset = 0  # 已处理页累计条目数（原始搜索列表序号基准）
-            # Round 17.1: 轻量列表跨页去重集合（重复 content_id 不消耗
-            # remaining）；按关键词重置（各关键词搜索相互独立）。
+            # Repeated content IDs do not consume the result limit; reset the
+            # set for each keyword because searches are independent.
             seen_light_content_ids: set = set()
             while remaining > 0 and (page - start_page + 1) * xhs_limit_count <= config.CRAWLER_MAX_NOTES_COUNT + xhs_limit_count:
                 if page < start_page:
@@ -168,8 +155,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
                 try:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] search Xiaohongshu keyword: {keyword}, page: {page}")
-                    note_ids: List[str] = []
-                    xsec_tokens: List[str] = []
                     _req_start = time.perf_counter()
                     notes_res = await self.xhs_client.get_note_by_keyword(
                         keyword=keyword,
@@ -194,343 +179,44 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         utils.logger.info("[XiaoHongShuCrawler.search] No items in this page!")
                         break
 
-                    # Limit detail tasks to remaining count
-                    filtered_items = [
-                        i for i in current_items
-                        if i.get("model_type") not in ("rec_query", "hot_query")
-                    ]
-                    items_to_fetch = filtered_items[:remaining]
-                    # Round 16.1: 原始搜索列表序号（过滤前 current_items 中的
-                    # 位置 + 已处理页累计偏移）。详情任务按完成顺序 sink，最终
-                    # 顺序必须按此恢复相关性（rec/hot 推荐项占位但不抓取）。
-                    source_index_by_id = {
-                        i.get("id"): source_offset + idx
-                        for idx, i in enumerate(current_items)
-                    }
-
-                    if not self._fetch_details():
-                        # ── Round 17/17.1 聚合搜索轻量列表模式 ──────────
-                        # 直接使用搜索列表接口数据生成结果，不再逐条调详情。
-                        # 直接枚举原始 current_items（保留真实原始位置）：
-                        # - rec_query/hot_query 跳过但占位；
-                        # - content_id 缺失/重复的项跳过，绝不消耗 remaining；
-                        # - source_index = source_offset + 原始 enumerate 下标
-                        #   （不再用 source_index_by_id 字典反查）；
-                        # - 收集满 remaining 个有效唯一条目即停止；
-                        # 安全浅拷贝，不修改平台原始响应。
-                        light_items = []
-                        for idx, post_item in enumerate(current_items):
-                            if len(light_items) >= remaining:
-                                break
-                            if post_item.get("model_type") in (
-                                    "rec_query", "hot_query"):
-                                continue
-                            card = post_item.get("note_card")
-                            content_id = post_item.get("id")
-                            if content_id is None and isinstance(card, dict):
-                                content_id = card.get("note_id")
-                            if content_id is None:
-                                content_id = post_item.get("note_id")
-                            if not content_id:
-                                continue  # 无效项不消耗 remaining
-                            if content_id in seen_light_content_ids:
-                                continue  # 重复项不消耗 remaining
-                            seen_light_content_ids.add(content_id)
-                            item = dict(post_item)  # 浅拷贝
-                            item["source_index"] = source_offset + idx
-                            light_items.append(item)
-                        if light_items:
-                            self._result_sink_call(light_items)
-                        remaining -= len(light_items)
-                        source_offset += len(current_items)
-                        page += 1
-                        utils.logger.info(
-                            f"[XiaoHongShuCrawler.search] light-list page "
-                            f"{page - 1}: {len(light_items)} items")
-                        # 第一页已达 limit：不执行额外 page sleep；不足且
-                        # has_more=True 时才沿用现有分页间隔请求下一页。
-                        if remaining > 0 and notes_res.get("has_more", False):
-                            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                            utils.logger.info(
-                                f"[XiaoHongShuCrawler.search] Sleeping for "
-                                f"{config.CRAWLER_MAX_SLEEP_SEC} seconds after "
-                                f"page {page - 1}")
-                        if not notes_res.get("has_more", False):
-                            utils.logger.info(
-                                "[XiaoHongShuCrawler.search] No more pages!")
+                    light_items = []
+                    for idx, post_item in enumerate(current_items):
+                        if len(light_items) >= remaining:
                             break
-                        continue
-
-                    semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-
-                    if self._stream_results():
-                        # Phase 3.1/16 渐进 sink：详情任务在"完成即 sink（先于
-                        # cooldown）"；这里只按原顺序 await 收集，不重复 sink。
-                        task_list = [
-                            asyncio.create_task(self.get_note_detail_async_task(
-                                note_id=post_item.get("id"),
-                                xsec_source=post_item.get("xsec_source"),
-                                xsec_token=post_item.get("xsec_token"),
-                                semaphore=semaphore,
-                                source_index=source_index_by_id.get(
-                                    post_item.get("id"), idx),
-                            )) for idx, post_item in enumerate(items_to_fetch)
-                        ]
-                        valid_details = []
-                        try:
-                            for task in task_list:
-                                note_detail = await task
-                                if note_detail:
-                                    valid_details.append(note_detail)
-                        except BaseException:
-                            # strict_errors=True：异常照常上抛；取消并回收
-                            # 剩余任务，绝不遗留后台 task。
-                            for t in task_list:
-                                if not t.done():
-                                    t.cancel()
-                            await asyncio.gather(*task_list, return_exceptions=True)
-                            raise
-                        remaining -= len(valid_details)
-                    else:
-                        # 旧行为：全部 gather 完成后统一发送。
-                        task_list = [
-                            self.get_note_detail_async_task(
-                                note_id=post_item.get("id"),
-                                xsec_source=post_item.get("xsec_source"),
-                                xsec_token=post_item.get("xsec_token"),
-                                semaphore=semaphore,
-                            ) for post_item in items_to_fetch
-                        ]
-                        note_details = await asyncio.gather(*task_list)
-                        # ── aggregate-search hook: push native results to sink ──
-                        valid_details = [d for d in note_details if d]
-                        remaining -= len(valid_details)
-                        self._result_sink_call(valid_details)
-                    for note_detail in valid_details:
-                        if self._should_persist():
-                            await xhs_store.update_xhs_note(note_detail)
-                        if self._should_fetch_media():
-                            await self.get_notice_media(note_detail)
-                        note_ids.append(note_detail.get("note_id"))
-                        xsec_tokens.append(note_detail.get("xsec_token"))
+                        if post_item.get("model_type") in ("rec_query", "hot_query"):
+                            continue
+                        card = post_item.get("note_card")
+                        content_id = post_item.get("id")
+                        if content_id is None and isinstance(card, dict):
+                            content_id = card.get("note_id")
+                        if content_id is None:
+                            content_id = post_item.get("note_id")
+                        if not content_id or content_id in seen_light_content_ids:
+                            continue
+                        seen_light_content_ids.add(content_id)
+                        item = dict(post_item)
+                        item["source_index"] = source_offset + idx
+                        light_items.append(item)
+                    if light_items:
+                        self._result_sink_call(light_items)
+                    remaining -= len(light_items)
                     source_offset += len(current_items)
                     page += 1
                     utils.logger.info(
-                        f"[XiaoHongShuCrawler.search] page {page-1}: {len(valid_details)} valid details"
+                        f"[XiaoHongShuCrawler.search] light-list page "
+                        f"{page - 1}: {len(light_items)} items"
                     )
-                    if self._should_fetch_comments():
-                        await self.batch_get_note_comments(note_ids, xsec_tokens)
-
-                    # Sleep after each page navigation（已达 limit 时无需再等下一页）
-                    if remaining > 0:
+                    if remaining > 0 and notes_res.get("has_more", False):
                         await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                        utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
-                    # Check has_more AFTER processing items (fix: don't discard last page)
                     if not notes_res.get("has_more", False):
                         utils.logger.info("[XiaoHongShuCrawler.search] No more pages!")
                         break
                 except DataFetchError:
                     if self._strict_errors():
                         raise
-                    utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
+                    utils.logger.error("[XiaoHongShuCrawler.search] Search request failed")
                     break
-
-    async def get_creators_and_notes(self) -> None:
-        """Get creator's notes and retrieve their comment information."""
-        utils.logger.info("[XiaoHongShuCrawler.get_creators_and_notes] Begin get Xiaohongshu creators")
-        for creator_url in config.XHS_CREATOR_ID_LIST:
-            try:
-                # Parse creator URL to get user_id and security tokens
-                creator_info: CreatorUrlInfo = parse_creator_info_from_url(creator_url)
-                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: {creator_info}")
-                user_id = creator_info.user_id
-
-                # get creator detail info from web html content
-                createor_info: Dict = await self.xhs_client.get_creator_info(
-                    user_id=user_id,
-                    xsec_token=creator_info.xsec_token,
-                    xsec_source=creator_info.xsec_source
-                )
-                if createor_info:
-                    await xhs_store.save_creator(user_id, creator=createor_info)
-            except ValueError as e:
-                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to parse creator URL: {e}")
-                continue
-
-            # Use fixed crawling interval
-            crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
-            # Get all note information of the creator
-            all_notes_list = await self.xhs_client.get_all_notes_by_creator(
-                user_id=user_id,
-                crawl_interval=crawl_interval,
-                callback=self.fetch_creator_notes_detail,
-                xsec_token=creator_info.xsec_token,
-                xsec_source=creator_info.xsec_source,
-            )
-
-            note_ids = []
-            xsec_tokens = []
-            for note_item in all_notes_list:
-                note_ids.append(note_item.get("note_id"))
-                xsec_tokens.append(note_item.get("xsec_token"))
-            await self.batch_get_note_comments(note_ids, xsec_tokens)
-
-    async def fetch_creator_notes_detail(self, note_list: List[Dict]):
-        """Concurrently obtain the specified post list and save the data"""
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [
-            self.get_note_detail_async_task(
-                note_id=post_item.get("note_id"),
-                xsec_source=post_item.get("xsec_source"),
-                xsec_token=post_item.get("xsec_token"),
-                semaphore=semaphore,
-            ) for post_item in note_list
-        ]
-
-        note_details = await asyncio.gather(*task_list)
-        for note_detail in note_details:
-            if note_detail:
-                await xhs_store.update_xhs_note(note_detail)
-                await self.get_notice_media(note_detail)
-
-    async def get_specified_notes(self):
-        """Get the information and comments of the specified post
-
-        Note: Must specify note_id, xsec_source, xsec_token
-        """
-        get_note_detail_task_list = []
-        for full_note_url in config.XHS_SPECIFIED_NOTE_URL_LIST:
-            note_url_info: NoteUrlInfo = parse_note_info_from_note_url(full_note_url)
-            utils.logger.info(f"[XiaoHongShuCrawler.get_specified_notes] Parse note url info: {note_url_info}")
-            crawler_task = self.get_note_detail_async_task(
-                note_id=note_url_info.note_id,
-                xsec_source=note_url_info.xsec_source,
-                xsec_token=note_url_info.xsec_token,
-                semaphore=asyncio.Semaphore(config.MAX_CONCURRENCY_NUM),
-            )
-            get_note_detail_task_list.append(crawler_task)
-
-        need_get_comment_note_ids = []
-        xsec_tokens = []
-        note_details = await asyncio.gather(*get_note_detail_task_list)
-        for note_detail in note_details:
-            if note_detail:
-                need_get_comment_note_ids.append(note_detail.get("note_id", ""))
-                xsec_tokens.append(note_detail.get("xsec_token", ""))
-                await xhs_store.update_xhs_note(note_detail)
-                await self.get_notice_media(note_detail)
-        await self.batch_get_note_comments(need_get_comment_note_ids, xsec_tokens)
-
-    async def get_note_detail_async_task(
-        self,
-        note_id: str,
-        xsec_source: str,
-        xsec_token: str,
-        semaphore: asyncio.Semaphore,
-        source_index: Optional[int] = None,
-    ) -> Optional[Dict]:
-        """Get note detail
-
-        Args:
-            note_id:
-            xsec_source:
-            xsec_token:
-            semaphore:
-            source_index: 该笔记在原始搜索列表中的序号（Round 16.1：详情按
-                完成顺序 sink，最终顺序按此恢复相关性）。仅聚合搜索传入；
-                None（默认：原爬虫控制台/存储路径）时不向数据添加该字段。
-
-        Returns:
-            Dict: note detail
-        """
-        note_detail = None
-        utils.logger.info(f"[get_note_detail_async_task] Begin get note detail, note_id: {note_id}")
-        async with semaphore:
-            try:
-                retry_error = None
-                try:
-                    note_detail = await self.xhs_client.get_note_by_id(note_id, xsec_source, xsec_token)
-                except RetryError as e:
-                    retry_error = e
-
-                if not note_detail:
-                    # RetryError OR empty API result — always try the HTML
-                    # fallback so a transient API failure doesn't lose the note.
-                    try:
-                        note_detail = await self.xhs_client.get_note_by_id_from_html(
-                            note_id, xsec_source, xsec_token, enable_cookie=True)
-                    except Exception:
-                        note_detail = None
-
-                if not note_detail:
-                    if self._strict_errors():
-                        raise DataFetchError(
-                            f"Failed to get note detail for {note_id}") from retry_error
-                    utils.logger.warning(f"[skip] Failed to get note detail, Id: {note_id}, 跳过继续")
-                    return None
-
-                note_detail.update({"xsec_token": xsec_token, "xsec_source": xsec_source})
-                # Round 16.1/16.2: 仅聚合搜索传入 source_index 时才盖章
-                # （原爬虫控制台/存储路径不新增该字段）。
-                if source_index is not None:
-                    note_detail["source_index"] = source_index
-                if self._stream_results():
-                    # Round 16: 详情完成 → 立即 sink（先于 cooldown），
-                    # 请求速率不变（cooldown 仍在槽内）。
-                    self._result_sink_call([note_detail])
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[get_note_detail_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching note {note_id}")
-                return note_detail
-
-            except NoteNotFoundError as ex:
-                utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] Note not found: {note_id}, {ex}")
-                return None
-            except DataFetchError as ex:
-                if self._strict_errors():
-                    raise
-                utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] Get note detail error: {ex}")
-                return None
-            except KeyError as ex:
-                if self._strict_errors():
-                    raise
-                utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] have not fund note detail note_id:{note_id}, err: {ex}")
-                return None
-
-    async def batch_get_note_comments(self, note_list: List[str], xsec_tokens: List[str]):
-        """Batch get note comments"""
-        if not config.ENABLE_GET_COMMENTS:
-            utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
-            return
-
-        utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Begin batch get note comments, note list: {note_list}")
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list: List[Task] = []
-        for index, note_id in enumerate(note_list):
-            task = asyncio.create_task(
-                self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore),
-                name=note_id,
-            )
-            task_list.append(task)
-        await asyncio.gather(*task_list)
-
-    async def get_comments(self, note_id: str, xsec_token: str, semaphore: asyncio.Semaphore):
-        """Get note comments with keyword filtering and quantity limitation"""
-        async with semaphore:
-            utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
-            # Use fixed crawling interval
-            crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
-            await self.xhs_client.get_note_all_comments(
-                note_id=note_id,
-                xsec_token=xsec_token,
-                crawl_interval=crawl_interval,
-                callback=xhs_store.batch_update_xhs_note_comments,
-                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
-            )
-
-            # Sleep after fetching comments
-            await asyncio.sleep(crawl_interval)
-            utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for note {note_id}")
 
     async def create_xhs_client(self, httpx_proxy: Optional[str]) -> XiaoHongShuClient:
         """Create Xiaohongshu client"""
@@ -569,9 +255,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def create_xhs_client_from_snapshot(
         self, cookie_dict: Dict[str, str],
     ) -> XiaoHongShuClient:
-        """Round 16 fast path：从内存会话快照构造 client，无浏览器（page=None）。
-        详情 HTML fallback 不可用（需要页面）—— 失败时由 worker 安全回退
-        原浏览器路径。"""
+        """Construct a client from an in-memory session snapshot."""
         cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
         return XiaoHongShuClient(
             proxy=None,
@@ -667,64 +351,3 @@ class XiaoHongShuCrawler(AbstractCrawler):
         else:
             await self.browser_context.close()
         utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
-
-    async def get_notice_media(self, note_detail: Dict):
-        if not config.ENABLE_GET_MEIDAS:
-            utils.logger.info(f"[XiaoHongShuCrawler.get_notice_media] Crawling image mode is not enabled")
-            return
-        await self.get_note_images(note_detail)
-        await self.get_notice_video(note_detail)
-
-    async def get_note_images(self, note_item: Dict):
-        """Get note images. Please use get_notice_media
-
-        Args:
-            note_item: Note item dictionary
-        """
-        if not config.ENABLE_GET_MEIDAS:
-            return
-        note_id = note_item.get("note_id")
-        image_list: List[Dict] = note_item.get("image_list", [])
-
-        for img in image_list:
-            if img.get("url_default") != "":
-                img.update({"url": img.get("url_default")})
-
-        if not image_list:
-            return
-        picNum = 0
-        for pic in image_list:
-            url = pic.get("url")
-            if not url:
-                continue
-            content = await self.xhs_client.get_note_media(url)
-            await asyncio.sleep(random.random())
-            if content is None:
-                continue
-            extension_file_name = f"{picNum}.jpg"
-            picNum += 1
-            await xhs_store.update_xhs_note_image(note_id, content, extension_file_name)
-
-    async def get_notice_video(self, note_item: Dict):
-        """Get note videos. Please use get_notice_media
-
-        Args:
-            note_item: Note item dictionary
-        """
-        if not config.ENABLE_GET_MEIDAS:
-            return
-        note_id = note_item.get("note_id")
-
-        videos = xhs_store.get_video_url_arr(note_item)
-
-        if not videos:
-            return
-        videoNum = 0
-        for url in videos:
-            content = await self.xhs_client.get_note_media(url)
-            await asyncio.sleep(random.random())
-            if content is None:
-                continue
-            extension_file_name = f"{videoNum}.mp4"
-            videoNum += 1
-            await xhs_store.update_xhs_note_video(note_id, content, extension_file_name)

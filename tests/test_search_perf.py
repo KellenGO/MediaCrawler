@@ -236,8 +236,7 @@ class TestXhsTailSleep:
     def _crawler(self, result_limit, sleeps, monkeypatch):
         crawler = XiaoHongShuCrawler()
         crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=result_limit, persist_results=False,
-            enable_comments=False, enable_media=False)
+            result_limit=result_limit)
         crawler.xhs_client = _FakeXhsClient()
         monkeypatch.setattr(
             "media_platform.xhs.core.asyncio.sleep", _record_sleep_caller(sleeps))
@@ -277,11 +276,6 @@ class _FakeXhsClient:
     async def get_note_by_id(self, note_id, xsec_source, xsec_token):
         return {"note_id": note_id, "title": f"title-{note_id}"}
 
-    async def get_note_by_id_from_html(self, note_id, xsec_source, xsec_token,
-                                       enable_cookie=False):
-        return None
-
-
 class TestDouyinTailSleep:
     @pytest.fixture
     def base_config(self, monkeypatch):
@@ -289,14 +283,10 @@ class TestDouyinTailSleep:
         monkeypatch.setattr(config, "START_PAGE", 1)
         monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 2)
         monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
-        monkeypatch.setattr(config, "ENABLE_GET_COMMENTS", False)
-        monkeypatch.setattr(config, "ENABLE_GET_MEIDAS", False)
-
     def _crawler(self, result_limit, sleeps, monkeypatch):
         crawler = DouYinCrawler()
         crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=result_limit, persist_results=False,
-            enable_comments=False, enable_media=False)
+            result_limit=result_limit)
         crawler.dy_client = _FakeDouyinClient()
         monkeypatch.setattr(
             "media_platform.douyin.core.asyncio.sleep", _record_sleep_caller(sleeps))
@@ -341,8 +331,7 @@ class TestBilibiliLightListTailSleep:
     def _crawler(self, result_limit, sleeps, monkeypatch):
         crawler = BilibiliCrawler()
         crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=result_limit, fetch_details=False,
-            persist_results=False, enable_comments=False, enable_media=False)
+            result_limit=result_limit)
         crawler.bili_client = _FakeBiliClient()
         monkeypatch.setattr(
             "media_platform.bilibili.core.asyncio.sleep", _record_sleep_caller(sleeps))
@@ -363,13 +352,13 @@ class TestBilibiliLightListTailSleep:
         assert len(sleeps) == 1
 
     @pytest.mark.asyncio
-    async def test_fetch_details_false_never_calls_detail_api(self, base_config, monkeypatch):
-        """fetch_details=False：sink 收到的是列表项，不是详情 DTO（不调详情 API）。"""
+    async def test_search_never_calls_detail_api(self, base_config, monkeypatch):
+        """搜索 sink 收到列表项，不调用详情 API。"""
         sleeps = []
         crawler = self._crawler(result_limit=2, sleeps=sleeps, monkeypatch=monkeypatch)
         sunk = []
         crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=2, fetch_details=False, persist_results=False,
+            result_limit=2,
             result_sink=lambda items: sunk.extend(items))
         await crawler.search_by_keywords()
         assert len(sunk) == 2  # 结果数量不超过 limit
@@ -382,217 +371,6 @@ class _FakeBiliClient:
     async def search_video_by_keyword(self, **kwargs):
         return {"result": [{"aid": i, "title": f"t{i}", "bvid": f"BV{i}"}
                            for i in range(5)]}
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 3.1 小红书渐进 sink：首条 result 在全部详情结束前发出
-# ═══════════════════════════════════════════════════════════════════════
-
-class _GatedXhsClient(_FakeXhsClient):
-    """第一个详情立即返回，第二个详情（n1）等待 gate（模拟慢详情）。"""
-
-    def __init__(self, gate):
-        super().__init__()
-        self.gate = gate
-        self.second_started = asyncio.Event()
-
-    async def get_note_by_id(self, note_id, xsec_source, xsec_token):
-        if note_id == "n1":
-            self.second_started.set()
-            await self.gate.wait()
-        return {"note_id": note_id, "title": f"title-{note_id}"}
-
-
-class TestXhsStreamingSink:
-    @pytest.fixture
-    def base_config(self, monkeypatch):
-        monkeypatch.setattr(config, "KEYWORDS", "test")
-        monkeypatch.setattr(config, "START_PAGE", 1)
-        monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)  # pacing 归零加速测试
-        monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
-
-    @pytest.mark.asyncio
-    async def test_first_result_emitted_before_all_details_finish(
-            self, base_config, monkeypatch):
-        """首条 result 在全部详情 gather 完成前发出，且 sink 先于 cooldown。"""
-        gate = asyncio.Event()
-        client = _GatedXhsClient(gate)
-        crawler = XiaoHongShuCrawler()
-        first_sunk = asyncio.Event()
-        sink_items = []
-        events = []  # ("sink", note_id) / ("sleep", secs) —— 记录生产顺序
-
-        def sink(items):
-            sink_items.extend(items)
-            events.append(("sink", items[0]["note_id"]))
-            if len(sink_items) == 1:
-                first_sunk.set()
-
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=2, persist_results=False, stream_results=True,
-            enable_comments=False, enable_media=False,
-            result_sink=sink)
-        crawler.xhs_client = client
-        real_sleep = asyncio.sleep
-
-        def fake_sleep(secs):
-            events.append(("sleep", secs))
-            return real_sleep(0)
-
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", fake_sleep)
-
-        search_task = asyncio.create_task(crawler.search())
-        # 第一个详情已 sink（n0 立即返回）；第二个详情（n1）仍在等待 gate。
-        await asyncio.wait_for(first_sunk.wait(), timeout=5)
-        assert sink_items[0]["note_id"] == "n0"
-        assert len(sink_items) == 1  # 首条已发出，n1 尚未完成（整体未结束）
-        # Round 16: sink 必须先于该详情的 cooldown sleep。
-        assert events.index(("sink", "n0")) < events.index(("sleep", 0))
-        gate.set()
-        await asyncio.wait_for(search_task, timeout=5)
-        assert [i["note_id"] for i in sink_items] == ["n0", "n1"]  # 顺序保持
-        # 每个详情恰好一次 sink（不重复 emit）。
-        assert [e for e in events if e[0] == "sink"] == \
-            [("sink", "n0"), ("sink", "n1")]
-
-    @pytest.mark.asyncio
-    async def test_streaming_strict_errors_cancels_remaining(
-            self, base_config, monkeypatch):
-        """strict_errors=True：DataFetchError 上抛，且剩余任务被取消回收。"""
-        crawler = XiaoHongShuCrawler()
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=5, persist_results=False, stream_results=True,
-            strict_errors=True, enable_comments=False, enable_media=False)
-
-        class _RaisingClient(_FakeXhsClient):
-            def __init__(self):
-                super().__init__()
-                self.cancelled = asyncio.Event()
-
-            async def get_note_by_id(self, note_id, xsec_source, xsec_token):
-                if note_id == "n2":
-                    # 模拟慢任务：等待被取消
-                    try:
-                        await asyncio.sleep(30)
-                    except asyncio.CancelledError:
-                        self.cancelled.set()
-                        raise
-                raise DataFetchError(f"boom {note_id}")
-
-        client = _RaisingClient()
-        crawler.xhs_client = client
-        real_sleep = asyncio.sleep
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep",
-            lambda s: real_sleep(0))
-
-        with pytest.raises(DataFetchError):
-            await crawler.search()
-        # 剩余任务已被取消（无后台泄漏）
-        await asyncio.wait_for(client.cancelled.wait(), timeout=5)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 4.1 小红书 source_index 盖章：详情完成顺序 ≠ 相关性顺序
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestXhsSourceIndexStamping:
-    @pytest.fixture
-    def base_config(self, monkeypatch):
-        monkeypatch.setattr(config, "KEYWORDS", "test")
-        monkeypatch.setattr(config, "START_PAGE", 1)
-        monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)
-        monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
-
-    @pytest.mark.asyncio
-    async def test_detail_task_stamps_source_index(self, base_config, monkeypatch):
-        """每个详情带原始搜索列表序号（0..n-1），供 worker 恢复相关性顺序。"""
-        sunk = []
-        crawler = XiaoHongShuCrawler()
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=5, persist_results=False, stream_results=True,
-            result_sink=lambda items: sunk.extend(items))
-        crawler.xhs_client = _FakeXhsClient()
-        real_sleep = asyncio.sleep
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
-
-        await crawler.search()
-        by_id = {d["note_id"]: d["source_index"] for d in sunk}
-        assert by_id == {"n0": 0, "n1": 1, "n2": 2, "n3": 3, "n4": 4}
-
-    @pytest.mark.asyncio
-    async def test_source_index_survives_rec_hot_filtering(self, base_config, monkeypatch):
-        """rec/hot 推荐项占位但不抓取：被过滤后序号仍按过滤前列表计算。"""
-        sunk = []
-
-        class _MixedClient(_FakeXhsClient):
-            async def get_note_by_keyword(self, **kwargs):
-                return {
-                    "items": [
-                        {"id": "rec1", "model_type": "rec_query"},
-                        {"id": "n0", "xsec_source": "pc_search",
-                         "xsec_token": "tok", "model_type": "note"},
-                        {"id": "rec2", "model_type": "hot_query"},
-                        {"id": "n1", "xsec_source": "pc_search",
-                         "xsec_token": "tok", "model_type": "note"},
-                    ],
-                    "has_more": False,
-                }
-
-        crawler = XiaoHongShuCrawler()
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=2, persist_results=False, stream_results=True,
-            result_sink=lambda items: sunk.extend(items))
-        crawler.xhs_client = _MixedClient()
-        real_sleep = asyncio.sleep
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
-
-        await crawler.search()
-        by_id = {d["note_id"]: d["source_index"] for d in sunk}
-        # n0 在原始列表 index=1，n1 在 index=3。
-        assert by_id == {"n0": 1, "n1": 3}
-
-    @pytest.mark.asyncio
-    async def test_legacy_default_no_source_index(self, base_config, monkeypatch):
-        """Round 16.2: 不传 source_index（原爬虫控制台路径）→ 数据不新增该字段。"""
-        crawler = XiaoHongShuCrawler()
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=5, persist_results=False, stream_results=False,
-            result_sink=lambda items: None)
-        crawler.xhs_client = _FakeXhsClient()
-        real_sleep = asyncio.sleep
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
-
-        semaphore = asyncio.Semaphore(2)
-        detail = await crawler.get_note_detail_async_task(
-            note_id="n0", xsec_source="pc_search", xsec_token="tok",
-            semaphore=semaphore)  # 不传 source_index
-        assert detail is not None
-        assert "source_index" not in detail, (
-            "legacy/default 路径不得向数据添加 source_index")
-
-    @pytest.mark.asyncio
-    async def test_non_stream_search_no_source_index(self, base_config, monkeypatch):
-        """Round 16.2: 非聚合（非 stream）search 路径不盖章 source_index。"""
-        sunk = []
-        crawler = XiaoHongShuCrawler()
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            result_limit=2, persist_results=False, stream_results=False,
-            result_sink=lambda items: sunk.extend(items))
-        crawler.xhs_client = _FakeXhsClient()
-        real_sleep = asyncio.sleep
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", lambda s: real_sleep(0))
-
-        await crawler.search()
-        assert sunk, "非 stream 路径也应 sink 结果"
-        for detail in sunk:
-            assert "source_index" not in detail, (
-                "非聚合路径不得添加 source_index 字段")
 
 
 class TestFinalizeSortsByRank:

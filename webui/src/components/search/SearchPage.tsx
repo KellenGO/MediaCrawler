@@ -10,7 +10,6 @@ import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 
 interface SearchPageProps {
-  onNavigateConsole?: () => void;
   onNavigateAccounts?: () => void;
 }
 

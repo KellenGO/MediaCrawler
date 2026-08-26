@@ -103,8 +103,6 @@ def _configure_config(monkeypatch):
     monkeypatch.setattr(config, "KEYWORDS", "测试")
     monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
     monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0.01)
-    monkeypatch.setattr(config, "ENABLE_GET_COMMENTS", False)
-    monkeypatch.setattr(config, "ENABLE_GET_MEIDAS", False)
     monkeypatch.setattr(config, "ENABLE_CDP_MODE", False)
     monkeypatch.setattr(config, "ENABLE_IP_PROXY", False)
     monkeypatch.setattr(config, "MAX_CONCURRENCY_NUM", 1)
@@ -127,10 +125,7 @@ def _make_crawler(monkeypatch, client, sink_list, *, allow_public_search,
     crawler.create_douyin_client = fake_create_client  # type: ignore[method-assign]
     crawler.runtime_options = CrawlerRuntimeOptions(
         result_sink=lambda items: sink_list.extend(items),
-        persist_results=False,
         login_policy=login_policy,
-        enable_comments=False,
-        enable_media=False,
         result_limit=5,
         strict_errors=False,
         headless=headless,

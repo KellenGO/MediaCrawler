@@ -22,7 +22,8 @@ Bilibili (B站) adapter.
 Native data: EITHER the video detail dict from Bilibili's view API
 (get_video_info_task returns a dict with a ``View`` sub-dict), OR the FLAT
 search-list item from /x/web-interface/wbi/search/type (light-list mode,
-fetch_details=False). Both shapes are supported here:
+The crawler passes lightweight list items. Both list and detail-like shapes
+are supported here:
 
 - View (detail):   aid, bvid, title, pic, pubdate,
                    owner: {name, mid}, stat: {view, danmaku, reply,

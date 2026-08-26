@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Search, UserCog, Terminal, HelpCircle, Wifi, WifiOff, ChevronRight } from 'lucide-react'
+import { Search, UserCog, HelpCircle, Wifi, WifiOff, ChevronRight } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { LanguageSwitch } from './LanguageSwitch'
 import { useAccounts } from '@/hooks/useAccounts'
@@ -21,7 +21,7 @@ import {
 } from '@/lib/accounts'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '@/types/search'
 
-export type ViewMode = 'search' | 'console' | 'accounts'
+export type ViewMode = 'search' | 'accounts'
 
 interface HeaderProps {
   viewMode: ViewMode
@@ -184,7 +184,7 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
         ? t('header.accountUnavailable')
         : `${badge.verified}/${badge.total}`
 
-  // ── Round 14.2 提醒（登录失效 / 未登录平台）──────────────────────────
+  // 提醒登录失效和未登录平台。
   // 去重存储是模块级（lib/accounts）：轮询与 React StrictMode 双挂载都
   // 不会重复提醒。
   const prevAccountsRef = useRef<AccountStatusInfo[] | null>(null)
@@ -233,7 +233,6 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
   const navItems: { key: ViewMode; label: string; icon: typeof Search }[] = [
     { key: 'search', label: t('nav.search'), icon: Search },
     { key: 'accounts', label: t('nav.accounts'), icon: UserCog },
-    { key: 'console', label: t('nav.console'), icon: Terminal },
   ]
 
   return (

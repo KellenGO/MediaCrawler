@@ -104,13 +104,6 @@ export const PLATFORM_COLORS: Record<PlatformSlug, string> = {
   zhihu: "#2768d9",
 };
 
-export const PLATFORM_ICONS: Record<PlatformSlug, string> = {
-  xhs: "📕",
-  douyin: "🎵",
-  bilibili: "📺",
-  zhihu: "💡",
-};
-
 export const STATUS_LABELS: Record<PlatformStatus, string> = {
   pending: "等待中",
   running: "搜索中",

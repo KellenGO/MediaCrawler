@@ -46,11 +46,11 @@ class SearchJobRequestSchema(BaseModel):
         min_length=1,
     )
     limit_per_platform: int = Field(default=10, ge=1, le=MAX_LIMIT_PER_PLATFORM)
-    # Round 15: 按平台独立数量。声明为 Any 并在 validator 中做严格整数校验，
+    # Per-platform limits use Any so the validator can reject lax coercion,
     # 避免 pydantic lax 模式把 "5"/true 强转成 int 而绕过上限校验。
     # 优先于 limit_per_platform；缺失平台回退 limit_per_platform（默认 10）。
     platform_limits: Optional[Dict[str, Any]] = Field(default=None)
-    # Round 16: 用户主动"重新搜索"时绕过内存结果缓存（默认 False）。
+    # Explicit refreshes bypass the in-memory result cache (default: False).
     bypass_cache: bool = Field(default=False)
 
     @field_validator("platforms")
@@ -80,7 +80,8 @@ class SearchJobRequestSchema(BaseModel):
 class PlatformTimingInfo(BaseModel):
     """平台搜索耗时指标（毫秒，perf_counter 单调时钟；无数据为 None）。
 
-    定义（Round 16.1 统一语义，全部为累计耗时，互不混用）：
+    All timing fields are cumulative milliseconds from the platform request;
+    they are intentionally not interchangeable:
     - spawn_ms            parent 创建/取得 worker 的耗时（复用既有进程≈0）；
     - worker_ready_ms     进程启动→模块加载完成的固定常量（不随空闲增长）；
     - reused_worker       本次搜索是否复用了既有常驻 worker 进程；

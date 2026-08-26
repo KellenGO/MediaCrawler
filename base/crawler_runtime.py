@@ -20,7 +20,7 @@
 Minimal runtime options for integrating aggregate search with MediaCrawler cores.
 
 These options are attached to a crawler instance BEFORE calling ``start()``.
-The default values maintain backward compatibility with the existing CLI flow.
+They describe the aggregate search runtime only.
 """
 
 from __future__ import annotations
@@ -34,27 +34,17 @@ ResultSink = Callable[[List[Any]], None]
 
 @dataclass
 class CrawlerRuntimeOptions:
-    """Optional runtime behaviour overrides for a crawler instance.
-
-    Default values preserve the original CLI behaviour exactly.
+    """Runtime behaviour overrides for an aggregate-search crawler.
     Set on a crawler instance before ``await crawler.start()``::
 
         crawler = CrawlerFactory.create_crawler(platform="xhs")
-        crawler.runtime_options = CrawlerRuntimeOptions(
-            persist_results=False,
-            login_policy="fail_fast",
-        )
+        crawler.runtime_options = CrawlerRuntimeOptions(login_policy="fail_fast")
         await crawler.start()
     """
 
     #: Callback invoked with each batch of platform-native search results.
-    #: When set, results are pushed to this sink IN ADDITION to normal
-    #: store processing (unless ``persist_results`` is False).
+    #: When set, native results are pushed to this sink.
     result_sink: Optional[ResultSink] = None
-
-    #: Whether to continue calling the existing store layer.
-    #: Set to False in aggregate-search mode to avoid writing files.
-    persist_results: bool = True
 
     #: ``"interactive"`` — wait for QR code / manual login prompt.
     #: ``"fail_fast"`` — raise ``LoginRequiredError`` immediately when
@@ -70,27 +60,8 @@ class CrawlerRuntimeOptions:
     #: report failures to the parent process.
     strict_errors: bool = False
 
-    #: Whether to enable comment fetching (default False for aggregate search).
-    enable_comments: bool = False
-
-    #: Whether to enable media download (default False for aggregate search).
-    enable_media: bool = False
-
     #: Whether to run the browser headless. None means use config default.
     headless: Optional[bool] = None
-
-    #: Light-list mode (aggregate search): when False, the search list items
-    #: are passed to the result sink directly — no per-item detail API call,
-    #: no store, no comments, no media. Bilibili and Xiaohongshu aggregate
-    #: search use this. Default True keeps the original per-item
-    #: detail-fetching behaviour.
-    fetch_details: bool = True
-
-    #: Progressive result sink: when True, each newly fetched detail is
-    #: pushed to ``result_sink`` immediately (in original list order) instead
-    #: of waiting for the whole batch to finish. Default False preserves the
-    #: original gather-then-sink behaviour.
-    stream_results: bool = False
 
     #: Reuse a single httpx.AsyncClient across requests for this platform
     #: (created lazily, closed on proxy change / cleanup). Default False

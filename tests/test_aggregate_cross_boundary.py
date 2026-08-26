@@ -283,9 +283,6 @@ class TestFastAPIRoutes:
     def test_health_200(self, client):
         assert client.get("/api/health").status_code == 200
 
-    def test_env_check_200(self, client):
-        assert client.get("/api/env/check").status_code == 200
-
     def test_empty_keyword_422(self, client):
         assert client.post("/api/search/jobs",
                           json={"keyword": "  ", "platforms": ["xhs"]}).status_code == 422

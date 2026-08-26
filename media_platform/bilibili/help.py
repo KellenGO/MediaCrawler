@@ -23,12 +23,10 @@
 # @Time    : 2023/12/2 23:26
 # @Desc    : bilibili request parameter signing
 # Reverse engineering implementation reference: https://socialsisteryi.github.io/bilibili-API-collect/docs/misc/sign/wbi.html#wbi%E7%AD%BE%E5%90%8D%E7%AE%97%E6%B3%95
-import re
 import urllib.parse
 from hashlib import md5
 from typing import Dict
 
-from model.m_bilibili import VideoUrlInfo, CreatorUrlInfo
 from tools import utils
 
 
@@ -75,73 +73,3 @@ class BilibiliSign:
         wbi_sign = md5((query + salt).encode()).hexdigest()  # Calculate w_rid
         req_data['w_rid'] = wbi_sign
         return req_data
-
-
-def parse_video_info_from_url(url: str) -> VideoUrlInfo:
-    """
-    Parse video ID from Bilibili video URL
-    Args:
-        url: Bilibili video link
-            - https://www.bilibili.com/video/BV1dwuKzmE26/?spm_id_from=333.1387.homepage.video_card.click
-            - https://www.bilibili.com/video/BV1d54y1g7db
-            - BV1d54y1g7db (directly pass BV number)
-    Returns:
-        VideoUrlInfo: Object containing video ID
-    """
-    # If the input is already a BV number, return directly
-    if url.startswith("BV"):
-        return VideoUrlInfo(video_id=url)
-
-    # Use regex to extract BV number
-    # Match /video/BV... or /video/av... format
-    bv_pattern = r'/video/(BV[a-zA-Z0-9]+)'
-    match = re.search(bv_pattern, url)
-
-    if match:
-        video_id = match.group(1)
-        return VideoUrlInfo(video_id=video_id)
-
-    raise ValueError(f"Unable to parse video ID from URL: {url}")
-
-
-def parse_creator_info_from_url(url: str) -> CreatorUrlInfo:
-    """
-    Parse creator ID from Bilibili creator space URL
-    Args:
-        url: Bilibili creator space link
-            - https://space.bilibili.com/434377496?spm_id_from=333.1007.0.0
-            - https://space.bilibili.com/20813884
-            - 434377496 (directly pass UID)
-    Returns:
-        CreatorUrlInfo: Object containing creator ID
-    """
-    # If the input is already a numeric ID, return directly
-    if url.isdigit():
-        return CreatorUrlInfo(creator_id=url)
-
-    # Use regex to extract UID
-    # Match /space.bilibili.com/number format
-    uid_pattern = r'space\.bilibili\.com/(\d+)'
-    match = re.search(uid_pattern, url)
-
-    if match:
-        creator_id = match.group(1)
-        return CreatorUrlInfo(creator_id=creator_id)
-
-    raise ValueError(f"Unable to parse creator ID from URL: {url}")
-
-
-if __name__ == '__main__':
-    # Test video URL parsing
-    video_url1 = "https://www.bilibili.com/video/BV1dwuKzmE26/?spm_id_from=333.1387.homepage.video_card.click"
-    video_url2 = "BV1d54y1g7db"
-    print("Video URL parsing test:")
-    print(f"URL1: {video_url1} -> {parse_video_info_from_url(video_url1)}")
-    print(f"URL2: {video_url2} -> {parse_video_info_from_url(video_url2)}")
-
-    # Test creator URL parsing
-    creator_url1 = "https://space.bilibili.com/434377496?spm_id_from=333.1007.0.0"
-    creator_url2 = "20813884"
-    print("\nCreator URL parsing test:")
-    print(f"URL1: {creator_url1} -> {parse_creator_info_from_url(creator_url1)}")
-    print(f"URL2: {creator_url2} -> {parse_creator_info_from_url(creator_url2)}")

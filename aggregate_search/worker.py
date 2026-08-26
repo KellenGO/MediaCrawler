@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Round 16.1: 进程启动时刻必须在任何重型 import 之前记录（只依赖 stdlib）。
+# Record process start before heavy imports so worker-ready timing stays stable.
 _PROCESS_START = time.perf_counter()
 
 # Ensure project root is on sys.path
@@ -49,8 +49,8 @@ from aggregate_search.adapters import (
     XhsAdapter, DouyinAdapter, BilibiliAdapter, ZhihuAdapter,
 )
 
-# Round 16.1: 模块加载完成即固定 worker 就绪耗时（进程启动→就绪），
-# 是进程生命周期内的常量 —— 绝不随 resident 空闲时间增长。
+# Worker-ready time is fixed when the module finishes loading; it does not
+# grow while a resident worker is idle.
 _PROCESS_READY_MS = int((time.perf_counter() - _PROCESS_START) * 1000)
 
 # 知乎 worker 使用的 UA（浏览器路径与 fast path 共用，避免重复字面量）。
@@ -199,8 +199,6 @@ async def _run_standard_search(
     config.KEYWORDS = keyword
     config.CRAWLER_TYPE = "search"
     config.CRAWLER_MAX_NOTES_COUNT = limit + 5
-    config.ENABLE_GET_COMMENTS = False
-    config.ENABLE_GET_MEIDAS = False
     config.ENABLE_CDP_MODE = False
     config.CDP_CONNECT_EXISTING = False
     config.HEADLESS = True
@@ -210,10 +208,6 @@ async def _run_standard_search(
     # 小红书有限并发（其余平台保持 1，禁止无限并发）；四平台仍是独立 worker
     # 进程并行，各 crawler 修改全局 config 互不影响。
     config.MAX_CONCURRENCY_NUM = 2 if core_platform == "xhs" else 1
-    # Force normal search mode for Bilibili
-    if core_platform == "bili":
-        config.BILI_SEARCH_MODE = "normal"
-
     fast_crawler_holder: List[Any] = [None]
     browser_crawler_holder: List[Any] = [None]
 
@@ -266,18 +260,11 @@ async def _run_standard_search(
             browser_crawler_holder[0] = crawler
             crawler.runtime_options = CrawlerRuntimeOptions(
                 result_sink=handle_results,
-                persist_results=False,
                 login_policy="fail_fast",
-                enable_comments=False,
-                enable_media=False,
                 result_limit=limit,
                 strict_errors=True,
                 headless=True,
-                # Round 17: xhs/bilibili search lists already contain the MVP
-                # fields, so do not add per-result detail requests.
-                fetch_details=(core_platform not in ("xhs", "bili")),
                 allow_public_search=(core_platform == "dy"),
-                stream_results=(core_platform == "xhs"),
                 reuse_http_client=True,
                 light_page=True,
                 metrics_cb=_phase_metric,
@@ -354,7 +341,7 @@ async def _run_standard_search(
     emit_done(job_id, platform)
 
 
-# ── Fast path (no-browser, Round 16) ────────────────────────────────────
+# ── Fast path (no-browser) ──────────────────────────────────────────────
 
 async def _run_fast_standard_search(
     job_id: str, platform: str, core_platform: str, keyword: str, limit: int,
@@ -374,16 +361,10 @@ async def _run_fast_standard_search(
         crawler_holder[0] = crawler
     crawler.runtime_options = CrawlerRuntimeOptions(
         result_sink=handle_results,
-        persist_results=False,
         login_policy="fail_fast",
-        enable_comments=False,
-        enable_media=False,
         result_limit=limit,
         strict_errors=True,
         headless=True,
-        # Round 17: 快速路径与浏览器路径一致 —— xhs/bilibili 轻量列表。
-        fetch_details=(core_platform not in ("xhs", "bili")),
-        stream_results=(core_platform == "xhs"),
         reuse_http_client=True,
         metrics_cb=phase_metric,
     )
@@ -730,10 +711,7 @@ async def _run_login(job_id: str, platform: str) -> None:
     config.CRAWLER_TYPE = "search"
     config.KEYWORDS = "__LOGIN_ONLY_NO_SEARCH__"
     config.CRAWLER_MAX_NOTES_COUNT = 0  # Don't fetch any results
-    config.ENABLE_GET_COMMENTS = False
-    config.ENABLE_GET_MEIDAS = False
     config.ENABLE_IP_PROXY = False
-    config.ENABLE_GET_WORDCLOUD = False
 
     crawler = None
     done_emitted = False
@@ -749,10 +727,7 @@ async def _run_login(job_id: str, platform: str) -> None:
         crawler = CrawlerFactory.create_crawler(platform=core_platform)
 
         crawler.runtime_options = CrawlerRuntimeOptions(
-            persist_results=False,
             login_policy="interactive",
-            enable_comments=False,
-            enable_media=False,
             result_limit=0,
             headless=False,
         )

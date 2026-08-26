@@ -14,18 +14,16 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 
 """
-Round 17 小红书聚合搜索轻量列表模式测试。
+小红书聚合搜索轻量列表模式测试。
 
 直接调用真实 ``XiaoHongShuCrawler.search`` 与真实 ``XhsAdapter``：
 
-1. light 模式（fetch_details=False）不调用任何详情 API/任务；
+1. 搜索只把轻量列表项交给 result_sink，不调用详情 API/任务；
 2. 完整链路 core → result_sink → XhsAdapter.adapt → UnifiedSearchResult；
 3. limit=1/5/10/20 精确裁剪、详情调用恒为 0；
 4. rec/hot 过滤 + 跨页 source_index 连续 + 最终顺序与原始相关性一致；
 5. 可选字段缺失（author/published_at/metrics/cover）照常输出；
-6. legacy（fetch_details=True）行为不变：逐条详情、无 source_index；
-7. worker 接线：xhs/bili fetch_details=False、douyin 保持 True、快速路径
-   与浏览器回退路径配置一致。
+6. 搜索分页、去重、limit 和可选字段处理保持稳定。
 
 性能断言以"请求数量 + 固定等待消失"为准，不使用不稳定毫秒。
 """
@@ -92,7 +90,6 @@ class _FakeXhsClient:
         self.pages = list(pages)
         self.search_calls = 0
         self.detail_calls = 0
-        self.html_calls = 0
         self.raise_on_detail = raise_on_detail
 
     async def get_note_by_keyword(self, **kwargs):
@@ -112,26 +109,11 @@ class _FakeXhsClient:
                 "user": {"nickname": "详情博主", "user_id": "u-d"},
                 "interact_info": {"liked_count": "1"}}
 
-    async def get_note_by_id_from_html(self, *a, **k):
-        self.html_calls += 1
-        if self.raise_on_detail:
-            raise AssertionError(
-                "get_note_by_id_from_html must not be called in light mode")
-        return None
-
-
-def _detail_tripwire(*a, **k):
-    raise AssertionError(
-        "get_note_detail_async_task must not be called in light-list mode")
-
-
 def _configure_config(monkeypatch):
     monkeypatch.setattr(config, "KEYWORDS", "露营")
     monkeypatch.setattr(config, "START_PAGE", 1)
     monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 2)
     monkeypatch.setattr(config, "CRAWLER_TYPE", "search")
-    monkeypatch.setattr(config, "ENABLE_GET_COMMENTS", False)
-    monkeypatch.setattr(config, "ENABLE_GET_MEIDAS", False)
     monkeypatch.setattr(config, "MAX_CONCURRENCY_NUM", 2)
 
 
@@ -141,19 +123,11 @@ def _make_crawler(fake_client, sink_list, limit, fetch_details=False,
     crawler.xhs_client = fake_client
     crawler.runtime_options = CrawlerRuntimeOptions(
         result_sink=lambda items: sink_list.extend(items),
-        persist_results=False,
         login_policy="fail_fast",
-        enable_comments=False,
-        enable_media=False,
         result_limit=limit,
         strict_errors=True,
         headless=True,
-        fetch_details=fetch_details,
-        stream_results=stream_results,
     )
-    if not fetch_details:
-        # 详情任务触发线：轻量模式下被调用即失败（生产路径证明）。
-        crawler.get_note_detail_async_task = _detail_tripwire
     return crawler
 
 
@@ -170,7 +144,7 @@ def _recorder_sleep(sleeps):
 class TestLightModeNoDetailCalls:
     @pytest.mark.asyncio
     async def test_no_detail_api_no_tasks_no_sleep(self, monkeypatch):
-        """fetch_details=False：search 1 次、详情 0 次、sink 恰好 10 条、
+        """搜索 1 次、详情 0 次、sink 恰好 10 条、
         第一页达 limit 时 asyncio.sleep 0 次。"""
         _configure_config(monkeypatch)
         sleeps = []
@@ -186,7 +160,6 @@ class TestLightModeNoDetailCalls:
 
         assert fake.search_calls == 1
         assert fake.detail_calls == 0, "轻量模式不得调用 get_note_by_id"
-        assert fake.html_calls == 0, "轻量模式不得调用 HTML 详情 fallback"
         assert len(sink) == 10, "sink 必须恰好 10 条"
         assert sleeps == [], "第一页已达 limit：不得有任何 sleep"
         # 每条都带聚合专用 source_index（原始搜索列表序号）。
@@ -280,7 +253,6 @@ class TestCustomLimits:
 
         assert len(sink) == limit, f"limit={limit} 必须精确输出 {limit} 条"
         assert fake.detail_calls == 0
-        assert fake.html_calls == 0
         ids = [s["id"] for s in sink]
         assert ids == [f"note{i:02d}" for i in range(limit)], "按原始顺序裁剪"
 
@@ -438,7 +410,6 @@ class TestRealCoverStructure:
             assert r.cover_url, "cover_url 必须非空"
             assert r.cover_url.startswith("https://")
         assert fake.detail_calls == 0
-        assert fake.html_calls == 0
 
 
 class TestCoverExtractionMatrix:
@@ -596,149 +567,6 @@ class TestInvalidAndDuplicateIds:
         assert [r.rank for r in results] == [2, 4, 6], \
             "source_index 必须对应第一次出现的原始位置"
         assert fake.detail_calls == 0
-        assert fake.html_calls == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 6. legacy 行为不变（fetch_details=True）
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestLegacyDetailPathUnchanged:
-    @pytest.mark.asyncio
-    async def test_legacy_still_fetches_details(self, monkeypatch):
-        """fetch_details=True（默认）：仍逐条调详情、输出详情对象、不携带
-        source_index，不受轻量模式影响。"""
-        _configure_config(monkeypatch)
-        monkeypatch.setattr(
-            "media_platform.xhs.core.asyncio.sleep", _recorder_sleep([]))
-        fake = _FakeXhsClient(
-            [{"items": [_search_item(i) for i in range(3)],
-              "has_more": False}],
-            raise_on_detail=False)
-        sink = []
-        crawler = _make_crawler(fake, sink, limit=3, fetch_details=True)
-
-        await crawler.search()
-
-        assert fake.detail_calls == 3, "legacy 模式必须逐条调详情"
-        assert len(sink) == 3
-        for detail in sink:
-            assert "note_id" in detail, "legacy 输出详情对象"
-            assert "source_index" not in detail, (
-                "原爬虫控制台路径不得携带 source_index")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 7. worker 接线（直接跑生产 worker 路径，不复制配置判断）
-# ═══════════════════════════════════════════════════════════════════════
-
-class _RecordingCrawler:
-    """记录 runtime_options.fetch_details 的替身 crawler。"""
-
-    def __init__(self):
-        self.runtime_options = None
-        self.seen = []
-
-    async def create_xhs_client_from_snapshot(self, snap):
-        return object()
-
-    async def create_bilibili_client_from_snapshot(self, snap):
-        return object()
-
-    async def search(self):
-        self.seen.append(self.runtime_options.fetch_details)
-
-    async def search_by_keywords(self):
-        self.seen.append(self.runtime_options.fetch_details)
-
-    async def start(self):
-        self.seen.append(self.runtime_options.fetch_details)
-
-
-class _FakeStdout:
-    def __init__(self):
-        self.buffer = io.BytesIO()
-
-    def write(self, s):
-        self.buffer.write(str(s).encode("utf-8", "replace"))
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
-
-    @property
-    def encoding(self):
-        return "utf-8"
-
-
-def _capture_events(coro_fn, *args, **kw):
-    fake = _FakeStdout()
-    old_stdout = sys.stdout
-    sys.stdout = fake
-    try:
-        asyncio.run(coro_fn(*args, **kw))
-    finally:
-        sys.stdout = old_stdout
-    return [parse_event_line(line) for line in
-            fake.buffer.getvalue().decode("utf-8", "replace").splitlines()
-            if parse_event_line(line)]
-
-
-def _patch_factory(monkeypatch, crawler):
-    monkeypatch.setattr("main.CrawlerFactory.create_crawler",
-                        lambda platform: crawler)
-
-
-class TestWorkerWiring:
-    def test_xhs_aggregate_fetch_details_false(self, monkeypatch):
-        import aggregate_search.worker as worker_mod
-        crawler = _RecordingCrawler()
-        _patch_factory(monkeypatch, crawler)
-        _capture_events(
-            worker_mod._run_standard_search,
-            "j1", "xhs", "露营", 3, {"web_session": "v1"})
-        assert crawler.seen == [False], "xhs 聚合必须 fetch_details=False"
-
-    def test_bili_aggregate_fetch_details_false(self, monkeypatch):
-        import aggregate_search.worker as worker_mod
-        crawler = _RecordingCrawler()
-        _patch_factory(monkeypatch, crawler)
-        _capture_events(
-            worker_mod._run_standard_search, "j1", "bilibili", "露营", 3, None)
-        assert crawler.seen == [False], "bili 聚合保持 fetch_details=False"
-
-    def test_douyin_keeps_original_value(self, monkeypatch):
-        import aggregate_search.worker as worker_mod
-        crawler = _RecordingCrawler()
-        _patch_factory(monkeypatch, crawler)
-        _capture_events(
-            worker_mod._run_standard_search, "j1", "douyin", "露营", 3, None)
-        assert crawler.seen == [True], "douyin 保持原值（fetch_details=True）"
-
-    def test_fast_path_matches_browser_path(self, monkeypatch):
-        """xhs 快速路径与浏览器回退路径的 fetch_details 配置一致。"""
-        import aggregate_search.worker as worker_mod
-
-        # 浏览器路径：xhs 无快照 → 跳过 fast path → crawler.start()
-        crawler_b = _RecordingCrawler()
-        _patch_factory(monkeypatch, crawler_b)
-        _capture_events(
-            worker_mod._run_standard_search, "j1", "xhs", "露营", 3, None)
-        assert crawler_b.seen == [False]
-
-        # 快速路径：直接调用 _run_fast_standard_search
-        crawler_f = _RecordingCrawler()
-        _patch_factory(monkeypatch, crawler_f)
-
-        def _noop_metric(phase, ms):
-            pass
-
-        async def _noop_sink(batch):
-            pass
-
-        _capture_events(
-            worker_mod._run_fast_standard_search,
-            "j1", "xhs", "xhs", "露营", 3, _noop_sink, {}, _noop_metric)
-        assert crawler_f.seen == [False], "快速路径与浏览器路径配置必须一致"
