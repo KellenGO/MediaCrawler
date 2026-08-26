@@ -12,6 +12,7 @@
  */
 
 import type {
+  GroupedSource,
   PlatformSlug,
   SearchJobResponse,
   UnifiedSearchResult,
@@ -487,6 +488,42 @@ export function makeDedupKey(platform: PlatformSlug, contentId: string): string 
   return `${platform}|${contentId}`;
 }
 
+function groupedSourceToResult(source: GroupedSource): UnifiedSearchResult {
+  return {
+    platform: source.platform,
+    content_id: source.content_id,
+    content_type: source.content_type,
+    title: source.title,
+    snippet: source.snippet ?? null,
+    author: source.author,
+    url: source.url,
+    published_at: source.published_at,
+    cover_url: source.cover_url,
+    metrics: { ...source.metrics },
+    rank: source.rank,
+    grouped_sources: null,
+  };
+}
+
+/** 展开后只用于单平台视图或重试合并，不改变综合结果中的组。 */
+export function expandGroupedResults(
+  results: readonly UnifiedSearchResult[]
+): UnifiedSearchResult[] {
+  return results.flatMap((result) => {
+    const sources = result.grouped_sources;
+    return sources && sources.length >= 2
+      ? sources.map(groupedSourceToResult)
+      : [result];
+  });
+}
+
+export function expandGroupedResultsForPlatform(
+  results: readonly UnifiedSearchResult[],
+  platform: PlatformSlug
+): UnifiedSearchResult[] {
+  return expandGroupedResults(results).filter((result) => result.platform === platform);
+}
+
 // ── Cross-platform de-duplication V1 ──────────────────────────────────
 
 const CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH = 6;
@@ -645,7 +682,34 @@ export function deduplicateCrossPlatformResults(
     return { firstIndex: Math.min(...indexes), winner };
   });
   representatives.sort((left, right) => left.firstIndex - right.firstIndex);
-  return representatives.map(({ winner }) => results[winner]);
+  return representatives.map(({ winner, firstIndex }) => {
+    const indexes = groups.get(find(firstIndex)) || [winner];
+    const representative = results[winner];
+    if (indexes.length <= 1) return representative;
+    const rest = indexes
+      .filter((index) => index !== winner)
+      .sort((left, right) => results[left].rank - results[right].rank
+        || (platformPriority.get(results[left].platform) ?? Number.MAX_SAFE_INTEGER)
+          - (platformPriority.get(results[right].platform) ?? Number.MAX_SAFE_INTEGER)
+        || left - right);
+    const sourceIndexes = [winner, ...rest];
+    return {
+      ...representative,
+      grouped_sources: sourceIndexes.map((index): GroupedSource => ({
+        platform: results[index].platform,
+        content_id: results[index].content_id,
+        content_type: results[index].content_type,
+        title: results[index].title,
+        snippet: results[index].snippet ?? null,
+        author: results[index].author,
+        url: results[index].url,
+        published_at: results[index].published_at,
+        cover_url: results[index].cover_url,
+        metrics: { ...results[index].metrics },
+        rank: results[index].rank,
+      })),
+    };
+  });
 }
 
 /**
@@ -705,7 +769,7 @@ export function mergeSinglePlatformRetry(
   newPlatformResults: UnifiedSearchResult[],
   platformOrder: PlatformSlug[]
 ): UnifiedSearchResult[] {
-  const grouped = groupByPlatform(prevResults);
+  const grouped = groupByPlatform(expandGroupedResults(prevResults));
   grouped.set(retryPlatform, newPlatformResults);
   return interleaveByPlatform(grouped, platformOrder);
 }

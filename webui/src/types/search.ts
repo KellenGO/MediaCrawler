@@ -14,6 +14,21 @@ export type PlatformStatus =
 export type OverallStatus = "running" | "completed" | "partial" | "failed" | "cancelling" | "cancelled";
 export type HydrationStatus = "not_started" | "running" | "completed";
 
+export interface GroupedSource {
+  platform: PlatformSlug;
+  content_id: string;
+  content_type: string;
+  title: string;
+  url: string;
+  author: string | null;
+  published_at: string | null;
+  snippet?: string | null;
+  metrics: Record<string, number>;
+  cover_url: string | null;
+  /** 原平台 rank，用于单平台 Tab 的稳定排序。 */
+  rank: number;
+}
+
 export interface UnifiedSearchResult {
   platform: PlatformSlug;
   content_id: string;
@@ -26,6 +41,7 @@ export interface UnifiedSearchResult {
   cover_url: string | null;
   metrics: Record<string, number>;
   rank: number;
+  grouped_sources?: GroupedSource[] | null;
 }
 
 export interface PlatformTimingInfo {

@@ -130,7 +130,11 @@ def set(keyword: str, platform: str, limit: int,
     payload = []
     for r in results or []:
         if hasattr(r, "model_dump"):
-            payload.append(r.model_dump())
+            # grouped_sources is derived from the per-platform raw entries;
+            # cache the representative fields and rebuild grouping on replay.
+            # This avoids caching the same grouped副本 alongside each
+            # platform's source and keeps hydration-updated snippets intact.
+            payload.append(r.model_dump(exclude={"grouped_sources"}))
         elif isinstance(r, dict):
             payload.append(dict(r))
     # 已有同 key → 先移除再插入（保持 LRU 序）。

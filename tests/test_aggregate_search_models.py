@@ -23,6 +23,7 @@ Unit tests for aggregate_search models: DTO, dedup, interleave, time parsing.
 import pytest
 from aggregate_search.models import (
     UnifiedSearchResult,
+    GroupedSource,
     PlatformResult,
     SearchJobRequest,
     SearchJobStatus,
@@ -73,6 +74,15 @@ class TestUnifiedSearchResult:
         assert data["platform"] == "douyin"
         assert data["metrics"]["like_count"] == 100
         assert data["snippet"] == "这是视频摘要"
+
+    def test_grouped_sources_are_optional_and_serializable(self):
+        r = UnifiedSearchResult(
+            platform="xhs", content_id="x1", title="单条内容", url="u", rank=0,
+        )
+        assert r.grouped_sources is None
+        source = GroupedSource.from_result(r)
+        r.grouped_sources = [source]
+        assert r.model_dump()["grouped_sources"][0]["content_id"] == "x1"
 
     def test_extra_fields_ignored(self):
         r = UnifiedSearchResult(
@@ -246,6 +256,49 @@ class TestInterleave:
         merged = interleave_results({"xhs": [r1], "douyin": [r2]})
         assert len(merged) == 1
         assert merged[0].content_id == "d1"  # more complete representative
+
+    def test_duplicate_results_become_one_group_with_representative_first(self):
+        xhs = UnifiedSearchResult(
+            platform="xhs", content_id="x1", title="Claude Code 完整教程",
+            author="秋芝", url="https://www.xiaohongshu.com/explore/x1", rank=0,
+        )
+        bili = UnifiedSearchResult(
+            platform="bilibili", content_id="b1", title="Claude Code 完整教程",
+            author="秋芝2046", snippet="详细教程简介", url="https://www.bilibili.com/video/b1", rank=1,
+        )
+        merged = interleave_results(
+            {"xhs": [xhs], "bilibili": [bili]},
+            platform_order=["xhs", "bilibili"],
+        )
+        assert len(merged) == 1
+        assert merged[0].content_id == "b1"
+        assert merged[0].grouped_sources is not None
+        assert [source.platform for source in merged[0].grouped_sources] == [
+            "bilibili", "xhs"
+        ]
+        assert merged[0].grouped_sources[1].url.endswith("/x1")
+
+    def test_three_platform_copies_form_one_group(self):
+        results = [
+            UnifiedSearchResult(platform="xhs", content_id="x", title="同一 Claude 视频", url="x", rank=0),
+            UnifiedSearchResult(platform="bilibili", content_id="b", title="同一 Claude 视频", url="b", rank=0),
+            UnifiedSearchResult(platform="douyin", content_id="d", title="同一 Claude 视频", url="d", rank=0),
+        ]
+        merged = deduplicate_cross_platform_results(results)
+        assert len(merged) == 1
+        assert merged[0].grouped_sources is not None
+        assert {source.platform for source in merged[0].grouped_sources} == {
+            "xhs", "bilibili", "douyin"
+        }
+
+    def test_unrelated_result_has_no_group(self):
+        results = [
+            UnifiedSearchResult(platform="xhs", content_id="x", title="Claude Code 入门教程", author="秋芝", url="x", rank=0),
+            UnifiedSearchResult(platform="bilibili", content_id="b", title="Claude Code 进阶实战", author="秋芝2046", url="b", rank=1),
+        ]
+        merged = deduplicate_cross_platform_results(results)
+        assert len(merged) == 2
+        assert all(result.grouped_sources is None for result in merged)
 
     def test_fuzzy_title_requires_supporting_signal(self):
         base = UnifiedSearchResult(

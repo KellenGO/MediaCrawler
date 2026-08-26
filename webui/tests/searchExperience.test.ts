@@ -17,6 +17,7 @@ import {
   aggregateSortResults,
   createInitialExperienceState,
   deduplicateCrossPlatformResults,
+  expandGroupedResultsForPlatform,
   engagementScore,
   groupByPlatform,
   interleaveByPlatform,
@@ -508,6 +509,35 @@ test("deduplicateCrossPlatformResults: 同作者标题附加修饰被识别为�
     }),
   ];
   assert.equal(deduplicateCrossPlatformResults(results).length, 1);
+});
+
+test("deduplicateCrossPlatformResults: 保留 grouped_sources 且代表结果排在第一", () => {
+  const results = [
+    makeResult("xhs", "x1", { title: "Claude Code 完整教程", rank: 0 }),
+    makeResult("bilibili", "b1", {
+      title: "Claude Code 完整教程",
+      snippet: "完整简介",
+      rank: 1,
+    }),
+  ];
+  const grouped = deduplicateCrossPlatformResults(results);
+  assert.equal(grouped.length, 1);
+  assert.deepEqual(
+    grouped[0].grouped_sources?.map((source) => source.platform),
+    ["bilibili", "xhs"],
+  );
+  assert.equal(grouped[0].grouped_sources?.[0].url, "https://bilibili.com/b1");
+});
+
+test("expandGroupedResultsForPlatform: 综合组在单平台 Tab 展开为原始版本", () => {
+  const grouped = deduplicateCrossPlatformResults([
+    makeResult("xhs", "x1", { title: "同一内容" }),
+    makeResult("bilibili", "b1", { title: "同一内容", rank: 1 }),
+    makeResult("douyin", "d1", { title: "同一内容", rank: 2 }),
+  ]);
+  const bili = expandGroupedResultsForPlatform(grouped, "bilibili");
+  assert.deepEqual(bili.map((result) => result.content_id), ["b1"]);
+  assert.equal(bili[0].grouped_sources, null);
 });
 
 test("deduplicateCrossPlatformResults: A~B、A~C 通过连通组聚类，即使 B~C 不直接匹配也只留一个", () => {

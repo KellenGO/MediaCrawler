@@ -1,7 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
 import type { SearchSortMode } from "@/lib/searchExperience";
-import { resolveActiveTab, sortResults } from "@/lib/searchExperience";
+import {
+  expandGroupedResultsForPlatform,
+  resolveActiveTab,
+  sortResults,
+} from "@/lib/searchExperience";
 import { ResultCard } from "./ResultCard";
 
 interface ResultTabsProps {
@@ -65,7 +69,9 @@ export function ResultTabs({
 
   // 先按当前标签筛选，再按所选模式排序（纯前端计算，不发任何请求）。
   const filteredResults = useMemo(() => {
-    const scoped = effectiveTab === "all" ? results : results.filter((r) => r.platform === effectiveTab);
+    const scoped = effectiveTab === "all"
+      ? results
+      : expandGroupedResultsForPlatform(results, effectiveTab);
     const sorted = sortResults(scoped, sortMode, keyword);
     const resultKey = (r: UnifiedSearchResult) => `${r.platform}|${r.content_id}`;
     const signature = [
@@ -92,7 +98,12 @@ export function ResultTabs({
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: results.length };
     for (const r of results) {
-      c[r.platform] = (c[r.platform] || 0) + 1;
+      const sources = r.grouped_sources && r.grouped_sources.length >= 2
+        ? r.grouped_sources
+        : [r];
+      for (const source of sources) {
+        c[source.platform] = (c[source.platform] || 0) + 1;
+      }
     }
     return c;
   }, [results]);

@@ -99,6 +99,39 @@ OverallStatus = Literal["running", "completed", "partial", "failed", "cancelling
 
 # ── Unified search result ──────────────────────────────────────────────
 
+class GroupedSource(BaseModel):
+    """Public fields for one platform version of a grouped result."""
+
+    platform: PlatformSlug
+    content_id: str
+    content_type: str = "note"
+    title: str
+    url: str
+    author: Optional[str] = None
+    published_at: Optional[str] = None
+    snippet: Optional[str] = None
+    metrics: Dict[str, int] = Field(default_factory=dict)
+    cover_url: Optional[str] = None
+    # Kept for stable reconstruction of a single-platform tab.  It is the
+    # existing platform rank, not a new grouping score.
+    rank: int = 0
+
+    @classmethod
+    def from_result(cls, result: "UnifiedSearchResult") -> "GroupedSource":
+        return cls(
+            platform=result.platform,
+            content_id=result.content_id,
+            content_type=result.content_type,
+            title=result.title,
+            url=result.url,
+            author=result.author,
+            published_at=result.published_at,
+            snippet=result.snippet,
+            metrics=dict(result.metrics),
+            cover_url=result.cover_url,
+            rank=result.rank,
+        )
+
 class UnifiedSearchResult(BaseModel):
     """Normalized result from any supported platform."""
 
@@ -113,6 +146,7 @@ class UnifiedSearchResult(BaseModel):
     cover_url: Optional[str] = None
     metrics: Dict[str, int] = Field(default_factory=dict)
     rank: int = 0  # original platform rank (0-based)
+    grouped_sources: Optional[List[GroupedSource]] = None
 
     # Allow extra fields from adapters for internal use
     model_config = {"extra": "ignore"}
@@ -485,7 +519,33 @@ def deduplicate_cross_platform_results(
         representatives.append((min(indexes), winner))
 
     representatives.sort(key=lambda pair: pair[0])
-    return [results[winner] for _, winner in representatives]
+    grouped_results: List[UnifiedSearchResult] = []
+    for _, winner in representatives:
+        indexes = next(
+            members for members in groups.values() if winner in members
+        )
+        representative = results[winner]
+        if len(indexes) <= 1:
+            grouped_results.append(representative)
+            continue
+
+        other_indexes = sorted(
+            (index for index in indexes if index != winner),
+            key=lambda index: (
+                results[index].rank,
+                platform_priority.get(results[index].platform, 10_000),
+                index,
+            ),
+        )
+        source_indexes = [winner, *other_indexes]
+        # Keep the same representative object from platform_results so later
+        # hydration updates and cache writes observe the grouped card too.
+        representative.grouped_sources = [
+            GroupedSource.from_result(results[index])
+            for index in source_indexes
+        ]
+        grouped_results.append(representative)
+    return grouped_results
 
 
 # ── Interleaved merge ──────────────────────────────────────────────────
