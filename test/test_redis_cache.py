@@ -27,7 +27,11 @@
 import time
 import unittest
 
+import pytest
+
 from cache.redis_cache import RedisCache
+
+pytestmark = pytest.mark.integration
 
 
 class TestRedisCache(unittest.TestCase):

@@ -288,6 +288,7 @@ class _FakeCtx:
     def __init__(self):
         self.cookies_list = [
             {"name": "web_session", "value": "x", "domain": ".xiaohongshu.com"},
+            {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
         ]
 
     async def cookies(self, urls=None):

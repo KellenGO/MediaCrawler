@@ -23,6 +23,7 @@
     "src/lib/accounts.ts",
     "src/lib/accountBulkSync.ts",
     "src/lib/platformLimits.ts",
+    "src/lib/environmentHealth.ts",
     "src/lib/statusDisplay.ts",
     "src/hooks/useAccounts.ts",
     "src/types/search.ts",

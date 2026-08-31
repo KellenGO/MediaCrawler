@@ -298,6 +298,7 @@ class TestFastAPIRoutes:
     def test_current_job_200(self, client):
         assert client.get("/api/search/jobs/current").status_code == 200
 
+    @pytest.mark.integration
     def test_search_create_cancel(self, client):
         r = client.post("/api/search/jobs",
                        json={"keyword": "test", "platforms": ["xhs"], "limit_per_platform": 3})
@@ -316,6 +317,7 @@ class TestFastAPIRoutes:
     def test_nonexistent_login_404(self, client):
         assert client.get("/api/search/login/nonexistent123").status_code == 404
 
+    @pytest.mark.integration
     def test_search_login_concurrent_only_one_accepted(self, client):
         """When a search is running, login must be rejected with 409."""
         r = client.post("/api/search/jobs",
@@ -448,6 +450,7 @@ def test_xhs_probe_verdicts_through_production_pong(monkeypatch, pong_result, ex
                   "media_platform.xhs.client.XiaoHongShuClient", FakeClient)
     ctx = _probe_ctx([
         {"name": "web_session", "value": "fake", "domain": ".xiaohongshu.com"},
+        {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
     ])
     result = asyncio.run(acc._pong_with_profile("xhs", ctx))
     assert result == expected
@@ -467,6 +470,7 @@ def test_xhs_probe_timeout_is_unavailable(monkeypatch):
                   "media_platform.xhs.client.XiaoHongShuClient", FakeClient)
     ctx = _probe_ctx([
         {"name": "web_session", "value": "fake", "domain": ".xiaohongshu.com"},
+        {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
     ])
     result = asyncio.run(acc._pong_with_profile("xhs", ctx))
     assert result == "unavailable"
@@ -483,6 +487,7 @@ def test_xhs_probe_datafetch_error_is_unavailable(monkeypatch):
                   "media_platform.xhs.client.XiaoHongShuClient", FakeClient)
     ctx = _probe_ctx([
         {"name": "web_session", "value": "fake", "domain": ".xiaohongshu.com"},
+        {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
     ])
     assert asyncio.run(acc._pong_with_profile("xhs", ctx)) == "unavailable"
 
@@ -722,6 +727,10 @@ _XHS_COOKIES = [
     {"name": "web_session", "value": "fake-xhs-session",
      "domain": ".xiaohongshu.com", "path": "/",
      "expirationDate": 1750000000.0, "httpOnly": True, "secure": True,
+     "sameSite": "no_restriction"},
+    {"name": "a1", "value": "fake-a1",
+     "domain": ".xiaohongshu.com", "path": "/",
+     "expirationDate": 1750000000.0, "httpOnly": False, "secure": True,
      "sameSite": "no_restriction"},
 ]
 

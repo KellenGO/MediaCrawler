@@ -1,0 +1,140 @@
+name: Windows Release Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package-and-smoke:
+    name: Build and test node-free Windows package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Node for build only
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Regenerate and validate lock metadata
+        run: |
+          uv lock
+          uv lock --check
+
+      - name: Install backend development environment
+        run: uv sync
+
+      - name: Run backend regression tests
+        run: uv run pytest -q
+
+      - name: Install frontend dependencies
+        working-directory: webui
+        run: npm ci
+
+      - name: Run frontend search tests
+        working-directory: webui
+        run: npm run test:search
+
+      - name: Build production frontend
+        working-directory: webui
+        run: npm run build
+
+      - name: Assemble release package
+        shell: pwsh
+        run: |
+          $baseVersion = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+          uv run python scripts/package_windows.py --output release --release-version "$baseVersion-rc1"
+
+      - name: Validate package boundary
+        shell: pwsh
+        run: |
+          $package = Join-Path (Resolve-Path release) "MediaCrawler-Windows"
+          $required = @(
+            "MediaCrawler.bat",
+            "scripts/start.ps1",
+            "api/main.py",
+            "pyproject.toml",
+            "RELEASE_VERSION",
+            "webui/dist/index.html"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path (Join-Path $package $path))) { throw "missing package entry: $path" }
+          }
+          $forbidden = @(".env", ".git", ".github", "browser_data", "logs", "node_modules", "webui/src", "tests", "__pycache__")
+          foreach ($name in $forbidden) {
+            if (Test-Path (Join-Path $package $name)) { throw "forbidden package entry: $name" }
+          }
+
+      - name: Extract and smoke-test package in clean room
+        shell: pwsh
+        run: |
+          $cleanRoot = Join-Path $env:RUNNER_TEMP "mediacrawler-clean-room"
+          if (Test-Path $cleanRoot) { Remove-Item -LiteralPath $cleanRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $cleanRoot | Out-Null
+          Expand-Archive -LiteralPath "release/MediaCrawler-Windows.zip" -DestinationPath $cleanRoot
+
+          $package = Join-Path $cleanRoot "MediaCrawler-Windows"
+          $runtimeEnv = Join-Path $cleanRoot "runtime-venv"
+          $env:UV_PROJECT_ENVIRONMENT = $runtimeEnv
+          uv sync --project $package --frozen --no-dev --no-install-project
+          $runtimePython = Join-Path $runtimeEnv "Scripts/python.exe"
+
+          $env:PATH = ((Join-Path $runtimeEnv "Scripts") + ";" + $env:PATH)
+          $nodeRoots = @("node", "npm") | ForEach-Object {
+            $command = Get-Command $_ -ErrorAction SilentlyContinue
+            if ($command) { Split-Path -Parent $command.Source }
+          } | Where-Object { $_ } | Select-Object -Unique
+          if ($nodeRoots) {
+            $env:PATH = (($env:PATH -split ';' | Where-Object {
+              $nodeRoots -notcontains $_
+            }) -join ';')
+          }
+          if ((Get-Command node -ErrorAction SilentlyContinue) -or (Get-Command npm -ErrorAction SilentlyContinue)) {
+            throw "Node/npm remained available during the node-free runtime smoke"
+          }
+
+          $env:PYTHONPATH = ""
+          & $runtimePython scripts/clean_room_smoke.py --package $package --python $runtimePython
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Create SHA256 checksum
+        shell: pwsh
+        run: |
+          $archive = Join-Path (Resolve-Path release) "MediaCrawler-Windows.zip"
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MediaCrawler-Windows.zip" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
+
+      - name: Upload validated Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaCrawler-Windows
+          path: |
+            release/MediaCrawler-Windows.zip
+            release/MediaCrawler-Windows.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload regenerated uv.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: uv-lock-regenerated
+          path: uv.lock
+          if-no-files-found: error

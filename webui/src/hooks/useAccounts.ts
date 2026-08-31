@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import type { AccountStatusInfo } from "@/lib/accounts";
+import type { EnvironmentHealth } from "@/lib/environmentHealth";
 
 const API_BASE = "/api/search/accounts";
 const POLL_INTERVAL_MS = 3000;
@@ -67,8 +68,9 @@ export function useAccounts(): UseAccountsResult {
     queryFn: async () => {
       try {
         const r = await fetch("/api/health");
+        if (!r.ok) throw new Error("health request failed");
         const d = await r.json();
-        return d?.status === "ok";
+        return d as EnvironmentHealth;
       } catch {
         return false;
       }
@@ -80,7 +82,7 @@ export function useAccounts(): UseAccountsResult {
 
   const apiRunning: boolean | null = healthQuery.isPending
     ? null
-    : healthQuery.data === true;
+    : healthQuery.data !== false;
 
   const accountsQuery = useQuery({
     ...accountsQueryOptions(apiRunning === true),

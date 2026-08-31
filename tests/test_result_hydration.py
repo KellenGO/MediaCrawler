@@ -125,6 +125,7 @@ async def test_timeout_does_not_block_other_results_and_concurrency_is_bounded()
     items = [result(snippet=None, index=i) for i in range(20)]
     active = 0
     maximum = 0
+    never = asyncio.Event()
 
     async def fetch(item):
         nonlocal active, maximum
@@ -132,10 +133,8 @@ async def test_timeout_does_not_block_other_results_and_concurrency_is_bounded()
         maximum = max(maximum, active)
         try:
             if item.content_id == "0":
-                await asyncio.sleep(0.05)
-            else:
-                await asyncio.sleep(0.001)
-                return f"正文简介 {item.content_id}"
+                await never.wait()
+            return f"正文简介 {item.content_id}"
         finally:
             active -= 1
 

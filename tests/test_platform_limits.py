@@ -194,7 +194,8 @@ async def test_four_workers_receive_different_limits(monkeypatch):
     resp = await manager.create_job(SearchJobRequestSchema(
         keyword="k", platforms=["xhs", "douyin", "bilibili", "zhihu"],
         limit_per_platform=10,
-        platform_limits={"xhs": 3, "douyin": 20, "bilibili": 8, "zhihu": 12}))
+        platform_limits={"xhs": 3, "douyin": 20, "bilibili": 8, "zhihu": 12},
+        bypass_cache=True))
     job = manager._active_job
     await asyncio.wait_for(job.task, timeout=10)
 
@@ -213,7 +214,7 @@ async def test_single_platform_retry_uses_target_configured_limit(monkeypatch):
     manager = SearchJobManager()
     resp = await manager.create_job(SearchJobRequestSchema(
         keyword="k", platforms=["douyin"], limit_per_platform=10,
-        platform_limits={"douyin": 20}))
+        platform_limits={"douyin": 20}, bypass_cache=True))
     job = manager._active_job
     await asyncio.wait_for(job.task, timeout=10)
 
@@ -230,7 +231,8 @@ async def test_legacy_uniform_limit_still_works(monkeypatch):
     _patch_proc(monkeypatch, procs)
     manager = SearchJobManager()
     resp = await manager.create_job(SearchJobRequestSchema(
-        keyword="k", platforms=["xhs", "bilibili"], limit_per_platform=5))
+        keyword="k", platforms=["xhs", "bilibili"], limit_per_platform=5,
+        bypass_cache=True))
     job = manager._active_job
     await asyncio.wait_for(job.task, timeout=10)
 
@@ -249,7 +251,7 @@ async def test_cancel_done_and_identity_no_regression(monkeypatch):
     manager = SearchJobManager()
     resp = await manager.create_job(SearchJobRequestSchema(
         keyword="k", platforms=["zhihu"], limit_per_platform=1,
-        platform_limits={"zhihu": 1}))
+        platform_limits={"zhihu": 1}, bypass_cache=True))
     job = manager._active_job
     await asyncio.wait_for(job.task, timeout=10)
     assert job.platforms_state["zhihu"].status in ("succeeded", "empty")

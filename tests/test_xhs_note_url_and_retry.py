@@ -39,10 +39,14 @@ def test_note_url_default_source_is_pc_search():
     assert qs["xsec_source"] == ["pc_search"]
 
 
-def test_note_url_existing_url_wins_when_allowed():
+def test_note_url_existing_official_url_keeps_hydration_context():
     existing = "https://www.xiaohongshu.com/explore/other_id"
     url = build_note_url("abc123", note_url=existing, xsec_token="tok")
-    assert url == existing
+    parts = urlsplit(url)
+    assert parts.netloc == "www.xiaohongshu.com"
+    assert parts.path == "/explore/other_id"
+    assert parse_qs(parts.query)["xsec_token"] == ["tok"]
+    assert parse_qs(parts.query)["xsec_source"] == ["pc_search"]
 
 
 def test_note_url_external_domain_rejected():

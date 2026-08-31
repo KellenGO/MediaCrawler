@@ -94,6 +94,9 @@ def _fake_client_class(verified=True):
 
 _XHS_COOKIE = [
     {"name": "web_session", "value": "x", "domain": ".xiaohongshu.com"},
+    # a1 is signing material, not a login marker; this fixture represents
+    # an already initialized HTTP session and should not trigger navigation.
+    {"name": "a1", "value": "test-a1", "domain": ".xiaohongshu.com"},
 ]
 _BILI_COOKIE = [
     {"name": "SESSDATA", "value": "x", "domain": ".bilibili.com"},

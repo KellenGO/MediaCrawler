@@ -84,7 +84,8 @@ async def _capture_running_pid(manager: sjm.SearchJobManager, platform: str,
 
 def _req(keyword: str, platform: str = "xhs", limit: int = 3) -> SearchJobRequestSchema:
     return SearchJobRequestSchema(
-        keyword=keyword, platforms=[platform], limit_per_platform=limit)
+        keyword=keyword, platforms=[platform], limit_per_platform=limit,
+        bypass_cache=True)
 
 
 class TestResidentSupervisor:

@@ -20,25 +20,50 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+      - name: Lock and install project dependencies
+        run: |
+          uv lock
+          uv sync
+      - name: Run local fixture and unit tests
+        # Integration tests are marked and skipped by repository-wide defaults.
+        run: uv run pytest -q
+
+  redis-integration:
+    name: Redis integration tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
       - name: Install project dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-      - name: Run local fixture and unit tests
-        # Keep browser, login, and live-platform tests out of CI.
-        run: >-
-          python -m pytest -q
-          tests/test_aggregate_search_models.py
-          tests/test_aggregate_search_adapters.py
-          tests/test_aggregate_search_protocol.py
-          tests/test_bilibili_light_list.py
-          tests/test_platform_limits.py
-          tests/test_result_cache.py
-          tests/test_search_job_manager.py
-          tests/test_search_timing.py
-          tests/test_webui_ui_contract.py
-          tests/test_xhs_light_list.py
+          uv lock
+          uv sync
+      - name: Run Redis-backed integration tests
+        run: uv run pytest -q --run-integration -m integration test/test_redis_cache.py
 
   frontend:
     name: Frontend tests

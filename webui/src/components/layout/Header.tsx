@@ -20,6 +20,7 @@ import {
   type AccountTone,
 } from '@/lib/accounts'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '@/types/search'
+import { environmentHealthWarning, type EnvironmentHealth } from '@/lib/environmentHealth'
 
 export type ViewMode = 'search' | 'accounts'
 
@@ -40,15 +41,18 @@ const PLATFORM_LETTERS: Record<string, string> = {
 const PLATFORM_ORDER = ['xhs', 'douyin', 'bilibili', 'zhihu'] as const
 
 /** 轻量本地 API 健康探测（每 15s 一次）。 */
-function useApiHealth(): boolean | null {
-  const [ok, setOk] = useState<boolean | null>(null)
+function useApiHealth(): EnvironmentHealth | false | null {
+  const [health, setHealth] = useState<EnvironmentHealth | false | null>(null)
   useEffect(() => {
     let alive = true
     const check = () => {
       fetch('/api/health')
-        .then((r) => r.json())
-        .then((d) => alive && setOk(d?.status === 'ok'))
-        .catch(() => alive && setOk(false))
+        .then((r) => {
+          if (!r.ok) throw new Error('health request failed')
+          return r.json()
+        })
+        .then((d) => alive && setHealth(d as EnvironmentHealth))
+        .catch(() => alive && setHealth(false))
     }
     check()
     const id = setInterval(check, 15000)
@@ -57,7 +61,7 @@ function useApiHealth(): boolean | null {
       clearInterval(id)
     }
   }, [])
-  return ok
+  return health
 }
 
 const TONE_DOT: Record<AccountTone, string> = {
@@ -163,7 +167,9 @@ function AccountPopover({
 
 export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) {
   const { t } = useTranslation()
-  const apiOk = useApiHealth()
+  const apiHealth = useApiHealth()
+  const apiOk = apiHealth === false ? false : apiHealth === null ? null : apiHealth.status === 'ok'
+  const healthWarning = environmentHealthWarning(apiHealth)
   const { accounts, loading, initialLoaded, error } = useAccounts()
   const [accountOpen, setAccountOpen] = useState(false)
   const accountRef = useRef<HTMLDivElement>(null)
@@ -312,6 +318,11 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
             <HelpCircle className="w-[17px] h-[17px]" />
           </button>
         </div>
+        {healthWarning && (
+          <div role="status" className="order-last basis-full rounded-[10px] border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+            {healthWarning}
+          </div>
+        )}
       </div>
     </header>
   )

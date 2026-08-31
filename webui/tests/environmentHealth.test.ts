@@ -1,0 +1,41 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  environmentHealthWarning,
+  type EnvironmentHealth,
+} from "../src/lib/environmentHealth.js";
+
+const healthy: EnvironmentHealth = {
+  status: "ok",
+  environment_status: "ok",
+  backend_available: true,
+  version: "1.0.0",
+  api_version: "1.0.0",
+  web_version: "1.0.0",
+  version_match: true,
+  browser_available: true,
+  browser_backend: "chrome",
+  redis_required: false,
+  redis_available: null,
+};
+
+test("正常环境不显示启动警告", () => {
+  assert.equal(environmentHealthWarning(healthy), null);
+});
+
+test("后端不可用显示明确提示", () => {
+  assert.equal(environmentHealthWarning(false), "本地后端不可用，请先启动后端服务。");
+});
+
+test("浏览器不可用显示安装提示", () => {
+  const warning = environmentHealthWarning({ ...healthy, browser_available: false });
+  if (!warning) throw new Error("expected browser warning");
+  assert.ok(warning.includes("浏览器不可用"));
+});
+
+test("版本不匹配显示重建提示", () => {
+  const warning = environmentHealthWarning({ ...healthy, version_match: false });
+  if (!warning) throw new Error("expected version warning");
+  assert.ok(warning.includes("版本不匹配"));
+});
