@@ -15,7 +15,6 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aggregate_search.models import (
@@ -24,6 +23,7 @@ from aggregate_search.models import (
 )
 from aggregate_search.hydration import hydration_candidates
 from aggregate_search.protocol import parse_event_line, WorkerRequest
+from base.runtime_paths import application_root
 from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
     PlatformTimingInfo,
@@ -42,7 +42,7 @@ GRACE_PERIOD_SECONDS = 5.0
 # repeat cancel). The cancel cleanup itself is bounded by GRACE_PERIOD.
 CANCEL_WAIT_TIMEOUT = 30.0
 _MAX_STDERR_TAIL = 40
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_PROJECT_ROOT = application_root()
 _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 
 # Production defaults to resident worker supervisors; one-shot mode remains for
@@ -51,6 +51,13 @@ _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 SEARCH_WORKER_MODE = os.environ.get("MC_SEARCH_WORKER_MODE", "supervisor")
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_command(*args: str) -> list[str]:
+    """Use the frozen executable for workers, source script otherwise."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--aggregate-worker", *args]
+    return [sys.executable, _WORKER_SCRIPT, *args]
 
 
 # ── Resident platform worker supervisor ─────────────────────────────────
@@ -87,7 +94,7 @@ class PlatformWorkerSupervisor:
                "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
                "MC_WORKER_MAX_REQUESTS": str(self.MAX_REQUESTS_PER_WORKER)}
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, _WORKER_SCRIPT, "--resident",
+            *_worker_command("--resident"),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
         )
@@ -526,6 +533,9 @@ class SearchJobManager:
             #   无 done + exit0 / 无 done + nonzero（中途退出）→ failed
             if proc.returncode is not None:
                 await self._remove_proc(job, proc)
+                current = job.platforms_state.get(platform)
+                if current and current.status in ("cancelled", "timed_out"):
+                    return
                 if not done_received or proc.returncode != 0:
                     job.set_platform_status(
                         platform, "failed",
@@ -571,7 +581,7 @@ class SearchJobManager:
                    "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
             job.mark_spawn_start(platform)
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, _WORKER_SCRIPT,
+                *_worker_command(),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
             )

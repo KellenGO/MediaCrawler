@@ -33,9 +33,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..schemas.search import PlatformDiagnostic
+from base.runtime_paths import application_root, resource_path, writable_path
 
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-BROWSER_DATA_DIR = _PROJECT_ROOT / "browser_data"
+_PROJECT_ROOT = application_root()
+BROWSER_DATA_DIR = writable_path("browser_data")
 
 # Platform -> official cookie domains (subdomain match allowed).
 PLATFORM_COOKIE_DOMAINS: Dict[str, tuple] = {
@@ -494,7 +495,7 @@ async def _ensure_xhs_signing_cookies(
         if cookie_dict.get("a1"):
             return cookie_dict
 
-        stealth_path = _PROJECT_ROOT / "libs" / "stealth.min.js"
+        stealth_path = resource_path("libs", "stealth.min.js")
         add_init_script = getattr(context, "add_init_script", None)
         if add_init_script is not None and stealth_path.is_file():
             await add_init_script(path=str(stealth_path))

@@ -27,7 +27,14 @@ from typing import Any, Dict, List
 _PROCESS_START = time.perf_counter()
 
 # Ensure project root is on sys.path
-_PROJECT_ROOT = Path(__file__).parent.parent
+if not getattr(sys, "frozen", False):
+    _SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(_SOURCE_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_SOURCE_PROJECT_ROOT))
+
+from base.runtime_paths import application_root, resource_path, writable_path
+
+_PROJECT_ROOT = application_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -496,10 +503,9 @@ async def _run_zhihu_search(
 
     async def run_browser_provider() -> int:
         async with async_playwright() as playwright:
-            user_data_dir = os.path.join(
-                os.getcwd(), "browser_data",
-                config.USER_DATA_DIR % core_platform
-            )
+            user_data_dir = str(writable_path(
+                "browser_data", config.USER_DATA_DIR % core_platform
+            ))
             user_agent = _ZHIHU_USER_AGENT
             executable_path, channel, backend = resolve_playwright_browser()
             if backend == "playwright-chromium":
@@ -523,7 +529,8 @@ async def _run_zhihu_search(
                 **launch_kwargs,
             )
             try:
-                await context.add_init_script(path="libs/stealth.min.js")
+                await context.add_init_script(
+                    path=str(resource_path("libs", "stealth.min.js")))
                 from tools.light_page import install_light_page_routes, light_goto_kwargs
                 await install_light_page_routes(context)
                 emit_metrics(job_id, platform, {

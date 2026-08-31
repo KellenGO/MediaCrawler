@@ -34,6 +34,7 @@ from playwright.async_api import (
 import config
 from constant import zhihu as constant
 from base.base_crawler import AbstractCrawler
+from base.runtime_paths import resource_path, writable_path
 from model.m_zhihu import ZhihuContent
 from tools import utils
 from tools.browser_launcher import (
@@ -100,7 +101,8 @@ class ZhihuCrawler(AbstractCrawler):
                     chromium, None, self.user_agent, headless=config.HEADLESS
                 )
                 # stealth.min.js is a js script to prevent the website from detecting the crawler.
-                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                await self.browser_context.add_init_script(
+                    path=str(resource_path("libs", "stealth.min.js")))
 
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url, wait_until="domcontentloaded")
@@ -273,9 +275,8 @@ class ZhihuCrawler(AbstractCrawler):
         if config.SAVE_LOGIN_STATE:
             # feat issue #14
             # we will save login state to avoid login every time
-            user_data_dir = os.path.join(
-                os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM
-            )  # type: ignore
+            user_data_dir = str(writable_path(
+                "browser_data", config.USER_DATA_DIR % config.PLATFORM))
             browser_context = await chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
                 **launch_kwargs,

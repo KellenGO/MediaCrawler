@@ -30,6 +30,7 @@ from model.m_zhihu import ZhihuContent, ZhihuCreator
 from tools import utils
 from tools.crawler_util import extract_text_from_html
 from tools.user_hash import anonymize_user_id, mask_nickname
+from base.runtime_paths import resource_path
 
 ZHIHU_SGIN_JS = None
 
@@ -46,8 +47,8 @@ def sign(url: str, cookies: str) -> Dict:
     """
     global ZHIHU_SGIN_JS
     if not ZHIHU_SGIN_JS:
-        with open("libs/zhihu.js", mode="r", encoding="utf-8-sig") as f:
-            ZHIHU_SGIN_JS = execjs.compile(f.read())
+        ZHIHU_SGIN_JS = execjs.compile(
+            resource_path("libs", "zhihu.js").read_text(encoding="utf-8-sig"))
 
     return ZHIHU_SGIN_JS.call("get_sign", url, cookies)
 

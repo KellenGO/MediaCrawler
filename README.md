@@ -73,42 +73,69 @@ Search UI
 
 ## 快速开始
 
-### 环境要求
+本项目有两种使用方式：普通用户使用 Windows 可执行包；开发者从源码运行。两种方式都使用同一个本地地址：`http://127.0.0.1:8080`。
 
-- Python 3.11
-- [uv](https://docs.astral.sh/uv/)
-- Node.js 20 或兼容的 LTS 版本（仅构建前端或运行开发服务器需要）
-- 可用的 Chrome/Chromium 浏览器
+### 普通用户：Windows 可执行包（推荐）
 
-### 普通用户：下载 Windows Release 包
+可执行包已经包含 Python runtime、FastAPI 后端和生产版 Web UI。普通使用不需要安装 Python、uv、Node.js、npm，也不需要手动运行 PowerShell 或 bat。
 
-从 GitHub Releases 下载 `MediaCrawler-Windows.zip`，解压后先准备 Python 3.11+ 环境并在解压目录执行 `uv sync --no-dev`，然后双击 `MediaCrawler.bat`。Release 包已经包含 `webui/dist`，日常运行不需要 Node.js、npm 或前端源码。
+1. 下载 `MediaCrawler-Windows-x64.zip`（GitHub Actions artifact 或项目提供的 Release 包）；
+2. 将 ZIP 解压到一个有写入权限的目录，不要只复制其中的 EXE；
+3. 打开解压后的 `MediaCrawler` 文件夹，双击 `MediaCrawler.exe`；
+4. 等待控制台显示 backend ready，程序会自动打开系统默认浏览器；
+5. 在搜索框输入关键词，选择需要的平台后开始搜索。
 
-### 安装 Python 依赖
+程序默认监听 `127.0.0.1:8080`。运行期间不要删除 EXE 旁边的 `_internal`、`webui` 或其他运行文件。账号 profile、缓存和运行数据会在 EXE 所在目录附近创建，不会写入构建临时目录。
 
-在仓库根目录执行：
+可执行包默认使用系统 Chrome/Edge；Windows 通常自带 Edge。如果 `/api/health` 显示浏览器不可用，请先安装或修复 Chrome/Edge，再重新启动。
+
+### Windows 可执行包：账号同步
+
+只有需要登录态、详情接口或更稳定平台访问时才需要同步账号。公开搜索不一定要求四个平台都登录。
+
+1. 在 Chrome 或 Edge 中打开扩展管理页：Chrome 为 `chrome://extensions`，Edge 为 `edge://extensions`；
+2. 打开“开发者模式”，选择“加载已解压的扩展程序”；
+3. 选择 ZIP 解压目录中的 `MediaCrawler/browser_extension/`；
+4. 在浏览器中登录小红书、抖音、Bilibili 或知乎；
+5. 打开本地网站的“账号设置”，点击对应平台的“同步当前浏览器登录状态”；
+6. 根据页面结果确认同步是否成功，然后返回搜索页使用。
+
+扩展只向本机 MediaCrawler 后端同步必要的会话信息，不要把扩展目录或账号 profile 上传给他人。更详细的扩展说明见 [`browser_extension/README.md`](browser_extension/README.md)。
+
+### 从源码运行：准备环境
+
+源码运行需要：
+
+- Python 3.11 或更高版本；
+- [uv](https://docs.astral.sh/uv/)；
+- Chrome/Edge，或可用的 Playwright Chromium；
+- Node.js 20 或兼容的 LTS 版本（仅前端开发和构建需要）。
+
+在仓库根目录安装 Python 依赖：
 
 ```shell
 uv sync
 ```
 
-如果使用项目管理的 Playwright Chromium，首次使用时安装浏览器：
+如果使用项目管理的 Playwright Chromium，首次安装一次浏览器：
 
 ```shell
 uv run playwright install chromium
 ```
 
-项目也支持按现有配置使用本机浏览器或 CDP。
+### 从源码一键启动
 
-### Windows 一键启动（推荐）
+确认已经存在 `webui/dist/index.html` 后，在仓库根目录双击：
 
-在仓库根目录双击 `MediaCrawler.bat`。启动器会检查 Python、Python 依赖和前端构建文件，然后启动 FastAPI 后端，等待 `/api/health` ready，最后打开系统默认浏览器。普通使用不需要 Node.js，也不会启动 Vite dev server。
+```text
+MediaCrawler.bat
+```
 
-如果找不到 `webui/dist`，请先按下方开发者步骤执行 `npm ci` 和 `npm run build`；不会自动安装 Python 或 Node.js。启动器不会使用 `--reload`，也不会终止其他程序占用的端口。
+启动器会检查 Python、依赖和前端构建文件，启动后端并轮询 `/api/health`。按 `Ctrl+C` 会清理本次启动的后端进程；如果 8080 已经是本项目服务，则直接复用，不会重复启动。
 
-启动窗口中按 `Ctrl+C` 会清理本次由启动器创建的后端进程。已运行的 MediaCrawler 服务会直接复用，不会重复启动。浏览器或其他本地环境检查出现 warning 时，页面仍会打开，具体状态可在应用中查看。
+如果源码目录没有 `webui/dist`，先按下面的“前端开发与构建”步骤执行。启动器不会自动安装系统 Python 或 Node.js，也不会抢占其他程序正在使用的端口。
 
-### 启动后端
+### 手动启动后端
 
 在仓库根目录执行：
 
@@ -116,11 +143,11 @@ uv run playwright install chromium
 uv run uvicorn api.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
-API 地址为 `http://127.0.0.1:8080`。完成前端生产构建后，后端也会直接提供构建后的页面。
+然后访问 `http://127.0.0.1:8080`。如果已经构建了 `webui/dist`，FastAPI 会直接提供生产版页面。
 
-### 前端开发环境
+### 前端开发与构建
 
-另开终端：
+前端开发需要 Node.js：
 
 ```shell
 cd webui
@@ -128,9 +155,9 @@ npm ci
 npm run dev
 ```
 
-开发页面通常位于 `http://localhost:5173`，开发服务器会将 `/api` 请求代理到后端。
+开发页面通常位于 `http://localhost:5173`，Vite 会将 `/api` 请求代理到 `8080` 后端。修改 React/TypeScript 后可使用 HMR。
 
-### 构建生产前端
+构建生产前端：
 
 ```shell
 cd webui
@@ -138,9 +165,14 @@ npm ci
 npm run build
 ```
 
-构建产物输出到 `webui/dist/`。随后启动后端并访问 `http://127.0.0.1:8080` 即可使用。
+构建产物输出到 `webui/dist/`。源码仓库不提交该目录；Windows executable workflow 会在构建后将它装入 `MediaCrawler-Windows-x64.zip`，并在 clean-room 中验证后上传 artifact。
 
-源码仓库不提交 `webui/dist`；GitHub Actions 的 release package workflow 会在构建后把它装入 `MediaCrawler-Windows.zip`。
+### 常见启动问题
+
+- **8080 端口被占用**：关闭占用该端口的本项目实例后再启动；程序不会强制终止其他应用，也不会自动改端口。
+- **源码启动提示缺少 `webui/dist`**：进入 `webui` 执行 `npm ci` 和 `npm run build`。
+- **页面可以打开但环境显示 degraded**：先查看账号设置中的 Platform Doctor；Redis、账号验证或浏览器状态异常不一定会阻止公开搜索。
+- **搜索任务失败或结果不完整**：单个平台失败不会阻止其他平台返回结果，可在结果页对失败平台单独重试。
 
 ## 账号同步
 

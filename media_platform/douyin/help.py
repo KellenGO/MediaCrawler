@@ -28,9 +28,11 @@ import random
 
 import execjs
 from playwright.async_api import Page
+from base.runtime_paths import resource_path
 
 
-douyin_sign_obj = execjs.compile(open('libs/douyin.js', encoding='utf-8-sig').read())
+douyin_sign_obj = execjs.compile(
+    resource_path("libs", "douyin.js").read_text(encoding="utf-8-sig"))
 
 def get_web_id():
     """

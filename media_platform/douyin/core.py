@@ -18,7 +18,6 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
-import os
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import (
@@ -31,6 +30,7 @@ from playwright.async_api import (
 
 import config
 from base.base_crawler import AbstractCrawler
+from base.runtime_paths import resource_path, writable_path
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
 from var import crawler_type_var, source_keyword_var
@@ -156,7 +156,8 @@ class DouYinCrawler(AbstractCrawler):
                     headless=config.HEADLESS,
                 )
                 # stealth.min.js is a js script to prevent the website from detecting the crawler.
-                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                await self.browser_context.add_init_script(
+                    path=str(resource_path("libs", "stealth.min.js")))
             self._report_metric("browser_launch")
             await self._apply_light_page()
 
@@ -299,7 +300,8 @@ class DouYinCrawler(AbstractCrawler):
     ) -> BrowserContext:
         """Launch browser and create browser context"""
         if config.SAVE_LOGIN_STATE:
-            user_data_dir = os.path.join(os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM)  # type: ignore
+            user_data_dir = str(writable_path(
+                "browser_data", config.USER_DATA_DIR % config.PLATFORM))
             browser_context = await chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
                 accept_downloads=True,

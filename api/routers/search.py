@@ -14,7 +14,6 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Header, Request
@@ -26,11 +25,19 @@ from ..services.search_job_manager import (
     search_job_manager, JobConflictError, InvalidPlatformsError,
 )
 from ..services import accounts as accounts_service
+from base.runtime_paths import application_root
 
 search_router = APIRouter(prefix="/api/search", tags=["aggregate-search"])
 
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_PROJECT_ROOT = application_root()
 _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
+
+
+def _worker_command(*args: str) -> list[str]:
+    """Use the frozen executable for login workers when packaged."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--aggregate-worker", *args]
+    return [sys.executable, _WORKER_SCRIPT, *args]
 
 # ── Operation coordinator（Phase 4.2：搜索/登录排他，账号操作共享 2 槽）──
 
@@ -79,7 +86,7 @@ async def _run_login_worker(platform: str, job_id: str):
         env = {**os.environ, "PYTHONUTF8": "1",
                "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, _WORKER_SCRIPT,
+            *_worker_command(),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
         )

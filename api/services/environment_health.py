@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from api.schemas.search import HealthPlatformStatus, HealthResponse
+from base.runtime_paths import resource_path
 
 from . import accounts as accounts_service
 
@@ -28,7 +29,7 @@ _browser_cache_lock = asyncio.Lock()
 
 
 def _read_web_version() -> Optional[str]:
-    package_path = Path(__file__).resolve().parents[2] / "webui" / "package.json"
+    package_path = resource_path("webui", "package.json")
     try:
         with package_path.open(encoding="utf-8") as f:
             version = json.load(f).get("version")

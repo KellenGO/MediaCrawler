@@ -22,11 +22,12 @@ Start command: uvicorn api.main:app --port 8080 --reload
 Or: python -m api.main
 """
 import uvicorn
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pathlib import Path
+from base.runtime_paths import resource_path
 
 from .routers.search import search_router
 from .schemas.search import HealthResponse
@@ -41,7 +42,7 @@ app = FastAPI(
 
 # Production frontend build directory. It is intentionally kept outside the
 # API package so the static server cannot expose arbitrary repository files.
-WEBUI_DIR = Path(__file__).resolve().parents[1] / "webui" / "dist"
+WEBUI_DIR = resource_path("webui", "dist")
 
 
 @app.on_event("shutdown")
