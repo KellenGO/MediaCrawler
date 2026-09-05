@@ -29,6 +29,7 @@ from ..schemas.search import (
     PlatformTimingInfo,
 )
 from .accounts import (
+    get_account_generation,
     get_session_snapshot,
     mark_login_required_from_search,
     record_search_outcome,
@@ -393,10 +394,9 @@ class SearchJobManager:
                  for p in job.platforms]
         await asyncio.gather(*tasks, return_exceptions=True)
         job.finalize()
-        # 只有整组搜索成功完成才写入缓存。平台级 succeeded/empty 在
-        # partial job 中不能单独落缓存，避免下次搜索复用不完整结果。
-        if not job.bypass_cache and job._compute_overall() == "completed":
-            self._cache_job_results(job)
+        # All workers have finished: complete successful platforms may be
+        # reused even if another platform failed. Explicit refreshes write too.
+        self._cache_job_results(job)
 
         # Hydration is intentionally detached from the original search task:
         # overall becomes terminal immediately, while GET /jobs keeps polling
@@ -406,15 +406,26 @@ class SearchJobManager:
             job.hydration_task = asyncio.create_task(
                 self._run_hydration(job), name=f"hydrate-{job.job_id}")
 
-    def _cache_job_results(self, job: "_ActiveJob") -> None:
-        if job.bypass_cache or job._compute_overall() != "completed":
+    def _cache_job_results(self, job: "_ActiveJob", *, hydration_update: bool = False) -> None:
+        if job._compute_overall() not in ("completed", "partial"):
             return
         for platform in job.platforms:
             info = job.platforms_state.get(platform)
-            if info and info.status in ("succeeded", "empty"):
+            if (info is None or info.status not in ("succeeded", "empty")
+                    or info.cache_hit
+                    or job.account_generations[platform] != get_account_generation(platform)):
+                continue
+            results = job.platform_results.get(platform, [])
+            if hydration_update:
+                result_cache.update(
+                    job.keyword, platform, job.limit_for(platform), results,
+                    owner=job.job_id,
+                )
+            else:
                 result_cache.set(
-                    job.keyword, platform, job.limit_for(platform),
-                    job.platform_results.get(platform, []),
+                    job.keyword, platform, job.limit_for(platform), results,
+                    owner=job.job_id, fetched_at=info.fetched_at,
+                    started_at=job._start_ts,
                 )
 
     async def _run_hydration(self, job: "_ActiveJob") -> None:
@@ -425,7 +436,7 @@ class SearchJobManager:
             if not job.hydration_cancel_event.is_set():
                 for update in updates:
                     job.update_snippet(update.result, update.snippet)
-                self._cache_job_results(job)
+                self._cache_job_results(job, hydration_update=True)
         except asyncio.CancelledError:
             job.hydration_cancel_event.set()
         except Exception as exc:
@@ -439,13 +450,13 @@ class SearchJobManager:
 
         缓存边界：只有平台终态 succeeded/empty 才写入；key 含
         账号代数（账号操作后自动失效）；用户主动"重新搜索"（bypass_cache）
-        跳过查/写。未命中 → 走常驻/一次性 worker。
+        只跳过读取。未命中 → 走常驻/一次性 worker。
         """
         limit = job.limit_for(platform)
         if not job.bypass_cache:
-            cached = result_cache.get(job.keyword, platform, limit)
+            cached = result_cache.lookup(job.keyword, platform, limit)
             if cached is not None:
-                for item in cached:
+                for item in cached.results:
                     try:
                         job.add_result(platform, UnifiedSearchResult(**item))
                     except Exception:
@@ -453,6 +464,8 @@ class SearchJobManager:
                 job.set_platform_status(
                     platform,
                     "succeeded" if job.platform_results.get(platform) else "empty")
+                job.platforms_state[platform].cache_hit = True
+                job.platforms_state[platform].fetched_at = cached.fetched_at
                 return
         await self._run_worker(job, platform)
 
@@ -960,6 +973,7 @@ class _ActiveJob:
         self.job_id = job_id
         self.keyword = keyword
         self.platforms = platforms
+        self.account_generations = {p: get_account_generation(p) for p in platforms}
         self.limit_per_platform = limit_per_platform
         # Round 16: 用户主动"重新搜索"时绕过结果缓存。
         self.bypass_cache = bypass_cache
@@ -1077,6 +1091,8 @@ class _ActiveJob:
         info.status = status
         if status in terminal:
             self.mark_platform_total(platform)
+        if status in ("succeeded", "empty") and info.fetched_at is None:
+            info.fetched_at = datetime.now(timezone.utc).isoformat()
         if result_count:
             info.result_count = max(info.result_count, result_count)
         if error_summary:
@@ -1117,6 +1133,8 @@ class _ActiveJob:
                 info.result_count = len(results)
                 self.mark_platform_total(p)
             if info:
+                if info.status in ("succeeded", "empty") and info.fetched_at is None:
+                    info.fetched_at = self.completed_at
                 # Platform Doctor consumes safe local metadata only; this does
                 # not alter the search result or worker decision path.
                 record_search_outcome(p, info.status, self.timings.get(p))
@@ -1131,6 +1149,10 @@ class _ActiveJob:
     def update_snippet(self, result: UnifiedSearchResult, snippet: str) -> None:
         """Update text in place without rebuilding/deduplicating the order."""
         result.snippet = snippet
+        for representative in self._final_results or []:
+            for source in representative.grouped_sources or []:
+                if source.platform == result.platform and source.content_id == result.content_id:
+                    source.snippet = snippet
 
     def _compute_overall(self) -> str:
         if self._cancelled:
@@ -1159,6 +1181,7 @@ class _ActiveJob:
                 pdict[p] = PlatformStatusInfo(
                     status=info.status, result_count=info.result_count,
                     error_summary=info.error_summary,
+                    cache_hit=info.cache_hit, fetched_at=info.fetched_at,
                     timings=self.timings.get(p))
         # Round 16: 平台的终态 status 事件会让 _compute_overall() 先于
         # finalize() 变成 terminal —— 此时 job 级 total_ms 尚未写入。这里

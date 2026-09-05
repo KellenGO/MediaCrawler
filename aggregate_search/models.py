@@ -29,7 +29,6 @@ import html
 import re
 import unicodedata
 from datetime import datetime
-from difflib import SequenceMatcher
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -317,7 +316,7 @@ def clean_title(value: Any) -> str:
 CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH = 6
 CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH = 4
 CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD = 0.90
-CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS = 30
+CROSS_PLATFORM_DEDUP_MIN_SNIPPET_LENGTH = 20
 _DEDUP_TITLE_SUFFIX_RE = re.compile(
     r"(?:附(?:完整)?(?:文档|资料|教程)|完整(?:版|文档)|完整版)$"
 )
@@ -327,12 +326,12 @@ def normalize_dedup_text(value: Any) -> str:
     """Normalize public text for conservative cross-platform comparison."""
     if value is None:
         return ""
-    text = html.unescape(str(value))
+    # Adapters decode HTML entities before constructing the public DTO.
+    # Match the frontend's Unicode letter/number normalization exactly.
+    text = str(value)
     text = unicodedata.normalize("NFKC", text).lower()
     text = re.sub(r"<[^>]*>", "", text)
-    # \w keeps Chinese letters/digits under Unicode; underscores are not
-    # meaningful for titles, so remove them as well.
-    return re.sub(r"[^\w]", "", text).replace("_", "")
+    return "".join(char for char in text if unicodedata.category(char)[0] in "LN")
 
 
 def _normalize_dedup_title(value: Any) -> str:
@@ -353,26 +352,36 @@ def _same_dedup_author(left: Any, right: Any) -> bool:
     return (
         len(shorter) >= 2
         and longer.startswith(shorter)
-        and bool(re.fullmatch(r"\d{4}", longer[len(shorter):]))
+        and bool(re.fullmatch(r"[0-9]{4}", longer[len(shorter):]))
     )
 
 
 def _title_similarity(left: str, right: str) -> float:
+    """Normalized Levenshtein distance over Unicode code points, as in the UI."""
     if not left or not right:
         return 0.0
-    return SequenceMatcher(None, left, right).ratio()
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, 1):
+        current = [i]
+        for j, right_char in enumerate(right, 1):
+            current.append(previous[j - 1] if left_char == right_char else
+                           1 + min(previous[j - 1], previous[j], current[j - 1]))
+        previous = current
+    return 1 - previous[-1] / max(len(left), len(right))
 
 
-def _published_at_close(left: Optional[str], right: Optional[str]) -> bool:
-    if not left or not right:
-        return False
-    try:
-        left_dt = datetime.fromisoformat(left.replace("Z", "+00:00"))
-        right_dt = datetime.fromisoformat(right.replace("Z", "+00:00"))
-        return abs((left_dt - right_dt).total_seconds()) \
-            <= CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS * 86400
-    except (TypeError, ValueError):
-        return False
+def _similar_dedup_snippets(
+    left: UnifiedSearchResult, right: UnifiedSearchResult,
+    left_title: str, right_title: str,
+) -> bool:
+    left_snippet = normalize_dedup_text(left.snippet)
+    right_snippet = normalize_dedup_text(right.snippet)
+    return (
+        min(len(left_snippet), len(right_snippet)) >= CROSS_PLATFORM_DEDUP_MIN_SNIPPET_LENGTH
+        and left_snippet != left_title
+        and right_snippet != right_title
+        and _title_similarity(left_snippet, right_snippet) >= 0.88
+    )
 
 
 def _same_cross_platform_content(
@@ -387,15 +396,13 @@ def _same_cross_platform_content(
     if min(len(left_title), len(right_title)) < CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH:
         return False
 
-    # Exact normalized titles are the high-confidence V1 path. This covers
-    # differences in case, spaces, full-width characters and punctuation.
+    same_author = _same_dedup_author(left.author, right.author)
+    # A common title or nearby publication dates alone do not identify content.
     if left_title == right_title:
-        return True
+        return same_author or _similar_dedup_snippets(left, right, left_title, right_title)
 
     if min(len(left_title), len(right_title)) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH:
         return False
-
-    same_author = _same_dedup_author(left.author, right.author)
 
     shorter_title, longer_title = sorted((left_title, right_title), key=len)
     core_title_contained = (
@@ -407,19 +414,11 @@ def _same_cross_platform_content(
     if same_author and (core_title_contained or title_similarity >= 0.86):
         return True
 
-    # Different authors keep the original conservative requirement: fuzzy
-    # title matching still needs an independent snippet/date signal.
+    # Fuzzy titles also require an independent author or substantial snippet.
     if title_similarity < CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD:
         return False
 
-    left_snippet = normalize_dedup_text(left.snippet)
-    right_snippet = normalize_dedup_text(right.snippet)
-    similar_snippet = (
-        bool(left_snippet and right_snippet)
-        and _title_similarity(left_snippet, right_snippet) >= 0.88
-    )
-    return same_author or similar_snippet or _published_at_close(
-        left.published_at, right.published_at)
+    return same_author or _similar_dedup_snippets(left, right, left_title, right_title)
 
 
 def _result_completeness_score(result: UnifiedSearchResult) -> float:
@@ -440,6 +439,8 @@ def _has_common_title_anchor(
     if len(indexes) <= 2:
         return True
     titles = [_normalize_dedup_title(results[index].title) for index in indexes]
+    if len(set(titles)) == 1:
+        return True
     for anchor in titles:
         if len(anchor) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH:
             continue
@@ -496,6 +497,8 @@ def deduplicate_cross_platform_results(
             if left_root == right_root:
                 continue
             merged = component_members(left_root) + component_members(right_root)
+            if len({results[index].platform for index in merged}) != len(merged):
+                continue  # Cross-platform bridges must not merge distinct IDs on one platform.
             # 两条结果保持原有 predicate 语义；三条以上还要共享一个标题核心，
             # 防止 A~B、B~C 的弱链路把明显不同的 C 传递合并进来。
             if _has_common_title_anchor(merged, results):

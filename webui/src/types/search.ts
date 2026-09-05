@@ -65,6 +65,8 @@ export interface PlatformStatusInfo {
   error_summary: string | null;
   /** 耗时指标；后端无数据时为 null，旧响应可能缺失 */
   timings?: PlatformTimingInfo | null;
+  cache_hit?: boolean;
+  fetched_at?: string | null;
 }
 
 export interface SearchJobResponse {

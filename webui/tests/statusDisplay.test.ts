@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { formatSeconds, statusLine, timingLine } from "../src/lib/statusDisplay.js";
+import { formatSeconds, freshnessLine, statusLine, timingLine } from "../src/lib/statusDisplay.js";
 import type { PlatformStatusInfo } from "../src/types/search.js";
 
 function info(overrides: Partial<PlatformStatusInfo> = {}): PlatformStatusInfo {
@@ -18,6 +18,19 @@ function info(overrides: Partial<PlatformStatusInfo> = {}): PlatformStatusInfo {
     ...overrides,
   };
 }
+
+test("freshnessLine: 缓存标识保留原采集时间", () => {
+  const fetched_at = "2026-09-05T09:30:00Z";
+  const time = new Date(fetched_at).toLocaleTimeString("zh-CN", { hour12: false });
+  assert.equal(freshnessLine(info({ fetched_at, cache_hit: true })), `缓存 · 更新于 ${time}`);
+  assert.equal(freshnessLine(info({ fetched_at })), `更新于 ${time}`);
+});
+
+test("freshnessLine: 旧响应、无效时间与失败不误标新鲜度", () => {
+  assert.equal(freshnessLine(info()), null);
+  assert.equal(freshnessLine(info({ fetched_at: "invalid" })), null);
+  assert.equal(freshnessLine(info({ status: "failed", fetched_at: "2026-09-05T09:30:00Z" })), null);
+});
 
 test("formatSeconds: 无数据返回 null", () => {
   assert.equal(formatSeconds(null), null);

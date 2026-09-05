@@ -247,6 +247,7 @@ class TestInterleave:
         r1 = UnifiedSearchResult(
             platform="xhs", content_id="x1",
             title="iPhone 18 使用一个月真实体验！", url="u", rank=0,
+            author="作者",
         )
         r2 = UnifiedSearchResult(
             platform="douyin", content_id="d1",
@@ -280,9 +281,9 @@ class TestInterleave:
 
     def test_three_platform_copies_form_one_group(self):
         results = [
-            UnifiedSearchResult(platform="xhs", content_id="x", title="同一 Claude 视频", url="x", rank=0),
-            UnifiedSearchResult(platform="bilibili", content_id="b", title="同一 Claude 视频", url="b", rank=0),
-            UnifiedSearchResult(platform="douyin", content_id="d", title="同一 Claude 视频", url="d", rank=0),
+            UnifiedSearchResult(platform="xhs", content_id="x", title="同一 Claude 视频", author="作者", url="x", rank=0),
+            UnifiedSearchResult(platform="bilibili", content_id="b", title="同一 Claude 视频", author="作者", url="b", rank=0),
+            UnifiedSearchResult(platform="douyin", content_id="d", title="同一 Claude 视频", author="作者", url="d", rank=0),
         ]
         merged = deduplicate_cross_platform_results(results)
         assert len(merged) == 1
@@ -304,11 +305,13 @@ class TestInterleave:
         base = UnifiedSearchResult(
             platform="xhs", content_id="x1",
             title="iPhone 18 使用一个月真实体验分享", url="u", rank=0,
+            author="作者",
             published_at="2026-08-01T00:00:00+00:00",
         )
         similar = UnifiedSearchResult(
             platform="bilibili", content_id="b1",
             title="iPhone18使用一个月真实体验", url="u", rank=1,
+            author="作者",
             published_at="2026-08-05T00:00:00+00:00",
         )
         assert len(deduplicate_cross_platform_results([base, similar])) == 1

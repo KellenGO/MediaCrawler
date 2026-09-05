@@ -1,7 +1,7 @@
 import { Loader2, Check, Minus, AlertTriangle, XCircle, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
-import { statusLine } from "@/lib/statusDisplay";
+import { freshnessLine, statusLine } from "@/lib/statusDisplay";
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
@@ -82,6 +82,7 @@ export function PlatformStatus({
           if (!info) return null;
 
           const status: PStatus = info.status;
+          const freshness = freshnessLine(info);
           const isRetrying = retryingPlatform === p;
           const retryable = onRetry ? RETRYABLE_STATUSES.includes(status) : false;
 
@@ -111,6 +112,11 @@ export function PlatformStatus({
                 <small className="text-[11px] text-cyber-text-muted block truncate">
                   {statusLine(status, info)}
                 </small>
+                {freshness && (
+                  <small className="text-[11px] text-cyber-text-muted block truncate" title={freshness}>
+                    {freshness}
+                  </small>
+                )}
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 {isRetrying ? (

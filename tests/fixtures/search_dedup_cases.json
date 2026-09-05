@@ -1,0 +1,443 @@
+[
+  {
+    "id": "same_title_different_authors",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Python入门教程",
+        "author": "作者甲",
+        "snippet": "学习变量与循环，从基础语法开始。",
+        "published_at": "2026-09-01T00:00:00Z"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程",
+        "author": "作者乙",
+        "snippet": "构建完整项目，介绍工具安装步骤。",
+        "published_at": "2026-09-02T00:00:00Z"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "same_title_no_support",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Python入门教程"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "normalized_title_same_author",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Ｐｙｔｈｏｎ 入门：教程！",
+        "author": "作者",
+        "rank": 0
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "python入门教程",
+        "author": "作者",
+        "rank": 1,
+        "snippet": "从基础语法开始，逐步介绍项目开发。"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili"
+      ]
+    ],
+    "representatives": [
+      "bilibili:bilibili"
+    ]
+  },
+  {
+    "id": "reported_similarity_disagreement",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "普通人如何使用人工智能提高工作效率",
+        "author": "同一作者"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "普通人如何使用人工智能大幅提升工作效率",
+        "author": "同一作者"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "minor_title_edit_same_author",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "普通人如何使用人工智能提高日常工作效率",
+        "author": "同一作者"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "普通人如何使用人工智能提升日常工作效率",
+        "author": "同一作者"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "title_suffix_author_alias",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "全网最全！60分钟全面掌握Claude Code~",
+        "author": "秋芝"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "全网最全！60分钟全面掌握Claude Code~【附完整文档】",
+        "author": "秋芝_2046"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "same_title_substantial_snippet",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Python入门教程",
+        "author": "作者甲",
+        "snippet": "本期从环境安装、变量和循环讲起，最后完成一个天气查询项目并分享源代码。"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程",
+        "author": "作者乙",
+        "snippet": "本期从环境安装、变量和循环讲起，最后完成一个天气查询项目并分享源代码。"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "short_boilerplate_snippet",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Python入门教程",
+        "snippet": "完整教程，欢迎关注"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程",
+        "snippet": "完整教程，欢迎关注"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "snippet_is_just_title",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "这是一份非常详细的人工智能开发工具安装与使用教程",
+        "snippet": "这是一份非常详细的人工智能开发工具安装与使用教程"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "这是一份非常详细的人工智能开发工具安装与使用教程",
+        "snippet": "这是一份非常详细的人工智能开发工具安装与使用教程"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "fuzzy_titles_nearby_dates_only",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "普通人如何使用人工智能提高日常工作效率",
+        "published_at": "2026-09-01T00:00:00Z"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "普通人如何使用人工智能提升日常工作效率",
+        "published_at": "2026-09-02T00:00:00Z"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "supplementary_character_short_title",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "𠮷野家",
+        "author": "同一作者"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "𠮷野家",
+        "author": "同一作者"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  },
+  {
+    "id": "three_copies_with_common_anchor",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Claude Code 全面教程",
+        "author": "秋芝"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Claude Code 全面教程安装与配置",
+        "author": "秋芝2046"
+      },
+      {
+        "platform": "douyin",
+        "content_id": "douyin",
+        "title": "Claude Code 全面教程实战与部署",
+        "author": "秋芝_2046"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili",
+        "douyin:douyin"
+      ]
+    ]
+  },
+  {
+    "id": "unsafe_transitive_chain",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Claude Code 入门教程",
+        "author": "秋芝"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Claude Code 入门教程与配置",
+        "author": "秋芝"
+      },
+      {
+        "platform": "douyin",
+        "content_id": "douyin",
+        "title": "Claude Code 入门与配置",
+        "author": "秋芝"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili"
+      ],
+      [
+        "douyin:douyin"
+      ]
+    ]
+  },
+  {
+    "id": "short_exact_title_three_copies",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "同一内容",
+        "author": "同一作者"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "同一内容",
+        "author": "同一作者"
+      },
+      {
+        "platform": "douyin",
+        "content_id": "douyin",
+        "title": "同一内容",
+        "author": "同一作者"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs",
+        "bilibili:bilibili",
+        "douyin:douyin"
+      ]
+    ]
+  },
+  {
+    "id": "same_platform_ids_not_merged_via_bridge",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "first",
+        "title": "Python入门教程",
+        "author": "同一作者"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程",
+        "author": "同一作者"
+      },
+      {
+        "platform": "xhs",
+        "content_id": "second",
+        "title": "Python入门教程",
+        "author": "同一作者"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:first",
+        "bilibili:bilibili"
+      ],
+      [
+        "xhs:second"
+      ]
+    ]
+  },
+  {
+    "id": "representative_ignores_empty_author_markup",
+    "results": [
+      {
+        "platform": "bilibili", "content_id": "bilibili", "title": "Python入门教程",
+        "author": "…", "snippet": "本期从环境安装、变量和循环讲起，最后完成一个天气查询项目并分享源代码。"
+      },
+      {
+        "platform": "xhs", "content_id": "xhs", "title": "Python入门教程",
+        "snippet": "本期从环境安装、变量和循环讲起，最后完成一个天气查询项目并分享源代码。"
+      }
+    ],
+    "groups": [["xhs:xhs", "bilibili:bilibili"]],
+    "representatives": ["xhs:xhs"]
+  },
+  {
+    "id": "unknown_author_alias_not_inferred",
+    "results": [
+      {
+        "platform": "xhs",
+        "content_id": "xhs",
+        "title": "Python入门教程",
+        "author": "作者甲"
+      },
+      {
+        "platform": "bilibili",
+        "content_id": "bilibili",
+        "title": "Python入门教程",
+        "author": "作者甲12"
+      }
+    ],
+    "groups": [
+      [
+        "xhs:xhs"
+      ],
+      [
+        "bilibili:bilibili"
+      ]
+    ]
+  }
+]

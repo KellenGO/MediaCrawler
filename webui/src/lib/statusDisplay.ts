@@ -31,6 +31,15 @@ export function timingLine(info: PlatformStatusInfo): string | null {
   return null;
 }
 
+/** Keep the original collection time visible when results come from cache. */
+export function freshnessLine(info: PlatformStatusInfo): string | null {
+  if (!info.fetched_at || !["succeeded", "empty"].includes(info.status)) return null;
+  const date = new Date(info.fetched_at);
+  if (!Number.isFinite(date.getTime())) return null;
+  const time = date.toLocaleTimeString("zh-CN", { hour12: false });
+  return `${info.cache_hit ? "缓存 · " : ""}更新于 ${time}`;
+}
+
 /** 状态卡主文案：终态且有时耗时，追加耗时行。 */
 export function statusLine(status: PStatus, info: PlatformStatusInfo): string {
   let base: string;

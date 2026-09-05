@@ -529,16 +529,21 @@ export function expandGroupedResultsForPlatform(
 const CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH = 6;
 const CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH = 4;
 const CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD = 0.9;
-const CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS = 30;
+const CROSS_PLATFORM_DEDUP_MIN_SNIPPET_LENGTH = 20;
 const DEDUP_TITLE_SUFFIX_RE = /(?:附(?:完整)?(?:文档|资料|教程)|完整(?:版|文档)|完整版)$/u;
 
 export function normalizeDedupText(value: string | null | undefined): string {
   if (!value) return "";
   return value
     .normalize("NFKC")
-    .toLocaleLowerCase()
+    .toLowerCase()
     .replace(/<[^>]*>/g, "")
-    .replace(/[\p{P}\p{S}\s_]+/gu, "");
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+// Python counts Unicode code points, not JavaScript UTF-16 code units.
+function textLength(value: string): number {
+  return Array.from(value).length;
 }
 
 function normalizeDedupTitle(value: string | null | undefined): string {
@@ -550,34 +555,39 @@ function sameDedupAuthor(left: string | null | undefined, right: string | null |
   const rightAuthor = normalizeDedupText(right);
   if (!leftAuthor || !rightAuthor) return false;
   if (leftAuthor === rightAuthor) return true;
-  const [shorter, longer] = [leftAuthor, rightAuthor].sort((a, b) => a.length - b.length);
+  const [shorter, longer] = [leftAuthor, rightAuthor].sort((a, b) => textLength(a) - textLength(b));
   // 例如“秋芝”和“秋芝2046”；只接受明确的四位数字后缀，避免泛化成作者别名库。
-  return shorter.length >= 2
+  return textLength(shorter) >= 2
     && longer.startsWith(shorter)
     && /^\d{4}$/u.test(longer.slice(shorter.length));
 }
 
 function textSimilarity(left: string, right: string): number {
   if (!left || !right) return 0;
-  const previous = Array.from({ length: right.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= left.length; i += 1) {
+  const leftChars = Array.from(left);
+  const rightChars = Array.from(right);
+  const previous = Array.from({ length: rightChars.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= leftChars.length; i += 1) {
     const current = [i];
-    for (let j = 1; j <= right.length; j += 1) {
-      current[j] = left[i - 1] === right[j - 1]
+    for (let j = 1; j <= rightChars.length; j += 1) {
+      current[j] = leftChars[i - 1] === rightChars[j - 1]
         ? previous[j - 1]
         : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
     }
-    for (let j = 0; j <= right.length; j += 1) previous[j] = current[j];
+    for (let j = 0; j <= rightChars.length; j += 1) previous[j] = current[j];
   }
-  return 1 - previous[right.length] / Math.max(left.length, right.length);
+  return 1 - previous[rightChars.length] / Math.max(leftChars.length, rightChars.length);
 }
 
-function publishedAtClose(left: string | null, right: string | null): boolean {
-  if (!left || !right) return false;
-  const leftMs = parsePublishedTime(left);
-  const rightMs = parsePublishedTime(right);
-  return leftMs !== null && rightMs !== null
-    && Math.abs(leftMs - rightMs) <= CROSS_PLATFORM_DEDUP_MAX_DATE_GAP_DAYS * 86400000;
+function similarDedupSnippets(
+  left: UnifiedSearchResult, right: UnifiedSearchResult,
+  leftTitle: string, rightTitle: string
+): boolean {
+  const leftSnippet = normalizeDedupText(left.snippet);
+  const rightSnippet = normalizeDedupText(right.snippet);
+  return Math.min(textLength(leftSnippet), textLength(rightSnippet)) >= CROSS_PLATFORM_DEDUP_MIN_SNIPPET_LENGTH
+    && leftSnippet !== leftTitle && rightSnippet !== rightTitle
+    && textSimilarity(leftSnippet, rightSnippet) >= 0.88;
 }
 
 function isCrossPlatformDuplicate(
@@ -587,30 +597,26 @@ function isCrossPlatformDuplicate(
   if (left.platform === right.platform) return false;
   const leftTitle = normalizeDedupTitle(left.title);
   const rightTitle = normalizeDedupTitle(right.title);
-  if (Math.min(leftTitle.length, rightTitle.length) < CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH) return false;
-  if (leftTitle === rightTitle) return true;
-  if (Math.min(leftTitle.length, rightTitle.length) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH) return false;
-
+  if (Math.min(textLength(leftTitle), textLength(rightTitle)) < CROSS_PLATFORM_DEDUP_MIN_EXACT_TITLE_LENGTH) return false;
   const sameAuthor = sameDedupAuthor(left.author, right.author);
-  const [shorterTitle, longerTitle] = [leftTitle, rightTitle].sort((a, b) => a.length - b.length);
-  const coreTitleContained = shorterTitle.length >= CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH
-    && shorterTitle.length / longerTitle.length >= 0.65
+  if (leftTitle === rightTitle) return sameAuthor || similarDedupSnippets(left, right, leftTitle, rightTitle);
+  if (Math.min(textLength(leftTitle), textLength(rightTitle)) < CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH) return false;
+
+  const [shorterTitle, longerTitle] = [leftTitle, rightTitle].sort((a, b) => textLength(a) - textLength(b));
+  const coreTitleContained = textLength(shorterTitle) >= CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH
+    && textLength(shorterTitle) / textLength(longerTitle) >= 0.65
     && longerTitle.includes(shorterTitle);
   const titleSimilarity = textSimilarity(leftTitle, rightTitle);
   if (sameAuthor && (coreTitleContained || titleSimilarity >= 0.86)) return true;
   if (titleSimilarity < CROSS_PLATFORM_DEDUP_FUZZY_THRESHOLD) return false;
 
-  const similarSnippet = Boolean(
-    left.snippet && right.snippet
-    && textSimilarity(normalizeDedupText(left.snippet), normalizeDedupText(right.snippet)) >= 0.88
-  );
-  return sameAuthor || similarSnippet || publishedAtClose(left.published_at, right.published_at);
+  return sameAuthor || similarDedupSnippets(left, right, leftTitle, rightTitle);
 }
 
 function resultCompletenessScore(result: UnifiedSearchResult): number {
-  return Math.min(normalizeDedupText(result.title).length, 40) / 40
-    + (result.snippet ? 3 : 0)
-    + (result.author ? 2 : 0)
+  return Math.min(textLength(normalizeDedupText(result.title)), 40) / 40
+    + (normalizeDedupText(result.snippet) ? 3 : 0)
+    + (normalizeDedupText(result.author) ? 2 : 0)
     + (result.published_at ? 1 : 0)
     + (result.cover_url ? 1 : 0)
     + Math.min(Object.values(result.metrics || {}).filter((value) => value > 0).length, 4) * 0.25;
@@ -619,15 +625,16 @@ function resultCompletenessScore(result: UnifiedSearchResult): number {
 function hasCommonTitleAnchor(indexes: readonly number[], results: readonly UnifiedSearchResult[]): boolean {
   if (indexes.length <= 2) return true;
   const titles = indexes.map((index) => normalizeDedupTitle(results[index].title));
-  return titles.some((anchor) => anchor.length >= CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH
+  if (new Set(titles).size === 1) return true;
+  return titles.some((anchor) => textLength(anchor) >= CROSS_PLATFORM_DEDUP_MIN_TITLE_LENGTH
     && titles.every((candidate) => {
       if (candidate === anchor) return true;
-      if (anchor.length / candidate.length < 0.65) return false;
-      return candidate.includes(anchor) || textSimilarity(anchor, candidate) >= 0.86;
+      if (textLength(anchor) / textLength(candidate) < 0.65) return false;
+      return candidate.includes(anchor);
     }));
 }
 
-/** Cross-platform V1: exact normalized titles, or conservative fuzzy matches. */
+/** Cross-platform grouping requires title similarity and author/snippet evidence. */
 export function deduplicateCrossPlatformResults(
   results: UnifiedSearchResult[],
   platformOrder: readonly PlatformSlug[] = PLATFORM_SLUGS
@@ -658,6 +665,7 @@ export function deduplicateCrossPlatformResults(
       const rightRoot = find(j);
       if (leftRoot === rightRoot) continue;
       const merged = [...componentMembers(leftRoot), ...componentMembers(rightRoot)];
+      if (new Set(merged.map((index) => results[index].platform)).size !== merged.length) continue;
       // 两条结果保持原有 predicate 语义；三条以上还要共享一个标题核心，
       // 防止 A~B、B~C 的弱链路把明显不同的 C 传递合并进来。
       if (hasCommonTitleAnchor(merged, results)) union(i, j);

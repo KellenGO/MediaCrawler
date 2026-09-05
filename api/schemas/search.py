@@ -122,6 +122,8 @@ class PlatformStatusInfo(BaseModel):
     result_count: int = 0
     error_summary: Optional[str] = None
     timings: Optional[PlatformTimingInfo] = None
+    cache_hit: bool = False
+    fetched_at: Optional[str] = None  # Original collection time, not replay time.
 
 
 class PlatformDiagnostic(BaseModel):

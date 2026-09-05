@@ -483,6 +483,7 @@ test("deduplicateCrossPlatformResults: 标题规范化后跨平台去重并保�
   const results = [
     makeResult("xhs", "x1", {
       title: "iPhone 18 使用一个月真实体验！",
+      author: "作者",
       rank: 0,
     }),
     makeResult("douyin", "d1", {
@@ -513,9 +514,10 @@ test("deduplicateCrossPlatformResults: 同作者标题附加修饰被识别为�
 
 test("deduplicateCrossPlatformResults: 保留 grouped_sources 且代表结果排在第一", () => {
   const results = [
-    makeResult("xhs", "x1", { title: "Claude Code 完整教程", rank: 0 }),
+    makeResult("xhs", "x1", { title: "Claude Code 完整教程", author: "作者", rank: 0 }),
     makeResult("bilibili", "b1", {
       title: "Claude Code 完整教程",
+      author: "作者",
       snippet: "完整简介",
       rank: 1,
     }),
@@ -531,9 +533,9 @@ test("deduplicateCrossPlatformResults: 保留 grouped_sources 且代表结果排
 
 test("expandGroupedResultsForPlatform: 综合组在单平台 Tab 展开为原始版本", () => {
   const grouped = deduplicateCrossPlatformResults([
-    makeResult("xhs", "x1", { title: "同一内容" }),
-    makeResult("bilibili", "b1", { title: "同一内容", rank: 1 }),
-    makeResult("douyin", "d1", { title: "同一内容", rank: 2 }),
+    makeResult("xhs", "x1", { title: "同一内容", author: "作者" }),
+    makeResult("bilibili", "b1", { title: "同一内容", author: "作者", rank: 1 }),
+    makeResult("douyin", "d1", { title: "同一内容", author: "作者", rank: 2 }),
   ]);
   const bili = expandGroupedResultsForPlatform(grouped, "bilibili");
   assert.deepEqual(bili.map((result) => result.content_id), ["b1"]);

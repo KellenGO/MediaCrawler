@@ -13,6 +13,10 @@ declare module "node:test" {
   ): void;
 }
 
+declare module "node:fs" {
+  export function readFileSync(path: string | URL, encoding: "utf8"): string;
+}
+
 declare module "node:assert/strict" {
   interface AssertFn {
     (value: unknown, message?: string): void;

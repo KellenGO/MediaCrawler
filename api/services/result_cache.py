@@ -17,7 +17,8 @@
 - 只缓存平台终态 succeeded/empty（调用方负责只对这两种状态调用 set）；
 - login_required / rate_limited / failed / timed_out / cancelled 绝不缓存；
 - 不缓存半成品（只有平台完成后才写入）；不写 localStorage；
-- 用户主动"重新搜索"（bypass_cache）跳过查/写；
+- 用户主动"重新搜索"（bypass_cache）只跳过读取，成功后更新缓存；
+- 命中和摘要补全不延长 TTL；补全只能更新原任务仍拥有的缓存；
 - 全部在 API 进程内存，shutdown 由 search_job_manager.cleanup() 清空。
 """
 
@@ -25,6 +26,9 @@ from __future__ import annotations
 
 import os
 import time
+from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import accounts as accounts_service
@@ -102,8 +106,14 @@ def _evict_if_full() -> None:
         _cache.pop(oldest, None)
 
 
-def get(keyword: str, platform: str, limit: int) -> Optional[List[Dict[str, Any]]]:
-    """命中返回结果 DTO 列表（副本）；未启用/过期/未命中返回 None。"""
+@dataclass(frozen=True)
+class CacheHit:
+    results: List[Dict[str, Any]]
+    fetched_at: str
+
+
+def lookup(keyword: str, platform: str, limit: int) -> Optional[CacheHit]:
+    """Return an isolated result snapshot and its original collection time."""
     if _CACHE_TTL_SECONDS <= 0:
         return None
     now = time.monotonic()
@@ -115,11 +125,18 @@ def get(keyword: str, platform: str, limit: int) -> Optional[List[Dict[str, Any]
     # LRU：命中后移到队尾（重新插入）。
     _cache.pop(key, None)
     _cache[key] = entry
-    return [dict(r) for r in entry["results"]]
+    return CacheHit(deepcopy(entry["results"]), entry["fetched_at"])
+
+
+def get(keyword: str, platform: str, limit: int) -> Optional[List[Dict[str, Any]]]:
+    """命中返回结果 DTO 列表（副本）；未启用/过期/未命中返回 None。"""
+    hit = lookup(keyword, platform, limit)
+    return hit.results if hit is not None else None
 
 
 def set(keyword: str, platform: str, limit: int,
-        results: List[Any]) -> None:
+        results: List[Any], *, owner: Optional[str] = None,
+        fetched_at: Optional[str] = None, started_at: Optional[float] = None) -> None:
     """写入缓存（调用方保证只对终态 succeeded/empty 调用）。"""
     if _CACHE_TTL_SECONDS <= 0:
         return
@@ -127,6 +144,32 @@ def set(keyword: str, platform: str, limit: int,
     _purge_expired(now)
     _purge_stale_generation(platform)
     key = _key(keyword, platform, limit)
+    started_at = now if started_at is None else started_at
+    previous = _cache.get(key)
+    if previous is not None and previous["started_at"] > started_at:
+        return  # A late completion from an older search cannot undo a refresh.
+    # 已有同 key → 先移除再插入（保持 LRU 序）。
+    _cache.pop(key, None)
+    _cache[key] = {
+        "results": _serialize_results(results), "ts": now, "owner": owner,
+        "started_at": started_at,
+        "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
+    }
+    _evict_if_full()
+
+
+def update(keyword: str, platform: str, limit: int,
+           results: List[Any], *, owner: str) -> None:
+    """Hydration must not replace newer results, revive expiry, or renew TTL."""
+    if _CACHE_TTL_SECONDS <= 0:
+        return
+    _purge_expired(time.monotonic())
+    entry = _cache.get(_key(keyword, platform, limit))
+    if entry is not None and entry["owner"] == owner:
+        entry["results"] = _serialize_results(results)
+
+
+def _serialize_results(results: List[Any]) -> List[Dict[str, Any]]:
     payload = []
     for r in results or []:
         if hasattr(r, "model_dump"):
@@ -136,11 +179,8 @@ def set(keyword: str, platform: str, limit: int,
             # platform's source and keeps hydration-updated snippets intact.
             payload.append(r.model_dump(exclude={"grouped_sources"}))
         elif isinstance(r, dict):
-            payload.append(dict(r))
-    # 已有同 key → 先移除再插入（保持 LRU 序）。
-    _cache.pop(key, None)
-    _cache[key] = {"results": payload, "ts": now}
-    _evict_if_full()
+            payload.append(deepcopy({k: v for k, v in r.items() if k != "grouped_sources"}))
+    return payload
 
 
 def clear() -> None:

@@ -19,7 +19,7 @@ Round 16 短内存结果缓存测试。
 - 默认 TTL=90 秒：普通重复搜索命中缓存；
 - 启用后：命中缓存不启动 worker，结果回放一致；
 - TTL 过期 → 未命中；账号代数变化（同步/失效/清除）→ 未命中；
-- bypass_cache 跳过查/写；limit/关键词不同 → 不同 key；
+- bypass_cache 跳过读取、成功后更新；limit/关键词不同 → 不同 key；
 - 只缓存 succeeded/empty（failed 不缓存）；empty 也缓存；
 - shutdown 清理。
 """
@@ -28,6 +28,7 @@ import asyncio
 import os
 import sys
 import time
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -52,6 +53,8 @@ async def manager(monkeypatch):
     """缓存测试 manager：_run_worker 用记录桩替代（无子进程）。"""
     mgr = sjm.SearchJobManager()
     calls = []
+    result_cache.clear()
+    monkeypatch.setattr(sjm, "hydration_candidates", lambda results: [])
 
     async def fake_run_worker(job, platform):
         calls.append((job.job_id, platform))
@@ -129,15 +132,16 @@ class TestResultCache:
         second = asyncio.run(_run(mgr))
         assert len(calls) == 2, "账号操作后缓存必须失效"
 
-    def test_bypass_cache_skips_lookup_and_store(self, manager, monkeypatch):
+    def test_bypass_cache_populates_cache(self, manager, monkeypatch):
         _enable_cache(monkeypatch)
         mgr, calls = manager
         first = asyncio.run(_run(mgr, bypass_cache=True))
         assert first.platforms["xhs"].status == "succeeded"
         assert len(calls) == 1
-        # bypass 不写缓存 → 普通搜索仍未命中。
+        # 主动刷新成功后，普通搜索复用刚刚取得的结果。
         second = asyncio.run(_run(mgr))
-        assert len(calls) == 2
+        assert len(calls) == 1
+        assert second.platforms["xhs"].cache_hit
 
     def test_different_limit_is_different_key(self, manager, monkeypatch):
         _enable_cache(monkeypatch)
@@ -173,8 +177,8 @@ class TestResultCache:
         assert first.platforms["xhs"].status == "failed"
         assert result_cache._cache == {}, "failed 不得写入缓存"
 
-    def test_partial_job_is_not_cached(self, manager, monkeypatch):
-        """一个平台失败时，另一个平台的成功结果也不能单独落缓存。"""
+    def test_partial_job_caches_only_complete_successful_platforms(self, manager, monkeypatch):
+        """整个平台成功的结果可复用；失败平台下次仍需重新请求。"""
         _enable_cache(monkeypatch)
         mgr, calls = manager
 
@@ -189,7 +193,12 @@ class TestResultCache:
         monkeypatch.setattr(mgr, "_run_worker", partial_run_worker)
         result = asyncio.run(_run(mgr, platforms=["xhs", "douyin"]))
         assert result.overall == "partial"
-        assert result_cache._cache == {}, "partial 结果不得写入任何平台缓存"
+        assert result_cache.get("露营", "xhs", 5)[0]["content_id"] == "partial-success"
+        assert result_cache.get("露营", "douyin", 5) is None
+        replay = asyncio.run(_run(mgr, platforms=["xhs", "douyin"]))
+        assert replay.platforms["xhs"].cache_hit
+        assert [platform for _, platform in calls].count("xhs") == 1
+        assert [platform for _, platform in calls].count("douyin") == 2
 
     def test_empty_is_cached(self, manager, monkeypatch):
         """empty（无结果）也缓存，避免重复搜索空关键词。"""
@@ -215,6 +224,182 @@ class TestResultCache:
         assert result_cache._cache
         asyncio.run(mgr.cleanup())
         assert result_cache._cache == {}
+
+
+class TestRefreshCacheSemantics:
+    def test_refresh_replaces_existing_cache(self, manager, monkeypatch):
+        mgr, calls = manager
+
+        async def worker(job, platform):
+            calls.append((job.job_id, platform))
+            job.add_result(platform, _make_result(f"version-{len(calls)}"))
+            job.set_platform_status(platform, "succeeded")
+
+        monkeypatch.setattr(mgr, "_run_worker", worker)
+        first = asyncio.run(_run(mgr))
+        refreshed = asyncio.run(_run(mgr, bypass_cache=True))
+        replay = asyncio.run(_run(mgr))
+        assert first.results[0].content_id == "version-1"
+        assert refreshed.results[0].content_id == replay.results[0].content_id == "version-2"
+        assert len(calls) == 2
+        assert not refreshed.platforms["xhs"].cache_hit
+        assert replay.platforms["xhs"].cache_hit
+        assert replay.platforms["xhs"].fetched_at == refreshed.platforms["xhs"].fetched_at
+
+    @pytest.mark.parametrize("status", ["failed", "timed_out", "rate_limited", "login_required", "cancelled"])
+    def test_unsuccessful_refresh_preserves_old_cache(self, manager, monkeypatch, status):
+        mgr, _ = manager
+        asyncio.run(_run(mgr))
+        original = result_cache.lookup("露营", "xhs", 5)
+
+        async def worker(job, platform):
+            # Receiving a few results does not make a failed platform complete.
+            job.add_result(platform, _make_result("unfinished"))
+            job.set_platform_status(platform, status)
+
+        monkeypatch.setattr(mgr, "_run_worker", worker)
+        refresh = asyncio.run(_run(mgr, bypass_cache=True))
+        assert refresh.platforms["xhs"].status == status
+        assert result_cache.lookup("露营", "xhs", 5) == original
+
+    def test_empty_refresh_replaces_previous_nonempty_results(self, manager, monkeypatch):
+        mgr, _ = manager
+        asyncio.run(_run(mgr))
+
+        async def worker(job, platform):
+            job.set_platform_status(platform, "empty")
+
+        monkeypatch.setattr(mgr, "_run_worker", worker)
+        asyncio.run(_run(mgr, bypass_cache=True))
+        replay = asyncio.run(_run(mgr))
+        assert replay.results == []
+        assert replay.platforms["xhs"].status == "empty"
+        assert replay.platforms["xhs"].cache_hit
+
+    def test_cache_replay_does_not_renew_ttl(self, manager, monkeypatch):
+        _enable_cache(monkeypatch)
+        mgr, calls = manager
+        asyncio.run(_run(mgr))
+        entry = next(iter(result_cache._cache.values()))
+        entry["ts"] -= 30
+        original_ts = entry["ts"]
+        asyncio.run(_run(mgr))
+        assert next(iter(result_cache._cache.values()))["ts"] == original_ts
+        entry["ts"] -= 31
+        asyncio.run(_run(mgr))
+        assert len(calls) == 2
+
+    def test_cancelled_job_does_not_cache_earlier_success(self, manager):
+        mgr, _ = manager
+        job = sjm._ActiveJob("cancelled", "露营", ["xhs", "douyin"], 5)
+        job.add_result("xhs", _make_result("complete"))
+        job.set_platform_status("xhs", "succeeded")
+        job.set_platform_status("douyin", "cancelled")
+        job._cancelled = True
+        job.finalize()
+        mgr._cache_job_results(job)
+        assert result_cache._cache == {}
+
+    def test_account_change_before_store_discards_old_session_results(self, manager):
+        mgr, _ = manager
+        job = sjm._ActiveJob("old-session", "露营", ["xhs"], 5)
+        job.add_result("xhs", _make_result("old-session"))
+        job.set_platform_status("xhs", "succeeded")
+        asyncio.run(acc.clear_session_snapshot("xhs"))
+        job.finalize()
+        mgr._cache_job_results(job)
+        assert result_cache._cache == {}
+
+    @pytest.mark.asyncio
+    async def test_old_hydration_cannot_overwrite_refresh(self, manager, monkeypatch):
+        mgr, calls = manager
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        class DelayedHydrator:
+            async def hydrate(self, results, cancel_event):
+                entered.set()
+                await release.wait()
+                return [SimpleNamespace(result=results[0], snippet="old hydrated snippet")]
+
+        async def worker(job, platform):
+            calls.append((job.job_id, platform))
+            job.add_result(platform, _make_result(f"version-{len(calls)}"))
+            job.set_platform_status(platform, "succeeded")
+
+        monkeypatch.setattr(mgr, "_run_worker", worker)
+        monkeypatch.setattr(sjm, "ResultHydrator", DelayedHydrator)
+        await _run(mgr)
+        old_job = mgr._active_job
+        hydration = asyncio.create_task(mgr._run_hydration(old_job))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            await _run(mgr, bypass_cache=True)
+        finally:
+            release.set()
+            await asyncio.wait_for(hydration, 2)
+        # Also reject an older job whose initial completion arrives late.
+        mgr._cache_job_results(old_job)
+        replay = await _run(mgr)
+        assert replay.results[0].content_id == "version-2"
+        assert replay.results[0].snippet is None
+
+    @pytest.mark.asyncio
+    async def test_hydration_updates_own_entry_without_renewing_ttl(self, manager, monkeypatch):
+        mgr, _ = manager
+
+        class ImmediateHydrator:
+            async def hydrate(self, results, cancel_event):
+                return [SimpleNamespace(result=results[0], snippet="这是补全后的有效摘要内容。")]
+
+        monkeypatch.setattr(sjm, "ResultHydrator", ImmediateHydrator)
+        await _run(mgr)
+        entry = next(iter(result_cache._cache.values()))
+        entry["ts"] -= 10
+        original_ts, original_fetched_at = entry["ts"], entry["fetched_at"]
+        await mgr._run_hydration(mgr._active_job)
+        hit = result_cache.lookup("露营", "xhs", 5)
+        assert hit.results[0]["snippet"] == "这是补全后的有效摘要内容。"
+        assert entry["ts"] == original_ts
+        assert hit.fetched_at == original_fetched_at
+
+    @pytest.mark.parametrize("invalidate", ["expired", "account_changed", "cleared"])
+    def test_hydration_does_not_revive_invalidated_cache(self, manager, monkeypatch, invalidate):
+        _enable_cache(monkeypatch)
+        mgr, _ = manager
+        asyncio.run(_run(mgr))
+        job = mgr._active_job
+        if invalidate == "expired":
+            next(iter(result_cache._cache.values()))["ts"] -= 61
+        elif invalidate == "account_changed":
+            asyncio.run(acc.clear_session_snapshot("xhs"))
+        else:
+            result_cache.clear()
+        mgr._cache_job_results(job, hydration_update=True)
+        assert result_cache.get("露营", "xhs", 5) is None
+
+    def test_grouping_survives_refresh_and_cache_replay(self, manager, monkeypatch):
+        mgr, _ = manager
+
+        async def worker(job, platform):
+            job.add_result(platform, UnifiedSearchResult(
+                platform=platform, content_id=platform, title="Python入门教程",
+                author="同一作者", url=f"https://example.test/{platform}",
+            ))
+            job.set_platform_status(platform, "succeeded")
+
+        monkeypatch.setattr(mgr, "_run_worker", worker)
+        first = asyncio.run(_run(mgr, platforms=["xhs", "bilibili"]))
+        refresh = asyncio.run(_run(mgr, platforms=["xhs", "bilibili"], bypass_cache=True))
+        replay = asyncio.run(_run(mgr, platforms=["xhs", "bilibili"]))
+        assert len(first.results) == 1
+        assert first.results == refresh.results == replay.results
+        assert len(replay.results[0].grouped_sources) == 2
+
+        # Hydration must reach the source copies used by platform tabs/retry.
+        job = mgr._active_job
+        job.update_snippet(job.response_results()[0], "这是补全后的正文简介。")
+        representative = job.to_response().results[0]
+        assert representative.grouped_sources[0].snippet == representative.snippet
 
 
 class TestCacheCapacityAndEviction:
