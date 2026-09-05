@@ -2,9 +2,17 @@ import { useState, useMemo } from "react";
 import { ArrowUpRight, ChevronDown, Heart, Eye, MessageCircle, ThumbsUp, Coins, Tv, Share2 } from "lucide-react";
 import type { UnifiedSearchResult } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
+import { highlightSegments, safeContentUrl as safeUrl } from "@/lib/resultTools";
 
 interface ResultCardProps {
   result: UnifiedSearchResult;
+  highlightQuery?: string;
+}
+
+function Highlight({ text, query }: { text: string; query: string }) {
+  return <>{highlightSegments(text, query).map((segment, index) => segment.matched
+    ? <mark key={index} className="rounded-sm bg-amber-100 text-amber-950">{segment.text}</mark>
+    : segment.text)}</>;
 }
 
 function formatTime(iso: string | null): string {
@@ -30,27 +38,6 @@ function formatCount(n: number): string {
   if (n >= 10000) return (n / 10000).toFixed(1) + "万";
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
   return String(n);
-}
-
-/** 安全 URL 校验（Round 12 逻辑原样保留）：仅允许 http/https 且域名在平台白名单内。 */
-function safeUrl(url: string): string | null {
-  if (!url) return null;
-  const u = url.trim();
-  const ALLOWED_DOMAINS = [
-    "xiaohongshu.com", "xhslink.com", "rednote.com",
-    "douyin.com", "bilibili.com", "zhihu.com", "zhuanlan.zhihu.com",
-  ];
-  if (u.startsWith("http://") || u.startsWith("https://")) {
-    try {
-      const host = new URL(u).hostname;
-      if (ALLOWED_DOMAINS.some(d => host === d || host.endsWith("." + d))) {
-        return u;
-      }
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 /** 内容类型展示文案（原始 slug → 中文；其余原样）。 */
@@ -100,7 +87,7 @@ function metricSummary(metrics: Record<string, number>): string {
     .join(" · ");
 }
 
-export function ResultCard({ result }: ResultCardProps) {
+export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
   const [imgError, setImgError] = useState(false);
   const [groupExpanded, setGroupExpanded] = useState(false);
   const url = safeUrl(result.url);
@@ -163,7 +150,7 @@ export function ResultCard({ result }: ResultCardProps) {
               {groupedContentTypes && <span className="text-[11px] text-cyber-text-muted">{groupedContentTypes}</span>}
             </div>
             <h3 className="text-[15px] sm:text-[16.5px] font-semibold leading-[1.55] tracking-[-0.01em] text-cyber-text-primary line-clamp-2">
-              {result.title}
+              <Highlight text={result.title} query={highlightQuery} />
             </h3>
             <div className="flex items-center gap-2.5 mt-2 text-[12px] text-cyber-text-secondary">
               {result.author && (
@@ -178,7 +165,7 @@ export function ResultCard({ result }: ResultCardProps) {
             </div>
             {result.snippet && (
               <p className="mt-1 text-[12.5px] leading-[1.55] text-cyber-text-secondary line-clamp-3">
-                {result.snippet}
+                <Highlight text={result.snippet} query={highlightQuery} />
               </p>
             )}
             {metrics.length > 0 && (
@@ -237,14 +224,14 @@ export function ResultCard({ result }: ResultCardProps) {
                         {PLATFORM_LABELS[source.platform] || source.platform}
                       </span>
                       {sourceType && <span className="text-[10.5px] text-cyber-text-muted flex-shrink-0">{sourceType}</span>}
-                      <span className="text-[12px] text-cyber-text-primary truncate">{source.title}</span>
+                      <span className="text-[12px] text-cyber-text-primary truncate"><Highlight text={source.title} query={highlightQuery} /></span>
                     </div>
                     <div className="flex items-center gap-2 mt-1 text-[11px] text-cyber-text-muted truncate">
                       {source.author && <span className="truncate">{source.author}</span>}
                       {source.published_at && <span className="flex-shrink-0">{formatTime(source.published_at)}</span>}
                     </div>
                     {source.snippet && (
-                      <p className="mt-1 text-[11.5px] leading-[1.5] text-cyber-text-secondary line-clamp-2">{source.snippet}</p>
+                      <p className="mt-1 text-[11.5px] leading-[1.5] text-cyber-text-secondary line-clamp-2"><Highlight text={source.snippet} query={highlightQuery} /></p>
                     )}
                     {metricSummary(source.metrics) && (
                       <p className="mt-1 text-[10.5px] text-cyber-text-muted truncate">{metricSummary(source.metrics)}</p>
@@ -294,7 +281,7 @@ export function ResultCard({ result }: ResultCardProps) {
           {contentType && <span className="text-[11px] text-cyber-text-muted">{contentType}</span>}
         </div>
         <h3 className="text-[15px] sm:text-[16.5px] font-semibold leading-[1.55] tracking-[-0.01em] text-cyber-text-primary line-clamp-2">
-          {result.title}
+          <Highlight text={result.title} query={highlightQuery} />
         </h3>
         <div className="flex items-center gap-2.5 mt-2 text-[12px] text-cyber-text-secondary">
           {result.author && (
@@ -312,7 +299,7 @@ export function ResultCard({ result }: ResultCardProps) {
         </div>
         {result.snippet && (
           <p className="mt-1 text-[12.5px] leading-[1.55] text-cyber-text-secondary line-clamp-3">
-            {result.snippet}
+            <Highlight text={result.snippet} query={highlightQuery} />
           </p>
         )}
         {metrics.length > 0 && (

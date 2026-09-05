@@ -1,0 +1,130 @@
+import type { PlatformSlug, UnifiedSearchResult } from "../types/search.js";
+import { PLATFORM_LABELS } from "../types/search.js";
+
+export type ContentFilter = "all" | "video" | "note" | "article";
+export interface ResultFilters {
+  days: 0 | 7 | 30;
+  contentType: ContentFilter;
+  query: string;
+}
+export const DEFAULT_FILTERS: ResultFilters = { days: 0, contentType: "all", query: "" };
+
+export function resultKey(result: Pick<UnifiedSearchResult, "platform" | "content_id">): string {
+  return `${result.platform}|${result.content_id}`;
+}
+
+export function resultSources(result: UnifiedSearchResult): UnifiedSearchResult[] {
+  const sources = result.grouped_sources;
+  return (sources && sources.length >= 2 ? sources : [result])
+    .map((source) => ({ ...source, metrics: { ...source.metrics }, grouped_sources: null }));
+}
+
+export function groupKey(result: UnifiedSearchResult): string {
+  return JSON.stringify(resultSources(result).map(resultKey).sort());
+}
+
+export function safeContentUrl(url: string): string | null {
+  const domains = ["xiaohongshu.com", "xhslink.com", "rednote.com", "douyin.com", "bilibili.com", "zhihu.com"];
+  try {
+    const parsed = new URL(url.trim());
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+    return domains.some((domain) => parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`))
+      ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+const normalize = (text: string) => text.normalize("NFKC").toLowerCase();
+
+export function matchesFilters(result: UnifiedSearchResult, filters: ResultFilters, nowMs: number): boolean {
+  if (filters.days) {
+    const published = Date.parse(result.published_at || "");
+    if (!Number.isFinite(published) || published > nowMs || published < nowMs - filters.days * 86400000) return false;
+  }
+  const types: Record<Exclude<ContentFilter, "all">, string[]> = {
+    video: ["video", "short_video", "zvideo"], note: ["note", "post"], article: ["article", "answer"],
+  };
+  if (filters.contentType !== "all" && !types[filters.contentType].includes(result.content_type)) return false;
+  const haystack = normalize([result.title, result.author, result.snippet].filter(Boolean).join(" "));
+  return normalize(filters.query).trim().split(/\s+/u).filter(Boolean).every((token) => haystack.includes(token));
+}
+
+/** All conditions must match the same source; keep only matching versions of a group. */
+export function filterResultGroups(
+  results: readonly UnifiedSearchResult[], filters: ResultFilters, nowMs: number,
+  platform: "all" | PlatformSlug = "all"
+): UnifiedSearchResult[] {
+  return results.flatMap((result) => {
+    const sources = resultSources(result).filter((source) =>
+      (platform === "all" || source.platform === platform) && matchesFilters(source, filters, nowMs));
+    if (!sources.length) return [];
+    const representative = sources.find((source) => resultKey(source) === resultKey(result)) || sources[0];
+    return [{ ...representative, grouped_sources: sources.length >= 2 ? sources : null }];
+  });
+}
+
+export function highlightSegments(text: string, query: string): Array<{ text: string; matched: boolean }> {
+  const tokens = [...new Set(query.trim().split(/\s+/u).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (!tokens.length) return [{ text, matched: false }];
+  const pattern = tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return text.split(new RegExp(`(${pattern})`, "giu"))
+    .map((part, index) => ({ text: part, matched: index % 2 === 1 }));
+}
+
+export interface ExportRow {
+  result: UnifiedSearchResult;
+  fetchedAt: string | null;
+  savedAt: string | null;
+  note: string;
+}
+
+export function exportRows(
+  results: readonly UnifiedSearchResult[],
+  metadata: (source: UnifiedSearchResult) => Omit<ExportRow, "result">
+): ExportRow[] {
+  const seen = new Set<string>();
+  return results.flatMap(resultSources).flatMap((result) => {
+    const key = resultKey(result);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ result, ...metadata(result) }];
+  });
+}
+
+function csvCell(value: string): string {
+  // Keep untrusted titles/notes as text when the CSV is opened in a spreadsheet.
+  const safe = /^[\s\u0000-\u001f]*[=+\-@]/u.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+export function resultsCsv(rows: readonly ExportRow[]): string {
+  const header = ["平台", "标题", "作者", "内容类型", "发布时间", "采集时间", "收藏时间", "备注", "摘要", "原文链接"];
+  const values = rows.map(({ result, fetchedAt, savedAt, note }) => [
+    PLATFORM_LABELS[result.platform], result.title, result.author || "", result.content_type,
+    result.published_at || "", fetchedAt || "", savedAt || "", note, result.snippet || "",
+    safeContentUrl(result.url) || "",
+  ]);
+  return "\uFEFF" + [header, ...values].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+const markdownText = (value: string) => value.replace(/[\r\n]+/g, " ").replace(/[\\`*_{}[\]()<>#!|]/g, "\\$&");
+
+export function resultsMarkdown(rows: readonly ExportRow[]): string {
+  return "# 搜索结果\n\n" + rows.map(({ result, fetchedAt, savedAt, note }) => {
+    const url = safeContentUrl(result.url)?.replace(/</g, "%3C").replace(/>/g, "%3E");
+    return [
+      `## ${markdownText(result.title)}`,
+      `平台：${PLATFORM_LABELS[result.platform]} · 作者：${markdownText(result.author || "未知")}`,
+      `发布时间：${markdownText(result.published_at || "未知")} · 采集时间：${markdownText(fetchedAt || "未知")}`,
+      savedAt ? `收藏时间：${markdownText(savedAt)}` : "",
+      result.snippet ? markdownText(result.snippet) : "",
+      note ? `备注：${markdownText(note)}` : "",
+      url ? `[打开原文](<${url}>)` : "原文链接不可用",
+    ].filter(Boolean).join("\n\n");
+  }).join("\n\n---\n\n") + "\n";
+}
+
+export function resultLinks(rows: readonly ExportRow[]): string {
+  return [...new Set(rows.map((row) => safeContentUrl(row.result.url)).filter(Boolean))].join("\n");
+}

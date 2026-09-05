@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { AlertTriangle, RotateCcw, Loader2, UserCog, RefreshCw } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { AlertTriangle, Bookmark, RotateCcw, Loader2, UserCog, RefreshCw } from "lucide-react";
 import { SearchBar } from "./SearchBar";
 import { PlatformStatus } from "./PlatformStatus";
 import { ResultTabs } from "./ResultTabs";
@@ -8,6 +8,8 @@ import { usePlatformLimits } from "@/hooks/usePlatformLimits";
 import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
+import { useBookmarks } from "@/hooks/useBookmarks";
+import { TOOL_BUTTON } from "./ResultTools";
 
 interface SearchPageProps {
   onNavigateAccounts?: () => void;
@@ -19,6 +21,9 @@ interface SearchPageProps {
  * 历史 / 任务恢复 —— 本组件只改布局与视觉。
  */
 export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
+  const library = useBookmarks();
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const savedResults = useMemo(() => library.items.map((item) => item.result), [library.items]);
   // Round 15: 每个平台独立搜索数量（展示用；搜索请求由 useSearchExperience 读取）。
   const { limits } = usePlatformLimits();
   const {
@@ -47,6 +52,8 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
     pollError,
     busy,
   } = useSearchExperience();
+  const fetchedAt = useMemo(() => Object.fromEntries(Object.entries(displayJobResponse?.platforms || {})
+    .map(([platform, info]) => [platform, info.fetched_at ?? null])), [displayJobResponse]);
 
   // 受控输入：初始平台选择来自 localStorage 偏好（至少一个平台）。
   const [keyword, setKeyword] = useState("");
@@ -74,6 +81,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
 
   const handleFullSearchLocal = useCallback(
     (kw: string, platforms: PlatformSlug[]) => {
+      setShowBookmarks(false);
       void handleFullSearch(kw, platforms);
     },
     [handleFullSearch]
@@ -91,6 +99,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
   // hook 的 busy + taskInFlight 双 guard 保证。
   const handleHistoryClickLocal = useCallback(
     (item: SearchHistoryItem) => {
+      setShowBookmarks(false);
       setKeyword(item.keyword);
       setSelectedPlatforms(new Set(item.platforms));
       updatePlatformPref(item.platforms); // 同步持久化偏好（刷新后保持）
@@ -151,6 +160,22 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         limits={limits}
       />
 
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <button type="button" className={TOOL_BUTTON} aria-expanded={showBookmarks} aria-controls="saved-results"
+          onClick={() => setShowBookmarks((value) => !value)}>
+          <Bookmark className="w-3.5 h-3.5" />{showBookmarks ? "返回搜索结果" : `本地收藏（${library.items.length}）`}
+        </button>
+        {library.error && <p className="text-xs text-warn" role="alert">{library.error}</p>}
+      </div>
+      {showBookmarks && (
+        <section id="saved-results" aria-label="本地收藏" className="mt-5">
+          <h2 className="text-base font-semibold text-cyber-text-primary">本地收藏</h2>
+          <p className="mt-1 text-xs text-cyber-text-muted">收藏和备注保存在当前浏览器中，重启后仍可查看。更换浏览器、访问地址或清除网站数据前，请先导出备份。</p>
+          <ResultTabs results={savedResults} overall="completed" platforms={["xhs", "douyin", "bilibili", "zhihu"]}
+            library={library} savedView jobId="bookmarks" />
+        </section>
+      )}
+      <div hidden={showBookmarks}>
       {/* 平台搜索状态（统一浅色状态卡） */}
       <PlatformStatus
         response={displayJobResponse ?? undefined}
@@ -324,9 +349,12 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             platforms={Object.keys(displayJobResponse.platforms) as PlatformSlug[]}
             sortMode={sortMode}
             onSortModeChange={setSortMode}
+            library={library}
+            fetchedAt={fetchedAt}
           />
         </div>
       )}
+      </div>
     </div>
   );
 }
