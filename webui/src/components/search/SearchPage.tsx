@@ -10,6 +10,7 @@ import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { TOOL_BUTTON } from "./ResultTools";
+import { SearchStatistics } from "./SearchStatistics";
 
 interface SearchPageProps {
   onNavigateAccounts?: () => void;
@@ -167,6 +168,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         </button>
         {library.error && <p className="text-xs text-warn" role="alert">{library.error}</p>}
       </div>
+      <SearchStatistics refreshKey={`${displayJobResponse?.job_id || ""}:${displayJobResponse?.overall || ""}`} />
       {showBookmarks && (
         <section id="saved-results" aria-label="本地收藏" className="mt-5">
           <h2 className="text-base font-semibold text-cyber-text-primary">本地收藏</h2>

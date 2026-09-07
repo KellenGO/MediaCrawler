@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { ArrowUpRight, ChevronDown, Heart, Eye, MessageCircle, ThumbsUp, Coins, Tv, Share2 } from "lucide-react";
 import type { UnifiedSearchResult } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
@@ -7,6 +7,7 @@ import { highlightSegments, safeContentUrl as safeUrl } from "@/lib/resultTools"
 interface ResultCardProps {
   result: UnifiedSearchResult;
   highlightQuery?: string;
+  renderBookmark?: (result: UnifiedSearchResult) => ReactNode;
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -87,7 +88,7 @@ function metricSummary(metrics: Record<string, number>): string {
     .join(" · ");
 }
 
-export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
+export function ResultCard({ result, highlightQuery = "", renderBookmark }: ResultCardProps) {
   const [imgError, setImgError] = useState(false);
   const [groupExpanded, setGroupExpanded] = useState(false);
   const url = safeUrl(result.url);
@@ -123,9 +124,9 @@ export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
             <span className="h-1.5 w-1.5 rounded-full bg-brand shadow-[0_0_0_3px_rgba(76,164,220,0.14)]" />
             跨平台聚合
           </span>
-          <span className="text-[11px] font-medium text-cyber-text-muted">
+          <div className="flex items-center gap-2"><span className="text-[11px] font-medium text-cyber-text-muted">
             {groupedSources.length} 个平台同内容
-          </span>
+          </span>{renderBookmark?.(result)}</div>
         </div>
 
         <div className="grid grid-cols-[104px_minmax(0,1fr)] sm:grid-cols-[144px_minmax(0,1fr)_auto] gap-3 sm:gap-[18px] p-3 sm:p-3.5 pt-2.5">
@@ -240,13 +241,11 @@ export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
                   <ArrowUpRight className="w-3.5 h-3.5 mt-1 flex-shrink-0 text-cyber-text-muted" />
                 </div>
               );
-              return sourceUrl ? (
-                <a key={`${source.platform}-${source.content_id}`} href={sourceUrl} target="_blank" rel="noopener noreferrer" className="block border-b last:border-b-0 border-cyber-border-subtle hover:bg-cyber-bg-tertiary/60">
-                  {sourceRow}
-                </a>
-              ) : (
-                <div key={`${source.platform}-${source.content_id}`} className="border-b last:border-b-0 border-cyber-border-subtle">{sourceRow}</div>
-              );
+              return <div key={`${source.platform}-${source.content_id}`} className="flex items-center gap-2 border-b last:border-b-0 border-cyber-border-subtle">
+                {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="block min-w-0 flex-1 hover:bg-cyber-bg-tertiary/60">{sourceRow}</a>
+                  : <div className="min-w-0 flex-1">{sourceRow}</div>}
+                {renderBookmark?.({ ...source, grouped_sources: null })}
+              </div>;
             })}
           </div>
         )}
@@ -274,7 +273,7 @@ export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
 
       {/* 中间信息 */}
       <div className="min-w-0 py-1">
-        <div className="flex items-center gap-2.5 mb-1.5">
+        <div className="flex items-center gap-2.5 mb-1.5 pr-8">
           <span className="text-[11.5px] font-bold" style={{ color: platformColor }}>
             {PLATFORM_LABELS[result.platform] || result.platform}
           </span>
@@ -321,12 +320,8 @@ export function ResultCard({ result, highlightQuery = "" }: ResultCardProps) {
     </div>
   );
 
-  if (url) {
-    return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
-        {inner}
-      </a>
-    );
-  }
-  return <div>{inner}</div>;
+  return <div className="relative">
+    {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="block">{inner}</a> : inner}
+    {renderBookmark && <div className="absolute right-3 top-3">{renderBookmark(result)}</div>}
+  </div>;
 }

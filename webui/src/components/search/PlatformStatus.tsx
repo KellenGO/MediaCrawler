@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { Loader2, Check, Minus, AlertTriangle, XCircle, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
-import { freshnessLine, statusLine } from "@/lib/statusDisplay";
+import { cooldownSeconds, freshnessLine, statusLine } from "@/lib/statusDisplay";
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
@@ -49,6 +50,18 @@ export function PlatformStatus({
   retryingPlatform,
   retryDisabled,
 }: PlatformStatusProps) {
+  const [nowMs, setNowMs] = useState(Date.now);
+  const deadline = Math.max(0, ...Object.values(response?.platforms || {})
+    .map((info) => Date.parse(info.cooldown_until || "") || 0));
+  useEffect(() => {
+    setNowMs(Date.now());
+    if (deadline <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+      if (deadline <= Date.now()) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
   // 无任务：显示四张浅色骨架卡
   if (!response) {
     return (
@@ -83,6 +96,7 @@ export function PlatformStatus({
 
           const status: PStatus = info.status;
           const freshness = freshnessLine(info);
+          const remaining = cooldownSeconds(info.cooldown_until, nowMs);
           const isRetrying = retryingPlatform === p;
           const retryable = onRetry ? RETRYABLE_STATUSES.includes(status) : false;
 
@@ -117,6 +131,9 @@ export function PlatformStatus({
                     {freshness}
                   </small>
                 )}
+                {remaining > 0 && <small className="text-[11px] text-warn block" title="冷却期间不会再次请求该平台，结束后可手动重试">
+                  冷却 {remaining} 秒{info.cooldown_skipped ? " · 未发起请求" : ""}
+                </small>}
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 {isRetrying ? (
@@ -130,12 +147,13 @@ export function PlatformStatus({
                 {retryable && !isRetrying && (
                   <button
                     type="button"
-                    disabled={retryDisabled}
+                    disabled={retryDisabled || remaining > 0}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRetry?.(p);
                     }}
                     title={`重试 ${PLATFORM_LABELS[p]}`}
+                    aria-label={`重试 ${PLATFORM_LABELS[p]}`}
                     className="flex items-center gap-1 rounded-md border border-brand/40 px-1.5 py-0.5 text-[10.5px] text-brand-strong hover:bg-brand-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <RotateCcw className="w-3 h-3" />重试

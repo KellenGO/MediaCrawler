@@ -34,6 +34,7 @@ class QuietHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channel", default="msedge", help="Browser channel, or chromium")
+    parser.add_argument("--screenshots", action="store_true", help="Save UI review images under build/")
     args = parser.parse_args()
     dist = ROOT / "webui" / "dist"
     if not (dist / "index.html").is_file():
@@ -94,7 +95,10 @@ def main() -> None:
             page = context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(origin)
-            expect(page.get_by_role("button", name="收藏全部来源 研究素材图文", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="选择收藏平台 研究素材图文", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="导出 CSV", exact=True)).to_have_count(0)
+            expect(page.get_by_role("checkbox", name="选择当前全部结果", exact=True)).to_have_count(0)
+            page.get_by_role("button", name="导出 / 复制", exact=True).click()
             page.get_by_label("发布时间筛选").select_option("7")
             page.get_by_label("内容类型筛选").select_option("note")
             expect(page.get_by_role("button", name="导出 CSV", exact=True)).to_be_disabled()
@@ -103,17 +107,45 @@ def main() -> None:
             page.get_by_label("结果内关键词").fill("视频")
             expect(page.locator("mark")).to_have_text(["视频"])
             page.get_by_role("button", name="清除筛选", exact=True).click()
-            page.get_by_role("button", name="收藏全部来源 研究素材图文", exact=True).click()
+            page.get_by_role("button", name="收起导出", exact=True).click()
+            expect(page.get_by_role("checkbox", name="选择当前全部结果", exact=True)).to_have_count(0)
+            page.get_by_role("button", name="选择收藏平台 研究素材图文", exact=True).click()
+            popup = page.get_by_role("group", name="选择收藏来源", exact=True)
+            if args.screenshots:
+                page.screenshot(path=str(ROOT / "build/result-bookmark-menu.png"), full_page=True)
+            popup.get_by_role("button", name="收藏 研究素材视频", exact=True).click()
+            items = page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items")
+            assert len(items) == 1 and items[0]["result"]["platform"] == "bilibili"
+            page.keyboard.press("Escape")
+            page.get_by_role("button", name="查看各平台版本", exact=True).click()
+            page.get_by_role("button", name="收藏 研究素材图文", exact=True).click()
+            page.get_by_role("button", name="取消收藏 研究素材图文", exact=True).click()
+            assert page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items.length") == 1
+            page.get_by_role("button", name="收起平台版本", exact=True).click()
+            page.get_by_role("button", name="选择收藏平台 研究素材图文", exact=True).click()
+            popup.get_by_role("button", name="收藏全部来源 研究素材图文", exact=True).click()
+            page.keyboard.press("Escape")
+            assert page.locator("a button, a input, a textarea").count() == 0
             page.get_by_role("button", name="本地收藏（2）", exact=True).click()
             library = page.get_by_role("region", name="本地收藏", exact=True)
-            expect(library.get_by_role("checkbox")).to_have_count(3)
+            expect(library.get_by_role("checkbox")).to_have_count(0)
+            expect(library.locator("textarea")).to_have_count(0)
+            library.get_by_role("button", name="添加备注 研究素材视频", exact=True).click()
             library.get_by_label("备注 研究素材视频", exact=True).fill("稍后整理，保留原文")
             library.locator("button:enabled").filter(has_text=re.compile("^保存备注$")).click()
             expect(library.get_by_text("尚未保存", exact=False)).to_have_count(0)
 
             page.reload()
             page.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            expect(library.get_by_label("备注 研究素材视频", exact=True)).to_have_value("稍后整理，保留原文")
+            expect(library.locator("textarea")).to_have_count(0)
+            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
+            if args.screenshots:
+                page.screenshot(path=str(ROOT / "build/result-bookmarks-reading.png"), full_page=True)
+            library.get_by_role("button", name="编辑备注 研究素材视频", exact=True).click()
+            library.get_by_label("备注 研究素材视频", exact=True).fill("取消后不应保留")
+            library.get_by_role("button", name="取消编辑", exact=True).click()
+            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
+            library.get_by_role("button", name="导出 / 复制", exact=True).click()
             library.get_by_role("checkbox", name="选择 研究素材视频", exact=True).check()
             for label, filename in (("导出 CSV", "selected.csv"), ("导出 Markdown", "selected.md")):
                 with page.expect_download() as download:
@@ -136,7 +168,8 @@ def main() -> None:
             page.evaluate("sessionStorage.clear()")
             page.reload()
             page.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            expect(library.get_by_label("备注 研究素材视频", exact=True)).to_have_value("稍后整理，保留原文")
+            expect(library.locator("textarea")).to_have_count(0)
+            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
             for width in (390, 320, 1280):
                 page.set_viewport_size({"width": width, "height": 900})
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"Overflow at {width}px"
@@ -171,7 +204,7 @@ def main() -> None:
         server.shutdown()
         server.server_close()
     print(json.dumps({"result": "passed", "checks": ["group filters", "highlight", "bookmark reload",
-                     "notes", "selected CSV/Markdown export", "clipboard", "idle library", "mobile layout",
+                     "notes collapsed/read/edit/cancel", "per-source bookmarks", "export disclosure", "selected CSV/Markdown export", "clipboard", "idle library", "mobile layout",
                      "cross-tab updates", "storage failure", "no API writes", "no page errors"]}))
 
 

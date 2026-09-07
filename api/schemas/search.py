@@ -124,6 +124,8 @@ class PlatformStatusInfo(BaseModel):
     timings: Optional[PlatformTimingInfo] = None
     cache_hit: bool = False
     fetched_at: Optional[str] = None  # Original collection time, not replay time.
+    cooldown_until: Optional[str] = None  # UTC deadline for the local retry gate.
+    cooldown_skipped: bool = False       # No worker request was made.
 
 
 class PlatformDiagnostic(BaseModel):

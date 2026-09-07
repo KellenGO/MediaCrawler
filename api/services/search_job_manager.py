@@ -36,6 +36,7 @@ from .accounts import (
 )
 from . import result_cache
 from .result_hydration import ResultHydrator
+from .search_metrics import PlatformCooldowns, SearchMetrics
 
 WORKER_TIMEOUT_SECONDS = 100
 GRACE_PERIOD_SECONDS = 5.0
@@ -207,7 +208,7 @@ class PlatformWorkerSupervisor:
             worker.stderr_task.cancel()
             try:
                 await worker.stderr_task
-            except Exception:
+            except (asyncio.CancelledError, Exception):
                 pass
 
     async def stop_worker(self, platform: str, kill: bool = True) -> None:
@@ -247,7 +248,7 @@ class PlatformWorkerSupervisor:
             worker.stderr_task.cancel()
             try:
                 await worker.stderr_task
-            except Exception:
+            except (asyncio.CancelledError, Exception):
                 pass
 
     async def stop_all(self) -> None:
@@ -257,7 +258,7 @@ class PlatformWorkerSupervisor:
             self._reaper_task.cancel()
             try:
                 await self._reaper_task
-            except Exception:
+            except (asyncio.CancelledError, Exception):
                 pass
             self._reaper_task = None
 
@@ -336,18 +337,23 @@ class SearchJobManager:
         self._recent_job: Optional[_ActiveJob] = None
         # Resident platform workers start lazily and are reclaimed when idle.
         self.supervisor = PlatformWorkerSupervisor()
+        self.cooldowns = PlatformCooldowns()
+        self.metrics = SearchMetrics()
 
     def is_search_active(self) -> bool:
         job = self._active_job
-        return job is not None and not job.is_terminal()
+        return job is not None and (not job.is_terminal()
+                                   or (job.task is not None and not job.task.done()))
 
     async def stop_platform_worker(self, platform: str) -> None:
         """账号 sync/verify/delete 前停止对应平台 worker（避免 profile 锁）。"""
+        if self._active_job and platform in self._active_job.platforms:
+            await self._stop_hydration_task(self._active_job)
         await self.supervisor.stop_worker(platform, kill=True)
 
     async def create_job(self, req: SearchJobRequestSchema) -> SearchJobResponse:
         async with self._lock:
-            if self._active_job is not None and not self._active_job.is_terminal():
+            if self.is_search_active():
                 raise JobConflictError("A search job is already running.")
 
             platforms = req.platforms
@@ -360,6 +366,9 @@ class SearchJobManager:
                 if not is_valid_platform(p):
                     raise InvalidPlatformsError(f"Invalid platform: {p}")
                 seen.add(p)
+
+            if self._active_job is not None:
+                await self._stop_hydration_task(self._active_job)
 
             job_id = uuid.uuid4().hex[:12]
             job = _ActiveJob(
@@ -393,15 +402,22 @@ class SearchJobManager:
         tasks = [asyncio.create_task(self._run_platform(job, p), name=f"w-{p}")
                  for p in job.platforms]
         await asyncio.gather(*tasks, return_exceptions=True)
+        # The cancel path owns finalization while process cleanup is in flight.
+        # Workers may finish naturally during that await; do not start hydration
+        # or count an intermediate "cancelling" state as a completed search.
+        if job._cancelling or job._cancelled:
+            return
         job.finalize()
         # All workers have finished: complete successful platforms may be
         # reused even if another platform failed. Explicit refreshes write too.
         self._cache_job_results(job)
+        self.metrics.record(job)
 
         # Hydration is intentionally detached from the original search task:
         # overall becomes terminal immediately, while GET /jobs keeps polling
         # only for the lightweight snippet updates.
-        if hydration_candidates(job.response_results()):
+        if (not job._cancelled and not job.hydration_cancel_event.is_set()
+                and hydration_candidates(job.response_results())):
             job.hydration_status = "running"
             job.hydration_task = asyncio.create_task(
                 self._run_hydration(job), name=f"hydrate-{job.job_id}")
@@ -432,7 +448,10 @@ class SearchJobManager:
         hydrator = ResultHydrator()
         try:
             updates = await hydrator.hydrate(
-                job.response_results(), job.hydration_cancel_event)
+                [result for result in job.response_results()
+                 if job.platforms_state[result.platform].status in ("succeeded", "empty")
+                 and not self.cooldowns.remaining(result.platform)],
+                job.hydration_cancel_event)
             if not job.hydration_cancel_event.is_set():
                 for update in updates:
                     job.update_snippet(update.result, update.snippet)
@@ -466,8 +485,20 @@ class SearchJobManager:
                     "succeeded" if job.platform_results.get(platform) else "empty")
                 job.platforms_state[platform].cache_hit = True
                 job.platforms_state[platform].fetched_at = cached.fetched_at
+                job.platforms_state[platform].cooldown_until = self.cooldowns.until(platform)
                 return
-        await self._run_worker(job, platform)
+        info = job.platforms_state[platform]
+        if self.cooldowns.remaining(platform):
+            job.set_platform_status(platform, "rate_limited", error_summary="平台冷却中，请倒计时结束后手动重试")
+            info.cooldown_until = self.cooldowns.until(platform)
+            info.cooldown_skipped = True
+            return
+        job.worker_platforms.add(platform)
+        try:
+            await self._run_worker(job, platform)
+        finally:
+            self.cooldowns.record(platform, info.status)
+            info.cooldown_until = self.cooldowns.until(platform)
 
     def _build_request_json(self, job: "_ActiveJob", platform: str) -> bytes:
         request = WorkerRequest(
@@ -491,6 +522,7 @@ class SearchJobManager:
         """常驻 supervisor 模式：复用平台 worker 进程。"""
         job.set_platform_status(platform, "running", 0)
         done_received = False
+        stdout_task = None
         try:
             request_json = self._build_request_json(job, platform)
             job.mark_spawn_start(platform)
@@ -575,6 +607,11 @@ class SearchJobManager:
         except Exception as e:
             job.set_platform_status(platform, "failed",
                                     error_summary=_safe_error_summary(str(e)))
+        finally:
+            if stdout_task is not None:
+                if not stdout_task.done():
+                    stdout_task.cancel()
+                await asyncio.gather(stdout_task, return_exceptions=True)
 
     async def _remove_proc(self, job: "_ActiveJob", proc) -> None:
         try:
@@ -832,13 +869,7 @@ class SearchJobManager:
         if job is None or job.job_id != job_id:
             return False
         if job.hydration_task is not None and not job.hydration_task.done():
-            job.hydration_cancel_event.set()
-            job.hydration_task.cancel()
-            try:
-                await asyncio.wait_for(job.hydration_task, timeout=GRACE_PERIOD_SECONDS)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                pass
-            job.hydration_status = "completed"
+            await self._stop_hydration_task(job)
             return True
         if job.is_terminal():
             # 已取消的 job 重复取消 → 幂等成功；正常终态 → 无可取消。
@@ -870,6 +901,7 @@ class SearchJobManager:
                     if job.platforms_state[p].status in ("pending", "running"):
                         job.set_platform_status(p, "cancelled", error_summary="已取消")
                 job.finalize()
+                self.metrics.record(job)
                 job.cancel_done.set()
         return True
 
@@ -952,15 +984,20 @@ class SearchJobManager:
         result_cache.clear()
 
     async def _stop_hydration_task(self, job: "_ActiveJob") -> None:
-        task = job.hydration_task
-        if task is None or task.done():
-            return
+        # Set this even before the detached task starts, closing the terminal
+        # status -> worker cleanup -> hydration scheduling race.
         job.hydration_cancel_event.set()
-        task.cancel()
-        try:
-            await asyncio.wait_for(task, timeout=GRACE_PERIOD_SECONDS)
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-            pass
+        async with job.hydration_stop_lock:
+            task = job.hydration_task
+            if task is None or task.done():
+                return
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=GRACE_PERIOD_SECONDS)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                pass
+            finally:
+                job.hydration_status = "completed"
 
 
 # ── Active Job ──────────────────────────────────────────────────────────
@@ -1012,6 +1049,9 @@ class _ActiveJob:
         self.hydration_status = "not_started"
         self.hydration_task: Optional[asyncio.Task] = None
         self.hydration_cancel_event = asyncio.Event()
+        self.hydration_stop_lock = asyncio.Lock()
+        self.worker_platforms: set[str] = set()
+        self.statistics_recorded = False
         self._final_results: Optional[List[UnifiedSearchResult]] = None
 
     def _ms_since(self, start_ts: float) -> int:
@@ -1086,6 +1126,10 @@ class _ActiveJob:
             return
         terminal = {"succeeded", "empty", "login_required",
                     "rate_limited", "timed_out", "failed", "cancelled"}
+        # Killing workers during cancellation may produce a nonzero exit after
+        # a successful status. Preserve outcomes already received by the user.
+        if (self._cancelling or self._cancelled) and info.status in terminal:
+            return
         if info.status in terminal and status not in terminal:
             return
         info.status = status
@@ -1182,6 +1226,7 @@ class _ActiveJob:
                     status=info.status, result_count=info.result_count,
                     error_summary=info.error_summary,
                     cache_hit=info.cache_hit, fetched_at=info.fetched_at,
+                    cooldown_until=info.cooldown_until, cooldown_skipped=info.cooldown_skipped,
                     timings=self.timings.get(p))
         # Round 16: 平台的终态 status 事件会让 _compute_overall() 先于
         # finalize() 变成 terminal —— 此时 job 级 total_ms 尚未写入。这里

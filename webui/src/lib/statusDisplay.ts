@@ -19,6 +19,11 @@ export function formatSeconds(ms: number | null | undefined): string | null {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+export function cooldownSeconds(until: string | null | undefined, nowMs: number): number {
+  const deadline = Date.parse(until || "");
+  return Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - nowMs) / 1000)) : 0;
+}
+
 /** 终态耗时行：`首条 1.3s · 完成 4.8s`；无数据返回 null（不占位）。 */
 export function timingLine(info: PlatformStatusInfo): string | null {
   const t = info.timings;

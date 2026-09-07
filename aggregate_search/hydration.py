@@ -82,6 +82,8 @@ async def hydrate_results(
                 raise
             except (asyncio.TimeoutError, Exception):
                 return None
+            if cancel_event is not None and cancel_event.is_set():
+                return None
             snippet = clean_snippet(value)
             if not snippet:
                 return None

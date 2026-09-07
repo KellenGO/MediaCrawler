@@ -67,6 +67,8 @@ export interface PlatformStatusInfo {
   timings?: PlatformTimingInfo | null;
   cache_hit?: boolean;
   fetched_at?: string | null;
+  cooldown_until?: string | null;
+  cooldown_skipped?: boolean;
 }
 
 export interface SearchJobResponse {

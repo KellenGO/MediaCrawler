@@ -356,6 +356,11 @@ async def get_current_job():
     return await search_job_manager.get_current()
 
 
+@search_router.get("/statistics")
+async def get_search_statistics():
+    return search_job_manager.metrics.snapshot(search_job_manager.cooldowns)
+
+
 @search_router.get("/jobs/{job_id}", response_model=SearchJobResponse)
 async def get_search_job(job_id: str):
     resp = await search_job_manager.get_job(job_id)

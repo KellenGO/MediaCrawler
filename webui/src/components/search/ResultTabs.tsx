@@ -6,7 +6,7 @@ import {
   sortResults,
 } from "@/lib/searchExperience";
 import { ResultCard } from "./ResultCard";
-import { BookmarkButton, BookmarkNote, ExportActions, TOOL_BUTTON } from "./ResultTools";
+import { BookmarkControl, BookmarkNote, ExportActions, TOOL_BUTTON } from "./ResultTools";
 import type { BookmarkLibrary } from "@/hooks/useBookmarks";
 import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, resultKey, type ContentFilter, type ResultFilters } from "@/lib/resultTools";
 
@@ -56,6 +56,7 @@ export function ResultTabs({
   const [activeTab, setActiveTab] = useState<TabKey>("all");
   const [filters, setFilters] = useState<ResultFilters>({ ...DEFAULT_FILTERS });
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
   const nowMs = useMemo(() => Date.now(), [results, filters]);
 
   // 五个固定标签始终可见；合法性判断仍走生产纯函数 resolveActiveTab，
@@ -78,6 +79,7 @@ export function ResultTabs({
 
   const hydrationOrderRef = useRef<{ signature: string; keys: string[] } | null>(null);
   useEffect(() => setSelected(new Set()), [jobId, effectiveTab, filters]);
+  useEffect(() => setExportOpen(false), [jobId]);
 
   // 先按当前标签筛选，再按所选模式排序（纯前端计算，不发任何请求）。
   const filteredResults = useMemo(() => {
@@ -184,6 +186,7 @@ export function ResultTabs({
           })}
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
         {onSortModeChange && (
           <div className="flex gap-0.5 rounded-[10px] border border-cyber-border-subtle bg-cyber-bg-secondary p-1" role="group" aria-label="排序方式">
             {SORT_MODES.map((m) => (
@@ -202,32 +205,36 @@ export function ResultTabs({
             ))}
           </div>
         )}
+        <button type="button" className={TOOL_BUTTON} aria-expanded={exportOpen} onClick={() => {
+          setExportOpen(!exportOpen); setSelected(new Set());
+        }}>{exportOpen ? "收起导出" : "导出 / 复制"}</button>
+        </div>
       </div>
 
       {/* 结果卡片 */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      {exportOpen && <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary p-3">
         <div className="flex flex-wrap items-center gap-3 text-xs text-cyber-text-muted">
           <label className="flex items-center gap-1.5"><input type="checkbox" aria-label="选择当前全部结果" checked={allSelected}
             disabled={!filteredResults.length} onChange={() => setSelected(allSelected ? new Set() : new Set(filteredResults.map(groupKey)))} />全选当前结果</label>
           <span>{selectedResults.length ? `已选 ${selectedResults.length} 条` : "未勾选时导出当前全部结果"} · 导出 {rows.length} 个来源</span>
         </div>
         <ExportActions rows={rows} keyword={savedView ? "本地收藏" : keyword} />
-      </div>
+      </div>}
       <div className="flex flex-col gap-3">
         {filteredResults.map((result) => {
           const key = groupKey(result);
           const bookmark = bookmarks.get(resultKey(result));
           return (
             <div key={key}>
-              <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+              {exportOpen && <div className="mb-1.5 flex items-center gap-2 px-1">
                 <label className="flex min-w-0 items-center gap-1.5 text-xs text-cyber-text-muted">
                   <input type="checkbox" aria-label={`选择 ${result.title}`} checked={selected.has(key)} onChange={() => setSelected((previous) => {
                     const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next;
                   })} />选择
                 </label>
-                {library && <BookmarkButton result={result} library={library} fetchedAt={fetchedAt} />}
-              </div>
-              <ResultCard result={result} highlightQuery={filters.query || keyword} />
+              </div>}
+              <ResultCard result={result} highlightQuery={filters.query || keyword}
+                renderBookmark={library ? (source) => <BookmarkControl result={source} library={library} fetchedAt={fetchedAt} /> : undefined} />
               {savedView && bookmark && library && <BookmarkNote bookmark={bookmark} onSave={library.saveNote} />}
             </div>
           );
