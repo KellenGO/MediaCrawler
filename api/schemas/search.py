@@ -35,7 +35,7 @@ from aggregate_search.models import (
     UnifiedSearchResult,
 )
 
-MAX_LIMIT_PER_PLATFORM = 20
+MAX_LIMIT_PER_PLATFORM = 40
 MIN_LIMIT_PER_PLATFORM = 1
 
 
@@ -45,13 +45,14 @@ class SearchJobRequestSchema(BaseModel):
         default_factory=lambda: PLATFORM_SLUGS.copy(),
         min_length=1,
     )
-    limit_per_platform: int = Field(default=10, ge=1, le=MAX_LIMIT_PER_PLATFORM)
+    limit_per_platform: int = Field(default=20, ge=1, le=MAX_LIMIT_PER_PLATFORM)
     # Per-platform limits use Any so the validator can reject lax coercion,
     # 避免 pydantic lax 模式把 "5"/true 强转成 int 而绕过上限校验。
-    # 优先于 limit_per_platform；缺失平台回退 limit_per_platform（默认 10）。
+    # 优先于 limit_per_platform；缺失平台回退 limit_per_platform（默认 20）。
     platform_limits: Optional[Dict[str, Any]] = Field(default=None)
     # Explicit refreshes bypass the in-memory result cache (default: False).
     bypass_cache: bool = Field(default=False)
+    continue_from: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("platforms")
     @classmethod
@@ -115,6 +116,8 @@ class PlatformTimingInfo(BaseModel):
     provider_attempts: Optional[List[str]] = None
     fallback_active: Optional[bool] = None
     fallback_reason: Optional[str] = None     # 回退原因安全枚举（无响应体）
+    page_requests: int = 0
+    duplicate_count: int = 0
 
 
 class PlatformStatusInfo(BaseModel):
@@ -188,3 +191,4 @@ class SearchJobResponse(BaseModel):
     results: List[UnifiedSearchResult] = Field(default_factory=list)
     # Search is terminal before best-effort description hydration finishes.
     hydration_status: Literal["not_started", "running", "completed"] = "not_started"
+    exploration: Optional[Dict[str, Any]] = None

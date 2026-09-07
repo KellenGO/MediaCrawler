@@ -25,7 +25,8 @@ from urllib.parse import urlencode
 from httpx import Response
 from playwright.async_api import BrowserContext, Page
 from tools.httpx_util import make_async_client
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
+from aggregate_search.pagination import allow_client_retry, check_search_http_status
 
 import config
 from base.base_crawler import AbstractApiClient
@@ -110,7 +111,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         headers['x-zse-96'] = sign_res["x-zse-96"]
         return headers
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), retry=retry_if_exception(allow_client_retry))
     async def request(self, method, url, **kwargs) -> Union[str, Any]:
         """
         Wrapper for httpx common request method with response handling
@@ -137,6 +138,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 response = await client.request(
                     method, url, timeout=self.timeout, **kwargs)
 
+        check_search_http_status(response.status_code)
         if response.status_code != 200:
             utils.logger.error(f"[ZhiHuClient.request] Requset Url: {url}, Request error: {response.text}")
             if response.status_code == 403:

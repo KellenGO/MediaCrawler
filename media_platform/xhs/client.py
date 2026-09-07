@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from urllib.parse import quote
 
 from playwright.async_api import BrowserContext, Page
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type, retry_if_exception
+from aggregate_search.pagination import allow_client_retry, check_search_http_status
 from tools.httpx_util import make_async_client
 
 import config
@@ -164,7 +165,7 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
     # 原语义保持不重试。其余网络/临时错误仍按原样重试 3 次。
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1),
            retry=retry_if_not_exception_type(
-               (NoteNotFoundError, XhsRateLimitError)))
+                (NoteNotFoundError, XhsRateLimitError)) & retry_if_exception(allow_client_retry))
     async def request(self, method, url, **kwargs) -> Union[str, Any]:
         """
         Wrapper for httpx common request method, processes request response
@@ -189,6 +190,8 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             # 旧行为：每个请求独立 client 生命周期。
             async with make_async_client(proxy=self.proxy) as client:
                 response = await client.request(method, url, timeout=self.timeout, **kwargs)
+
+        check_search_http_status(response.status_code)
 
         # Keep only safe response metadata for the hydration diagnostic log.
         self.last_response_status = response.status_code

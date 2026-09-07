@@ -136,7 +136,7 @@ class TestSearchJobRequest:
         req = SearchJobRequest(keyword="露营装备")
         assert req.keyword == "露营装备"
         assert req.platforms == PLATFORM_SLUGS
-        assert req.limit_per_platform == 10
+        assert req.limit_per_platform == 20
 
     def test_empty_keyword_rejected(self):
         with pytest.raises(Exception):  # pydantic validation error
@@ -150,7 +150,7 @@ class TestSearchJobRequest:
             SearchJobRequest(keyword="test", limit_per_platform=0)
 
         with pytest.raises(Exception):
-            SearchJobRequest(keyword="test", limit_per_platform=21)
+            SearchJobRequest(keyword="test", limit_per_platform=41)
 
     def test_specific_platforms(self):
         req = SearchJobRequest(keyword="test", platforms=["xhs", "zhihu"])
@@ -180,7 +180,7 @@ class TestSearchJobRequest:
         assert SearchJobRequest(
             keyword="k", platform_limits={"xhs": 20}).platform_limits == {"xhs": 20}
 
-    @pytest.mark.parametrize("bad", [0, 21, -1, 5.5, "5", True, None, [5], {"x": 1}])
+    @pytest.mark.parametrize("bad", [0, 41, -1, 5.5, "5", True, None, [5], {"x": 1}])
     def test_platform_limits_invalid_values_rejected(self, bad):
         with pytest.raises(Exception):
             SearchJobRequest(keyword="k", platform_limits={"xhs": bad})

@@ -153,7 +153,9 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         # HTTP 5xx / transient failures: exactly ONE bounded retry, then a
         # safe "temporarily unavailable" error — never unlimited retries,
         # never fast retry loops that bypass platform limits.
-        if response.status_code >= 500:
+        from aggregate_search.pagination import allow_client_retry, check_search_http_status
+        check_search_http_status(response.status_code)
+        if response.status_code >= 500 and allow_client_retry():
             utils.logger.warning(
                 f"[BilibiliClient.request] HTTP {response.status_code} for "
                 f"{url} (stage={stage}), retrying once after 1.5s")

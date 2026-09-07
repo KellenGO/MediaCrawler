@@ -198,6 +198,11 @@ class DouYinCrawler(AbstractCrawler):
             utils.logger.info("[DouYinCrawler.start] Douyin Crawler finished ...")
 
     async def search(self) -> None:
+        from aggregate_search.pagination import current_pagination
+        pagination = current_pagination.get()
+        if pagination is not None:
+            await pagination.run(self.dy_client)
+            return
         utils.logger.info("[DouYinCrawler.search] Begin search douyin keywords")
         dy_limit_count = 10  # douyin limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < dy_limit_count:

@@ -81,7 +81,7 @@ export function useSearchExperience() {
 
   // ── 全量搜索 / 历史回放（keyword/platforms 直接来自调用方参数） ──────
   const handleFullSearch = useCallback(
-    async (keyword: string, platforms: PlatformSlug[], bypassCache = false) => {
+    async (keyword: string, platforms: PlatformSlug[], bypassCache = false, continueFrom?: string) => {
       if (busy || taskInFlightRef.current) return;
       const seq = ++taskSeqRef.current;
       taskInFlightRef.current = true;
@@ -93,9 +93,10 @@ export function useSearchExperience() {
         const job = await base.startSearch(
           keyword,
           platforms,
-          10,
+          20,
           selectedPlatformLimits(limits, platforms),
-          bypassCache
+          bypassCache,
+          continueFrom
         );
         if (taskSeqRef.current !== seq) return; // 已发起更新的任务，本结果作废
         // 只有 POST 被后端接受后才写入身份与历史。
@@ -124,6 +125,10 @@ export function useSearchExperience() {
       const current = state.display.jobResponse;
       const keyword = current?.keyword;
       if (!keyword) return;
+      if (current.exploration) {
+        void handleFullSearch(keyword, [platform], true, current.job_id);
+        return;
+      }
       const seq = ++taskSeqRef.current;
       taskInFlightRef.current = true;
       userStartedRef.current = true;
@@ -134,7 +139,7 @@ export function useSearchExperience() {
         const job = await base.startSearch(
           keyword,
           [platform],
-          10,
+          20,
           selectedPlatformLimits(limits, [platform]),
           true
         );
@@ -148,7 +153,7 @@ export function useSearchExperience() {
         if (taskSeqRef.current === seq) taskInFlightRef.current = false;
       }
     },
-    [busy, base, state.display.jobResponse, limits]
+    [busy, base, state.display.jobResponse, limits, handleFullSearch]
   );
 
   // 用户明确点击"重新搜索"：整组绕过短缓存，获取平台新结果。
@@ -157,9 +162,17 @@ export function useSearchExperience() {
     if (!current?.keyword || busy || taskInFlightRef.current) return;
     void handleFullSearch(
       current.keyword,
-      Object.keys(current.platforms) as PlatformSlug[],
+      Object.keys(current.exploration?.platforms ?? current.platforms) as PlatformSlug[],
       true,
     );
+  }, [busy, handleFullSearch, state.display.jobResponse]);
+
+  const handleNextBatch = useCallback(() => {
+    const current = state.display.jobResponse;
+    if (!current?.exploration || busy) return;
+    const platforms = (Object.keys(current.exploration.platforms) as PlatformSlug[])
+      .filter((p) => current.exploration!.platforms[p]?.has_more);
+    if (platforms.length) void handleFullSearch(current.keyword, platforms, true, current.job_id);
   }, [busy, handleFullSearch, state.display.jobResponse]);
 
   // ── 任务观察：区分"用户发起"与"页面加载恢复" ────────────────────────
@@ -176,7 +189,7 @@ export function useSearchExperience() {
       recoveredOnceRef.current = true;
       dispatch({ type: "job_recovered", jobId: resp.job_id });
     }
-    if (TERMINAL_OVERALLS.has(resp.overall)) {
+    if (TERMINAL_OVERALLS.has(resp.overall) && resp.completed_at) {
       dispatch({ type: "job_terminal", job: resp });
     } else {
       dispatch({ type: "job_progress", job: resp });
@@ -260,6 +273,7 @@ export function useSearchExperience() {
     // 动作
     handleFullSearch,
     handleRefresh,
+    handleNextBatch,
     handleRetry,
     handleCancel,
     handleReset,

@@ -170,9 +170,9 @@ class SearchJobRequest(BaseModel):
         default_factory=lambda: PLATFORM_SLUGS.copy(),
         description="Platforms to search",
     )
-    limit_per_platform: int = Field(default=10, ge=1, le=20)
+    limit_per_platform: int = Field(default=20, ge=1, le=40)
     # Round 15: 按平台独立数量。优先于 limit_per_platform；缺失平台回退
-    # limit_per_platform（默认 10）。值必须是 1–20 的严格整数。
+    # limit_per_platform（默认 20）。值必须是 1–40 的严格整数。
     platform_limits: Optional[Dict[str, Any]] = Field(default=None)
 
     @field_validator("platform_limits")
@@ -186,9 +186,9 @@ class SearchJobRequest(BaseModel):
             if key not in PLATFORM_SLUGS:
                 raise ValueError(f"未知平台: {key}")
             if isinstance(val, bool) or not isinstance(val, int):
-                raise ValueError(f"{key} 的数量必须是 1–20 的整数")
-            if val < 1 or val > 20:
-                raise ValueError(f"{key} 的数量必须在 1–20 之间")
+                raise ValueError(f"{key} 的数量必须是 1–40 的整数")
+            if val < 1 or val > 40:
+                raise ValueError(f"{key} 的数量必须在 1–40 之间")
         return v
 
 
@@ -226,6 +226,8 @@ class WorkerRequest(BaseModel):
     fast_path: bool = False
     # Round 16: 用户主动重新搜索时绕过结果缓存（默认 False）。
     bypass_cache: bool = False
+    pagination: Optional[Dict[str, Any]] = Field(default=None, repr=False)
+    seen_ids: List[str] = Field(default_factory=list, max_length=100, repr=False)
 
     def __init__(self, **data):
         snap = data.get("session_snapshot")

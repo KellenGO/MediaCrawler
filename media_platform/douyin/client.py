@@ -158,6 +158,8 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         else:
             async with make_async_client(proxy=self.proxy) as client:
                 response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        from aggregate_search.pagination import check_search_http_status
+        check_search_http_status(response.status_code)
         try:
             if response.text == "" or response.text == "blocked":
                 utils.logger.error(f"request params incrr, response.text: {response.text}")

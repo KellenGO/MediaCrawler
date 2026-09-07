@@ -110,6 +110,7 @@ def _evict_if_full() -> None:
 class CacheHit:
     results: List[Dict[str, Any]]
     fetched_at: str
+    pagination: Optional[Dict[str, Any]] = None
 
 
 def lookup(keyword: str, platform: str, limit: int) -> Optional[CacheHit]:
@@ -125,7 +126,7 @@ def lookup(keyword: str, platform: str, limit: int) -> Optional[CacheHit]:
     # LRU：命中后移到队尾（重新插入）。
     _cache.pop(key, None)
     _cache[key] = entry
-    return CacheHit(deepcopy(entry["results"]), entry["fetched_at"])
+    return CacheHit(deepcopy(entry["results"]), entry["fetched_at"], deepcopy(entry.get("pagination")))
 
 
 def get(keyword: str, platform: str, limit: int) -> Optional[List[Dict[str, Any]]]:
@@ -136,7 +137,8 @@ def get(keyword: str, platform: str, limit: int) -> Optional[List[Dict[str, Any]
 
 def set(keyword: str, platform: str, limit: int,
         results: List[Any], *, owner: Optional[str] = None,
-        fetched_at: Optional[str] = None, started_at: Optional[float] = None) -> None:
+        fetched_at: Optional[str] = None, started_at: Optional[float] = None,
+        pagination: Optional[Dict[str, Any]] = None) -> None:
     """写入缓存（调用方保证只对终态 succeeded/empty 调用）。"""
     if _CACHE_TTL_SECONDS <= 0:
         return
@@ -154,6 +156,7 @@ def set(keyword: str, platform: str, limit: int,
         "results": _serialize_results(results), "ts": now, "owner": owner,
         "started_at": started_at,
         "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
+        "pagination": deepcopy(pagination),
     }
     _evict_if_full()
 

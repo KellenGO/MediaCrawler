@@ -75,6 +75,7 @@ async def run_provider_chain(
     *,
     trace: Optional[ProviderChainTrace] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    allow_fallback: Optional[Callable[[Exception], bool]] = None,
 ) -> ProviderChainResult:
     """Run eligible providers serially with conservative fallback semantics."""
 
@@ -92,12 +93,13 @@ async def run_provider_chain(
         except asyncio.CancelledError:
             await _cleanup(provider)
             raise
-        except Exception:
+        except Exception as exc:
             emitted_count = max(0, int(provider.emitted_count()))
             await _cleanup(provider)
             # A partially emitted provider owns the result stream. Re-running
             # the query through another provider could duplicate or reorder it.
-            if emitted_count > 0 or index >= len(eligible) - 1:
+            if (emitted_count > 0 or index >= len(eligible) - 1
+                    or (allow_fallback is not None and not allow_fallback(exc))):
                 raise
             trace.fallback_active = True
             trace.fallback_reason = provider.fallback_reason or "provider_failed"

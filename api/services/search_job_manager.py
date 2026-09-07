@@ -37,6 +37,8 @@ from .accounts import (
 from . import result_cache
 from .result_hydration import ResultHydrator
 from .search_metrics import PlatformCooldowns, SearchMetrics
+from .search_exploration import Exploration
+from aggregate_search.pagination import PageState
 
 WORKER_TIMEOUT_SECONDS = 100
 GRACE_PERIOD_SECONDS = 5.0
@@ -99,6 +101,7 @@ class PlatformWorkerSupervisor:
             *_worker_command("--resident"),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
+            limit=2 * 1024 * 1024,
         )
         worker = _ResidentWorker(platform=platform, proc=proc)
         worker.stderr_task = asyncio.create_task(
@@ -377,6 +380,27 @@ class SearchJobManager:
                 platform_limits=req.platform_limits,
                 bypass_cache=req.bypass_cache,
             )
+            if req.continue_from:
+                previous = self._active_job
+                if (previous is None or previous.job_id != req.continue_from
+                        or previous.keyword != job.keyword or previous.exploration is None):
+                    raise InvalidPlatformsError("上一轮已失效，请从当前搜索继续或重新搜索")
+                session = previous.exploration
+                if any(p not in session.platforms for p in platforms):
+                    raise InvalidPlatformsError("换批不能新增平台，请重新搜索")
+                if not any(session.more(p) for p in platforms):
+                    raise InvalidPlatformsError("当前主题没有更多可获取内容，或已达到累计上限")
+                job.exploration = session
+                job.continuation = True
+                job.bypass_cache = True
+                for p in platforms:
+                    if session.generations[p] != job.account_generations[p]:
+                        raise InvalidPlatformsError("账号状态已变化，请重新搜索后继续")
+                    job.page_states[p] = session.states[p].model_copy(deep=True)
+                    job.prior_ids[p] = [r.content_id for r in session.results[p]]
+                    job.platform_limits[p] = min(job.limit_for(p), session.remaining(p))
+            else:
+                job.exploration = Exploration(job)
             self._active_job = job
             self._recent_job = job
 
@@ -412,6 +436,8 @@ class SearchJobManager:
         # reused even if another platform failed. Explicit refreshes write too.
         self._cache_job_results(job)
         self.metrics.record(job)
+        if job.exploration:
+            job.exploration.commit(job)
 
         # Hydration is intentionally detached from the original search task:
         # overall becomes terminal immediately, while GET /jobs keeps polling
@@ -423,6 +449,8 @@ class SearchJobManager:
                 self._run_hydration(job), name=f"hydrate-{job.job_id}")
 
     def _cache_job_results(self, job: "_ActiveJob", *, hydration_update: bool = False) -> None:
+        if job.continuation:
+            return
         if job._compute_overall() not in ("completed", "partial"):
             return
         for platform in job.platforms:
@@ -442,6 +470,7 @@ class SearchJobManager:
                     job.keyword, platform, job.limit_for(platform), results,
                     owner=job.job_id, fetched_at=info.fetched_at,
                     started_at=job._start_ts,
+                    pagination=job.page_states[platform].model_dump() if platform in job.page_checkpoints else None,
                 )
 
     async def _run_hydration(self, job: "_ActiveJob") -> None:
@@ -472,6 +501,9 @@ class SearchJobManager:
         只跳过读取。未命中 → 走常驻/一次性 worker。
         """
         limit = job.limit_for(platform)
+        if job.continuation and not job.exploration.more(platform):
+            job.set_platform_status(platform, "empty")
+            return
         if not job.bypass_cache:
             cached = result_cache.lookup(job.keyword, platform, limit)
             if cached is not None:
@@ -486,6 +518,9 @@ class SearchJobManager:
                 job.platforms_state[platform].cache_hit = True
                 job.platforms_state[platform].fetched_at = cached.fetched_at
                 job.platforms_state[platform].cooldown_until = self.cooldowns.until(platform)
+                if cached.pagination is not None:
+                    job.page_states[platform] = PageState.model_validate(cached.pagination)
+                    job.page_checkpoints.add(platform)
                 return
         info = job.platforms_state[platform]
         if self.cooldowns.remaining(platform):
@@ -509,6 +544,8 @@ class SearchJobManager:
             session_snapshot=get_session_snapshot(platform),
             fast_path=True,
             bypass_cache=job.bypass_cache,
+            pagination=job.page_states[platform].model_dump(),
+            seen_ids=job.prior_ids[platform],
         )
         return request.model_dump_json().encode("utf-8") + b"\n"
 
@@ -634,6 +671,7 @@ class SearchJobManager:
                 *_worker_command(),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
+                limit=2 * 1024 * 1024,
             )
             job.mark_spawn_end(platform)
             job.procs.append(proc)
@@ -902,6 +940,8 @@ class SearchJobManager:
                         job.set_platform_status(p, "cancelled", error_summary="已取消")
                 job.finalize()
                 self.metrics.record(job)
+                if job.exploration:
+                    job.exploration.commit(job)
                 job.cancel_done.set()
         return True
 
@@ -1052,6 +1092,12 @@ class _ActiveJob:
         self.hydration_stop_lock = asyncio.Lock()
         self.worker_platforms: set[str] = set()
         self.statistics_recorded = False
+        self.exploration = None
+        self.exploration_info = None
+        self.continuation = False
+        self.page_states = {p: PageState() for p in platforms}
+        self.page_checkpoints = set()
+        self.prior_ids = {p: [] for p in platforms}
         self._final_results: Optional[List[UnifiedSearchResult]] = None
 
     def _ms_since(self, start_ts: float) -> int:
@@ -1067,6 +1113,18 @@ class _ActiveJob:
         info = self.timings.get(platform)
         if info is None or not isinstance(metrics, dict):
             return
+        if isinstance(metrics.get("pagination"), dict):
+            try:
+                state = PageState.model_validate(metrics["pagination"])
+                if all(r.platform == platform for r in state.pending):
+                    self.page_states[platform] = state
+                    self.page_checkpoints.add(platform)
+            except ValueError:
+                pass
+        for key in ("page_requests", "duplicate_count"):
+            value = metrics.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1000:
+                setattr(info, key, value)
         for key in self._METRIC_NUMERIC_FIELDS:
             value = metrics.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -1143,6 +1201,8 @@ class _ActiveJob:
             info.error_summary = error_summary
 
     def add_result(self, platform: str, result: UnifiedSearchResult) -> None:
+        if result.content_id in self.prior_ids.get(platform, []):
+            return
         key = make_dedup_key(platform, result.content_id)
         if key in self._seen_keys:
             return
@@ -1188,12 +1248,21 @@ class _ActiveJob:
     def response_results(self) -> List[UnifiedSearchResult]:
         if self._final_results is not None:
             return self._final_results
+        if self.continuation and self.exploration:
+            return self.exploration.preview(self)
         return interleave_results(self.platform_results, platform_order=self.platforms)
 
     def update_snippet(self, result: UnifiedSearchResult, snippet: str) -> None:
         """Update text in place without rebuilding/deduplicating the order."""
         result.snippet = snippet
-        for representative in self._final_results or []:
+        copies = list(self._final_results or []) + self.platform_results.get(result.platform, [])
+        if self.exploration:
+            copies += self.exploration.results.get(result.platform, [])
+            for batch in self.exploration.batches:
+                copies += batch["results"]
+        for representative in copies:
+            if representative.platform == result.platform and representative.content_id == result.content_id:
+                representative.snippet = snippet
             for source in representative.grouped_sources or []:
                 if source.platform == result.platform and source.content_id == result.content_id:
                     source.snippet = snippet
@@ -1242,7 +1311,7 @@ class _ActiveJob:
             keyword=self.keyword, created_at=self.created_at,
             completed_at=self.completed_at, total_ms=job_total,
             platforms=pdict, results=all_results,
-            hydration_status=self.hydration_status)
+            hydration_status=self.hydration_status, exploration=self.exploration_info)
 
 
 class JobConflictError(Exception):

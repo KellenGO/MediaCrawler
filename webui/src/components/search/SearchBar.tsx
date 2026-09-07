@@ -228,7 +228,7 @@ export function SearchBar({
             </button>
           );
         })}
-        <span className="ml-auto hidden sm:inline text-[12px] text-cyber-text-muted pr-1.5">按平台设置 · 单个平台最多 20 条</span>
+        <span className="ml-auto hidden sm:inline text-[12px] text-cyber-text-muted pr-1.5">按平台设置 · 单个平台每轮最多 40 条</span>
       </div>
     </form>
   );

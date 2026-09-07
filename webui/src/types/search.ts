@@ -45,6 +45,8 @@ export interface UnifiedSearchResult {
 }
 
 export interface PlatformTimingInfo {
+  page_requests?: number;
+  duplicate_count?: number;
   /** worker 子进程创建耗时（毫秒） */
   spawn_ms: number | null;
   /** 从 job 开始到该平台首条合法结果（毫秒） */
@@ -72,6 +74,7 @@ export interface PlatformStatusInfo {
 }
 
 export interface SearchJobResponse {
+  exploration?: SearchExploration | null;
   job_id: string;
   overall: OverallStatus;
   keyword: string;
@@ -84,11 +87,33 @@ export interface SearchJobResponse {
   hydration_status?: HydrationStatus;
 }
 
+export interface SearchBatch {
+  number: number;
+  job_id: string;
+  overall: OverallStatus;
+  completed_at: string | null;
+  platforms: Record<PlatformSlug, PlatformStatusInfo>;
+  results: UnifiedSearchResult[];
+}
+
+export interface SearchExploration {
+  id: string;
+  round: number;
+  max_per_platform: number;
+  new_sources: number;
+  new_contents: number;
+  page_requests: number;
+  duplicates: number;
+  platforms: Partial<Record<PlatformSlug, { collected: number; has_more: boolean }>>;
+  previous_batches: SearchBatch[];
+}
+
 export interface SearchJobRequest {
+  continue_from?: string;
   keyword: string;
   platforms?: PlatformSlug[];
   limit_per_platform?: number;
-  /** Round 15: 按平台独立数量（1–20 整数）；缺失平台回退 limit_per_platform。 */
+  /** 按平台独立数量（1–40 整数）；缺失平台回退 limit_per_platform。 */
   platform_limits?: Partial<Record<PlatformSlug, number>>;
   /** 普通搜索允许命中短缓存；显式重新搜索时设为 true。 */
   bypass_cache?: boolean;

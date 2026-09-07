@@ -1099,7 +1099,7 @@ export function applySearchTransition(state: ExperienceState, event: ExperienceE
           ...state,
           display: {
             ...d,
-            jobResponse: hasPartialResults ? job : d.jobResponse,
+            jobResponse: hasPartialResults || job.exploration ? job : d.jobResponse,
             liveResponse: null,
             refreshing: false,
             retryingPlatform: null,

@@ -130,6 +130,11 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
     async def search(self) -> None:
         """Search notes through the lightweight list API used by aggregation."""
+        from aggregate_search.pagination import current_pagination
+        pagination = current_pagination.get()
+        if pagination is not None:
+            await pagination.run(self.xhs_client)
+            return
         utils.logger.info("[XiaoHongShuCrawler.search] Begin search Xiaohongshu keywords")
         xhs_limit_count = 20  # Xiaohongshu limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < xhs_limit_count:

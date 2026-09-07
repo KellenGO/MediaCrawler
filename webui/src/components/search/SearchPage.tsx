@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bookmark, RotateCcw, Loader2, UserCog, RefreshCw } from "lucide-react";
 import { SearchBar } from "./SearchBar";
 import { PlatformStatus } from "./PlatformStatus";
@@ -28,7 +28,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
   // Round 15: 每个平台独立搜索数量（展示用；搜索请求由 useSearchExperience 读取）。
   const { limits } = usePlatformLimits();
   const {
-    displayJobResponse,
+    displayJobResponse: latestJobResponse,
     showingStaleSnapshot,
     liveHint,
     refreshing,
@@ -45,6 +45,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
     platformPref,
     handleFullSearch,
     handleRefresh,
+    handleNextBatch,
     handleRetry,
     handleCancel,
     handleReset,
@@ -53,6 +54,14 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
     pollError,
     busy,
   } = useSearchExperience();
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  useEffect(() => setSelectedRound(null), [latestJobResponse?.job_id]);
+  const exploration = latestJobResponse?.exploration;
+  const previousBatch = exploration?.previous_batches.find((batch) => batch.number === selectedRound);
+  const displayJobResponse = previousBatch && latestJobResponse
+    ? { ...latestJobResponse, ...previousBatch, hydration_status: "completed" as const }
+    : latestJobResponse;
+  const hasMore = Object.values(exploration?.platforms ?? {}).some((info) => info.has_more);
   const fetchedAt = useMemo(() => Object.fromEntries(Object.entries(displayJobResponse?.platforms || {})
     .map(([platform, info]) => [platform, info.fetched_at ?? null])), [displayJobResponse]);
 
@@ -183,7 +192,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         response={displayJobResponse ?? undefined}
         onRetry={handleRetry}
         retryingPlatform={retryingPlatform}
-        retryDisabled={busy}
+        retryDisabled={busy || !!previousBatch}
       />
 
       {/* Cancelling */}
@@ -283,7 +292,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
       )}
 
       {/* Results（全宽布局，无右侧栏） */}
-      {displayJobResponse && displayJobResponse.overall !== "failed" && (
+      {displayJobResponse && (displayJobResponse.overall !== "failed" || exploration) && (
         <div className={`w-full mt-4 transition-opacity ${refreshing || showingStaleSnapshot ? "opacity-60" : "opacity-100"}`}>
           {(liveHint || refreshing) && (
             <div className="mb-3 flex items-center gap-2 px-3.5 py-2 rounded-xl border border-brand/40 bg-brand-soft text-brand-strong text-xs w-fit">
@@ -292,7 +301,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
             <p className="text-xs text-cyber-text-muted">
               搜索: <span className="text-cyber-text-primary">{displayJobResponse.keyword}</span>
               {isTerminal && displayJobResponse.completed_at && (
@@ -300,19 +309,37 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
               )}
               {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
             </p>
-            {isTerminal && (
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={busy}
-                className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-cyber-border-subtle text-xs text-cyber-text-secondary hover:text-brand-strong hover:border-brand/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="重新搜索"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                重新搜索
-              </button>
-            )}
+            {isTerminal && <div className="flex items-center gap-2">
+              {exploration && <button type="button" onClick={handleNextBatch}
+                disabled={busy || !hasMore} className={TOOL_BUTTON}>
+                <RefreshCw className="w-3.5 h-3.5" />换一批
+              </button>}
+              <details key={latestJobResponse?.job_id} className="relative text-xs">
+                <summary className={`${TOOL_BUTTON} cursor-pointer`}>更多</summary>
+                <div className="absolute right-0 top-full z-20 mt-2 w-52 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary p-3 shadow-lg space-y-3">
+                  <button type="button" onClick={handleRefresh} disabled={busy} className={TOOL_BUTTON}
+                    aria-label="刷新结果">刷新结果</button>
+                  <p className="text-cyber-text-muted">从头搜索，开始新的轮次记录。</p>
+                  {exploration && <p className="text-cyber-text-muted">本轮列表请求 {exploration.page_requests} 次，过滤重复来源 {exploration.duplicates} 条。每个主题最多 20 轮。</p>}
+                  {exploration && <label className="block text-cyber-text-secondary">查看轮次
+                    <select aria-label="查看轮次" disabled={busy} value={selectedRound ?? exploration.round}
+                      onChange={(event) => setSelectedRound(Number(event.target.value) === exploration.round ? null : Number(event.target.value))}
+                      className="mt-1 w-full rounded-lg border border-cyber-border-subtle bg-cyber-bg-primary p-2">
+                      {exploration.previous_batches.map((batch) => <option key={batch.number} value={batch.number}>第 {batch.number} 批（{batch.results.length} 条）</option>)}
+                      <option value={exploration.round}>第 {exploration.round} 批（当前）</option>
+                    </select>
+                  </label>}
+                </div>
+              </details>
+            </div>}
           </div>
+          {exploration && <div className="mb-3 text-xs text-cyber-text-muted space-y-1" aria-live="polite">
+            <p>第 {previousBatch?.number ?? exploration.round} 批 · {previousBatch ? `${previousBatch.results.length} 条内容` : `新增 ${exploration.new_contents} 条内容`}
+              {Object.entries(exploration.platforms).map(([p, info]) => <span className="ml-3" key={p}>{PLATFORM_LABELS[p as PlatformSlug]}累计 {info.collected}/{exploration.max_per_platform}</span>)}
+            </p>
+            {!hasMore && <p>已到本次探索上限（最多 20 轮）或平台暂无更多结果，可在“更多”中刷新结果。</p>}
+            {!previousBatch && exploration.new_contents === 0 && hasMore && <p>本轮没有新的独立内容；重复内容已过滤，新平台版本已补充到之前的卡片。可回看或稍后再换一批。</p>}
+          </div>}
 
           {/* 单平台重试失败提示（保留旧结果，仅显示安全摘要） */}
           {Object.entries(retryErrors).map(([platform, message]) => (

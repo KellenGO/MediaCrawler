@@ -159,6 +159,8 @@ async def _run_standard_search(
     job_id: str, platform: str, keyword: str, limit: int,
     session_snapshot: Optional[Dict[str, str]] = None,
 ) -> None:
+    from aggregate_search.pagination import current_pagination
+    pagination = current_pagination.get()
     core_platform = agg_to_core_platform(platform)
     adapter = _ADAPTERS[platform]
     total_emitted = 0
@@ -255,7 +257,7 @@ async def _run_standard_search(
                 handle_results, session_snapshot or {}, _phase_metric,
                 fast_crawler_holder,
             )
-            return total_emitted
+            return pagination.emitted if pagination else total_emitted
 
         async def cleanup_fast_provider() -> None:
             crawler = fast_crawler_holder[0]
@@ -278,7 +280,7 @@ async def _run_standard_search(
             )
             emit_status(job_id, platform, "running")
             await asyncio.wait_for(crawler.start(), timeout=WORKER_TIMEOUT_SECONDS)
-            return total_emitted
+            return pagination.emitted if pagination else total_emitted
 
         async def cleanup_browser_provider() -> None:
             crawler = browser_crawler_holder[0]
@@ -291,7 +293,7 @@ async def _run_standard_search(
                 id="session_api",
                 run=run_fast_provider,
                 cleanup=cleanup_fast_provider,
-                emitted_count=lambda: total_emitted,
+                emitted_count=lambda: pagination.emitted if pagination else total_emitted,
                 fallback_reason="fast_path_failed",
             ))
         elif core_platform == "bili":
@@ -299,7 +301,7 @@ async def _run_standard_search(
                 id="light_api",
                 run=run_fast_provider,
                 cleanup=cleanup_fast_provider,
-                emitted_count=lambda: total_emitted,
+                emitted_count=lambda: pagination.emitted if pagination else total_emitted,
                 fallback_reason="fast_path_failed",
             ))
 
@@ -307,12 +309,15 @@ async def _run_standard_search(
             id="public_search" if core_platform == "dy" else "browser",
             run=run_browser_provider,
             cleanup=cleanup_browser_provider,
-            emitted_count=lambda: total_emitted,
+            emitted_count=lambda: pagination.emitted if pagination else total_emitted,
         ))
 
         trace = ProviderChainTrace()
         try:
-            chain_result = await run_provider_chain(providers, trace=trace)
+            chain_result = await run_provider_chain(providers, trace=trace,
+                allow_fallback=lambda exc: current_pagination.get() is None or (
+                    current_pagination.get().requests < current_pagination.get().MAX_REQUESTS
+                    and _classify_error(exc) != "rate_limited"))
             emit_provider_metrics(trace)
             if chain_result.emitted_count == 0:
                 emit_status(job_id, platform, "empty",
@@ -404,6 +409,8 @@ async def _run_zhihu_search(
         BrowserUnavailableError, resolve_playwright_browser,
     )
 
+    from aggregate_search.pagination import current_pagination
+    pagination_run = current_pagination.get()
     core_platform = agg_to_core_platform(platform)
     adapter = _ADAPTERS["zhihu"]
     total_emitted = 0
@@ -484,6 +491,13 @@ async def _run_zhihu_search(
             cookie_dict=dict(session_snapshot),
             reuse_http_client=True,
         )
+        from aggregate_search.pagination import current_pagination
+        pagination = current_pagination.get()
+        if pagination is not None:
+            try:
+                return await pagination.run(fp_client)
+            finally:
+                await fp_client.aclose()
         search_res = await fp_client.get("/api/v4/search_v3", {
             "gk_version": "gz-gaokao",
             "t": "general",
@@ -574,6 +588,13 @@ async def _run_zhihu_search(
                 emit_metrics(job_id, platform, {
                     "preflight_ms": int((time.perf_counter() - _zh_phase) * 1000)})
 
+                from aggregate_search.pagination import current_pagination
+                pagination = current_pagination.get()
+                if pagination is not None:
+                    try:
+                        return await pagination.run(zhihu_client)
+                    finally:
+                        await zhihu_client.aclose()
                 page_size = min(limit + 5, 20)
                 try:
                     search_res = await zhihu_client.get("/api/v4/search_v3", {
@@ -613,14 +634,17 @@ async def _run_zhihu_search(
             id="session_api",
             run=run_fast_provider,
             eligible=bool(session_snapshot and _snapshot_has_dc0(session_snapshot)),
-            emitted_count=lambda: total_emitted,
+            emitted_count=lambda: pagination_run.emitted if pagination_run else total_emitted,
             fallback_reason="fast_path_failed",
         ), SearchProvider(
             id="browser",
             run=run_browser_provider,
-            emitted_count=lambda: total_emitted,
+            emitted_count=lambda: pagination_run.emitted if pagination_run else total_emitted,
         )]
-        chain_result = await run_provider_chain(providers, trace=trace)
+        chain_result = await run_provider_chain(providers, trace=trace,
+                allow_fallback=lambda exc: current_pagination.get() is None or (
+                    current_pagination.get().requests < current_pagination.get().MAX_REQUESTS
+                    and _classify_error(exc) != "rate_limited"))
         emit_provider_metrics(trace)
         if chain_result.emitted_count == 0:
             emit_status(job_id, platform, "empty", {"message": "No results found."})
@@ -863,7 +887,7 @@ async def _get_browser_cookies(browser_context, urls: List[str]):
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
 
-async def run_worker(
+async def _dispatch_worker(
     job_id: str, mode: str, platform: str, keyword: str, limit: int,
     session_snapshot: Optional[Dict[str, str]] = None,
     fast_path: bool = False,
@@ -884,6 +908,20 @@ async def run_worker(
         await _run_standard_search(
             job_id, platform, keyword, limit,
             session_snapshot=session_snapshot if fast_path else None)
+
+
+async def run_worker(job_id, mode, platform, keyword, limit, session_snapshot=None,
+                     fast_path=False, pagination=None, seen_ids=None):
+    from aggregate_search.pagination import PageState, PaginationRun, current_pagination
+    run = None if pagination is None else PaginationRun(
+        platform, keyword, limit, PageState.model_validate(pagination), seen_ids or [],
+        lambda result: emit_result(job_id, platform, result),
+        lambda metrics: emit_metrics(job_id, platform, metrics))
+    token = current_pagination.set(run)
+    try:
+        await _dispatch_worker(job_id, mode, platform, keyword, limit, session_snapshot, fast_path)
+    finally:
+        current_pagination.reset(token)
 
 
 class _WorkerExit(Exception):
@@ -946,6 +984,8 @@ def main() -> None:
                         limit=request.limit,
                         session_snapshot=request.session_snapshot,
                         fast_path=request.fast_path,
+                        pagination=request.pagination,
+                        seen_ids=request.seen_ids,
                     )
                 )
             except _WorkerExit:

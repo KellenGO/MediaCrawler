@@ -143,6 +143,11 @@ class BilibiliCrawler(AbstractCrawler):
         search bilibili video with keywords in normal mode
         :return:
         """
+        from aggregate_search.pagination import current_pagination
+        pagination = current_pagination.get()
+        if pagination is not None:
+            await pagination.run(self.bili_client)
+            return
         utils.logger.info("[BilibiliCrawler.search_by_keywords] Begin search bilibli keywords")
         bili_limit_count = 20  # bilibili limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < bili_limit_count:

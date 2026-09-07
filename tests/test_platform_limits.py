@@ -80,7 +80,7 @@ class TestSearchJobRequestSchema:
         assert SearchJobRequestSchema(
             keyword="k", platform_limits={"xhs": 20}).platform_limits == {"xhs": 20}
 
-    @pytest.mark.parametrize("bad", [0, 21, -1, 5.5, "5", True, None, [], {"x": 1}])
+    @pytest.mark.parametrize("bad", [0, 41, -1, 5.5, "5", True, None, [], {"x": 1}])
     def test_invalid_values_return_422(self, bad):
         with pytest.raises(ValidationError):
             SearchJobRequestSchema(keyword="k", platform_limits={"xhs": bad})

@@ -148,7 +148,7 @@ export function useAggregateSearch() {
       const data = query.state.data;
       if (!data) return 800;
       const terminal = ["completed", "partial", "failed", "cancelled"];
-      if (terminal.includes(data.overall) && data.hydration_status !== "running") return false;
+      if (terminal.includes(data.overall) && data.completed_at && data.hydration_status !== "running") return false;
       return 800;
     },
     staleTime: 500,
@@ -162,14 +162,15 @@ export function useAggregateSearch() {
 
   // 返回 POST 的结果 Promise：调用方 await 成功后才写入历史（Round 12.1）。
   // Round 15: 支持按平台独立数量 platform_limits（可选）；缺失时后端回退
-  // limit_per_platform（默认 10），旧调用方不受影响。
+  // limit_per_platform（默认 20），旧调用方不受影响。
   const startSearch = useCallback(
     (
       keyword: string,
       platforms: PlatformSlug[],
       limitPerPlatform?: number,
       platformLimits?: Partial<Record<PlatformSlug, number>>,
-      bypassCache = false
+      bypassCache = false,
+      continueFrom?: string
     ): Promise<SearchJobResponse> => {
       generationRef.current += 1; // invalidate in-flight recovery responses
       setJobId(null);
@@ -181,11 +182,12 @@ export function useAggregateSearch() {
       const req: SearchJobRequest = {
         keyword,
         platforms,
-        limit_per_platform: limitPerPlatform ?? 10,
+        limit_per_platform: limitPerPlatform ?? 20,
         ...(platformLimits && Object.keys(platformLimits).length > 0
           ? { platform_limits: platformLimits }
           : {}),
         bypass_cache: bypassCache,
+        ...(continueFrom ? { continue_from: continueFrom } : {}),
       };
       return createMutation.mutateAsync(req);
     },
