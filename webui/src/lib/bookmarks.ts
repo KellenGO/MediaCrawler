@@ -4,6 +4,7 @@ import { resultKey, resultSources, safeContentUrl } from "./resultTools.js";
 export const BOOKMARKS_KEY = "aggregate_search_bookmarks_v1";
 export const MAX_BOOKMARKS = 500;
 export const MAX_NOTE_LENGTH = 1000;
+export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
 
 export interface Bookmark {
   result: UnifiedSearchResult;
@@ -47,6 +48,11 @@ function publicResult(value: unknown): UnifiedSearchResult {
 export function readBookmarks(storage: BookmarkStorage): Bookmark[] {
   const raw = storage.getItem(BOOKMARKS_KEY);
   if (raw === null) return [];
+  return parseBookmarkBackup(raw);
+}
+
+export function parseBookmarkBackup(raw: string): Bookmark[] {
+  if (new TextEncoder().encode(raw).length > MAX_BACKUP_BYTES) throw new Error("收藏备份不能超过 10 MB");
   const data: unknown = JSON.parse(raw);
   if (!isRecord(data) || data.version !== 1 || !Array.isArray(data.items) || data.items.length > MAX_BOOKMARKS) {
     throw new Error("收藏数据无法读取，未覆盖原数据");
@@ -62,6 +68,18 @@ export function readBookmarks(storage: BookmarkStorage): Bookmark[] {
     seen.add(resultKey(result));
     return { result, savedAt: item.savedAt, fetchedAt: item.fetchedAt as string | null, note: item.note };
   });
+}
+
+export function bookmarkBackup(items: Bookmark[]): string {
+  const raw = JSON.stringify({ version: 1, items });
+  return JSON.stringify({ version: 1, items: parseBookmarkBackup(raw) });
+}
+
+export function mergeBookmarkBackup(items: Bookmark[], incoming: Bookmark[]): Bookmark[] {
+  const keys = new Set(items.map((item) => resultKey(item.result)));
+  const additions = incoming.filter((item) => !keys.has(resultKey(item.result)));
+  if (items.length + additions.length > MAX_BOOKMARKS) throw new Error(`导入后超过 ${MAX_BOOKMARKS} 条，未修改现有收藏`);
+  return [...additions, ...items];
 }
 
 export function writeBookmarks(storage: BookmarkStorage, items: Bookmark[]): void {

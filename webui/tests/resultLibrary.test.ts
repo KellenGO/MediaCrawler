@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { addBookmarks, BOOKMARKS_KEY, MAX_BOOKMARKS, readBookmarks, setBookmarkNote, writeBookmarks, type BookmarkStorage } from "../src/lib/bookmarks.js";
 import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, highlightSegments, matchesFilters, resultKey, resultLinks, resultsCsv, resultsMarkdown, safeContentUrl } from "../src/lib/resultTools.js";
 import type { UnifiedSearchResult } from "../src/types/search.js";
+import { bookmarkBackup, mergeBookmarkBackup, parseBookmarkBackup, MAX_BACKUP_BYTES } from "../src/lib/bookmarks.js";
 
 const NOW = "2026-09-06T12:00:00Z";
 const nowMs = Date.parse(NOW);
@@ -22,6 +23,34 @@ class Storage implements BookmarkStorage {
   setItem(key: string, value: string): void { assert.equal(key, BOOKMARKS_KEY); this.value = value; }
 }
 const metadata = () => ({ fetchedAt: NOW, savedAt: null, note: "" });
+
+test("JSON 备份可恢复快照、备注和时间，重复导入不覆盖本地修改", () => {
+  const saved = setBookmarkNote(addBookmarks([], [group()], NOW), "xhs|note", "原备注");
+  const incoming = parseBookmarkBackup(bookmarkBackup(saved));
+  assert.deepEqual(incoming, saved);
+  const local = setBookmarkNote([saved[0]], "xhs|note", "本地新备注");
+  const merged = mergeBookmarkBackup(local, incoming);
+  assert.equal(merged.length, 2);
+  assert.equal(merged.find((item) => resultKey(item.result) === "xhs|note")!.note, "本地新备注");
+  assert.deepEqual(mergeBookmarkBackup(merged, incoming), merged);
+  assert.deepEqual(parseBookmarkBackup(bookmarkBackup([])), []);
+});
+
+test("备份拒绝损坏、未知版本、危险链接、重复条目和超大文件", () => {
+  const items = addBookmarks([], [result("a")], NOW);
+  for (const raw of ["{broken", '{"version":2,"items":[]}',
+    JSON.stringify({ version: 1, items: [...items, ...items] }),
+    JSON.stringify({ version: 1, items: [{ ...items[0], result: result("a", { url: "javascript:alert(1)" }) }] }),
+    " ".repeat(MAX_BACKUP_BYTES + 1)]) assert.throws(() => parseBookmarkBackup(raw));
+});
+
+test("合并超出容量整批失败，现有收藏保持原样", () => {
+  const items = addBookmarks([], Array.from({ length: MAX_BOOKMARKS }, (_, i) => result(String(i))), NOW);
+  const before = JSON.stringify(items);
+  assert.throws(() => mergeBookmarkBackup(items, addBookmarks([], [result("new")], NOW)));
+  assert.equal(JSON.stringify(items), before);
+  assert.deepEqual(mergeBookmarkBackup(items, [items[0]]), items);
+});
 
 test("时间筛选包含边界，排除范围外、未来和未知日期", () => {
   const filters = { ...DEFAULT_FILTERS, days: 7 as const };

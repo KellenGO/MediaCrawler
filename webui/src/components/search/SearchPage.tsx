@@ -11,6 +11,7 @@ import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { TOOL_BUTTON } from "./ResultTools";
 import { SearchStatistics } from "./SearchStatistics";
+import { BookmarkBackup } from "./BookmarkBackup";
 
 interface SearchPageProps {
   onNavigateAccounts?: () => void;
@@ -182,6 +183,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         <section id="saved-results" aria-label="本地收藏" className="mt-5">
           <h2 className="text-base font-semibold text-cyber-text-primary">本地收藏</h2>
           <p className="mt-1 text-xs text-cyber-text-muted">收藏和备注保存在当前浏览器中，重启后仍可查看。更换浏览器、访问地址或清除网站数据前，请先导出备份。</p>
+          <BookmarkBackup library={library} />
           <ResultTabs results={savedResults} overall="completed" platforms={["xhs", "douyin", "bilibili", "zhihu"]}
             library={library} savedView jobId="bookmarks" />
         </section>

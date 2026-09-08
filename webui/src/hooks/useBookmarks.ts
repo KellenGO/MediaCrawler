@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
-import { addBookmarks, BOOKMARKS_KEY, readBookmarks, setBookmarkNote, writeBookmarks, type Bookmark } from "@/lib/bookmarks";
+import { addBookmarks, BOOKMARKS_KEY, mergeBookmarkBackup, parseBookmarkBackup, readBookmarks, setBookmarkNote, writeBookmarks, type Bookmark } from "@/lib/bookmarks";
 import { resultKey, resultSources } from "@/lib/resultTools";
 
 function load(): { items: Bookmark[]; error: string | null } {
@@ -46,7 +46,17 @@ export function useBookmarks() {
   }, [update]);
 
   const saveNote = useCallback((key: string, note: string) => update((items) => setBookmarkNote(items, key, note)), [update]);
-  return { ...state, toggle, saveNote };
+  const importBackup = useCallback((raw: string) => {
+    let added = 0;
+    const saved = update((items) => {
+      const next = mergeBookmarkBackup(items, parseBookmarkBackup(raw));
+      added = next.length - items.length;
+      return next;
+    });
+    if (saved) toast.success(`已导入 ${added} 条收藏，重复内容保留现有快照和备注`);
+    return saved;
+  }, [update]);
+  return { ...state, toggle, saveNote, importBackup };
 }
 
 export type BookmarkLibrary = ReturnType<typeof useBookmarks>;
