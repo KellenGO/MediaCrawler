@@ -355,6 +355,64 @@ async def _run_standard_search(
 
 # ── Fast path (no-browser) ──────────────────────────────────────────────
 
+async def _run_favorites(job_id: str, platform: str, limit: int) -> None:
+    """Read a bounded slice of a logged-in account's remote favourites."""
+    from main import CrawlerFactory
+
+    core_platform = agg_to_core_platform(platform)
+    adapter = _ADAPTERS[platform]
+    pending: Dict[str, Any] = {}
+
+    def handle_results(native_batch: List[Any]) -> None:
+        rows = [item.model_dump() if hasattr(item, "model_dump") else item
+                for item in native_batch if isinstance(item, dict) or hasattr(item, "model_dump")]
+        for result in adapter.adapt(rows):
+            key = f"{platform}:{result.content_id}"
+            if key in pending:
+                existing = pending[key]
+                existing.collection_names = list(dict.fromkeys(
+                    [*existing.collection_names, *result.collection_names]))
+                continue
+            if len(pending) >= limit:
+                continue
+            result.rank = len(pending)
+            pending[key] = result
+
+    config.PLATFORM = core_platform
+    config.KEYWORDS = ""
+    config.CRAWLER_TYPE = "favorites"
+    config.CRAWLER_MAX_NOTES_COUNT = limit
+    config.ENABLE_CDP_MODE = False
+    config.CDP_CONNECT_EXISTING = False
+    config.HEADLESS = True
+    config.SAVE_LOGIN_STATE = True
+    config.LOGIN_TYPE = "qrcode"
+    config.ENABLE_IP_PROXY = False
+    config.MAX_CONCURRENCY_NUM = 1
+    crawler = None
+    try:
+        emit_status(job_id, platform, "running")
+        crawler = CrawlerFactory.create_crawler(platform=core_platform)
+        crawler.runtime_options = CrawlerRuntimeOptions(
+            result_sink=handle_results, login_policy="fail_fast",
+            result_limit=limit, strict_errors=True, headless=True,
+            reuse_http_client=True, light_page=True,
+        )
+        await asyncio.wait_for(crawler.start(), timeout=WORKER_TIMEOUT_SECONDS)
+        for result in pending.values():
+            emit_result(job_id, platform, result.model_dump())
+        emit_status(job_id, platform, "succeeded" if pending else "empty")
+    except asyncio.TimeoutError:
+        emit_error(job_id, platform, "timed_out", "收藏夹同步超时")
+    except Exception as exc:
+        emit_error(job_id, platform, _classify_error(exc), _safe_error_message(exc))
+    finally:
+        await _cleanup_crawler(crawler)
+    emit_done(job_id, platform)
+
+
+# ── Fast path (no-browser) ──────────────────────────────────────────────
+
 async def _run_fast_standard_search(
     job_id: str, platform: str, core_platform: str, keyword: str, limit: int,
     handle_results, session_snapshot: Dict[str, str], phase_metric,
@@ -894,6 +952,10 @@ async def _dispatch_worker(
 ) -> None:
     if mode == "login":
         await _run_login(job_id, platform)
+        return
+
+    if mode == "favorites":
+        await _run_favorites(job_id, platform, limit)
         return
 
     if mode != "search":

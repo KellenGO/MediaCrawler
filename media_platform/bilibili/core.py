@@ -128,6 +128,8 @@ class BilibiliCrawler(AbstractCrawler):
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 await self.search()
+            elif config.CRAWLER_TYPE == "favorites":
+                await self.fetch_favorites()
             else:
                 pass
             utils.logger.info("[BilibiliCrawler.start] Bilibili Crawler finished ...")
@@ -137,6 +139,56 @@ class BilibiliCrawler(AbstractCrawler):
         search bilibili video
         """
         await self.search_by_keywords()
+
+    async def fetch_favorites(self) -> None:
+        """Fetch recent items across the current user's created folders."""
+        nav = await self.bili_client.get("/x/web-interface/nav", enable_params_sign=False)
+        mid = nav.get("mid") if isinstance(nav, dict) else None
+        if not mid:
+            from base.exceptions import LoginRequiredError
+            raise LoginRequiredError(platform="bilibili", message="B站登录状态已失效")
+        folders_response = await self.bili_client.get_created_favorite_folders(int(mid))
+        folders = folders_response.get("list", []) if isinstance(folders_response, dict) else []
+        remaining = self._result_limit()
+        seen: set[str] = set()
+        for folder in folders if isinstance(folders, list) else []:
+            if remaining <= 0 or not isinstance(folder, dict):
+                break
+            media_id = folder.get("id") or folder.get("media_id")
+            if not media_id:
+                continue
+            page = 1
+            while remaining > 0:
+                response = await self.bili_client.get_favorite_folder_contents(
+                    int(media_id), page, min(remaining, 20))
+                medias = response.get("medias", []) if isinstance(response, dict) else []
+                batch = []
+                for media in medias if isinstance(medias, list) else []:
+                    if not isinstance(media, dict):
+                        continue
+                    key = str(media.get("bvid") or media.get("id") or "")
+                    if not key:
+                        continue
+                    item = dict(media)
+                    item["_collection_name"] = str(folder.get("title") or "默认收藏夹")
+                    if key in seen:
+                        # Emit folder membership as an update; the worker merges
+                        # it into the already collected public result.
+                        self._result_sink_call([item])
+                        continue
+                    seen.add(key)
+                    batch.append(item)
+                    if len(batch) >= remaining:
+                        break
+                if batch:
+                    self._result_sink_call(batch)
+                    remaining -= len(batch)
+                has_more = bool(response.get("has_more")) or (
+                    isinstance(medias, list) and len(medias) >= min(remaining + len(batch), 20))
+                if not has_more or not medias:
+                    break
+                page += 1
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
     async def search_by_keywords(self):
         """

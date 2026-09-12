@@ -194,6 +194,8 @@ class DouYinCrawler(AbstractCrawler):
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 await self.search()
+            elif config.CRAWLER_TYPE == "favorites":
+                await self.fetch_favorites()
 
             utils.logger.info("[DouYinCrawler.start] Douyin Crawler finished ...")
 
@@ -272,6 +274,30 @@ class DouYinCrawler(AbstractCrawler):
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
+
+    async def fetch_favorites(self) -> None:
+        """Fetch a bounded slice of the logged-in account's collected videos."""
+        remaining = self._result_limit()
+        cursor = 0
+        while remaining > 0:
+            response = await self.dy_client.get_collected_awemes(cursor, min(remaining, 20))
+            items = response.get("aweme_list", []) if isinstance(response, dict) else []
+            if not isinstance(items, list) or not items:
+                break
+            self._result_sink_call(items[:remaining])
+            remaining -= len(items[:remaining])
+            if not response.get("has_more"):
+                break
+            next_cursor = response.get("cursor") or response.get("max_cursor")
+            try:
+                next_cursor = int(next_cursor)
+            except (TypeError, ValueError):
+                break
+            if next_cursor == cursor:
+                break
+            cursor = next_cursor
+            if remaining > 0:
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
     async def create_douyin_client(self, httpx_proxy: Optional[str]) -> DouYinClient:
         """Create douyin client"""

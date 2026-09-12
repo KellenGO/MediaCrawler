@@ -142,6 +142,8 @@ class ZhihuCrawler(AbstractCrawler):
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 await self.search()
+            elif config.CRAWLER_TYPE == "favorites":
+                await self.fetch_favorites()
             else:
                 pass
 
@@ -208,6 +210,54 @@ class ZhihuCrawler(AbstractCrawler):
                         raise
                     utils.logger.error("[ZhihuCrawler.search] Search content error")
                     return
+
+    async def fetch_favorites(self) -> None:
+        """Fetch recent items across the current user's Zhihu collections."""
+        me = await self.zhihu_client.get_current_user_info()
+        token = me.get("url_token") if isinstance(me, dict) else None
+        if not token:
+            from base.exceptions import LoginRequiredError
+            raise LoginRequiredError(platform="zhihu", message="知乎登录状态已失效")
+        collections_response = await self.zhihu_client.get_user_collections(str(token))
+        collections = collections_response.get("data", []) if isinstance(collections_response, dict) else []
+        remaining = self._result_limit()
+        seen: set[str] = set()
+        for collection in collections if isinstance(collections, list) else []:
+            if remaining <= 0 or not isinstance(collection, dict):
+                break
+            collection_id = collection.get("id")
+            if collection_id is None:
+                continue
+            offset = 0
+            while remaining > 0:
+                response = await self.zhihu_client.get_collection_items(
+                    str(collection_id), offset, min(remaining, 20))
+                rows = response.get("data", []) if isinstance(response, dict) else []
+                batch = []
+                for row in rows if isinstance(rows, list) else []:
+                    content = row.get("content") if isinstance(row, dict) else None
+                    if not isinstance(content, dict):
+                        continue
+                    key = f"{content.get('type')}:{content.get('id')}"
+                    if not content.get("id"):
+                        continue
+                    item = dict(content)
+                    item["_collection_name"] = str(collection.get("title") or "默认收藏夹")
+                    if key in seen:
+                        self._result_sink_call([item])
+                        continue
+                    seen.add(key)
+                    batch.append(item)
+                    if len(batch) >= remaining:
+                        break
+                if batch:
+                    self._result_sink_call(batch)
+                    remaining -= len(batch)
+                paging = response.get("paging", {}) if isinstance(response, dict) else {}
+                if not rows or (isinstance(paging, dict) and paging.get("is_end")):
+                    break
+                offset += len(rows)
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
     async def create_zhihu_client(self, httpx_proxy: Optional[str]) -> ZhiHuClient:
         """Create zhihu client"""

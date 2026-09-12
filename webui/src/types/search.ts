@@ -42,6 +42,22 @@ export interface UnifiedSearchResult {
   metrics: Record<string, number>;
   rank: number;
   grouped_sources?: GroupedSource[] | null;
+  collection_names?: string[];
+}
+
+export interface FavoritePlatformInfo {
+  status: PlatformStatus;
+  result_count: number;
+  error_summary: string | null;
+}
+
+export interface FavoritesJobResponse {
+  job_id: string;
+  overall: "running" | "completed" | "partial" | "failed";
+  created_at: string;
+  completed_at: string | null;
+  platforms: Partial<Record<PlatformSlug, FavoritePlatformInfo>>;
+  results: UnifiedSearchResult[];
 }
 
 export interface PlatformTimingInfo {

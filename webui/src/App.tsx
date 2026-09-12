@@ -9,6 +9,9 @@ import { SearchPage } from '@/components/search/SearchPage'
 const AccountsPage = lazy(() =>
   import('@/components/accounts/AccountsPage').then((m) => ({ default: m.AccountsPage }))
 )
+const FavoritesPage = lazy(() =>
+  import('@/components/favorites/FavoritesPage').then((m) => ({ default: m.FavoritesPage }))
+)
 
 /** 浅蓝色 Suspense 占位（不闪屏）。 */
 function PageLoading() {
@@ -57,6 +60,8 @@ function App() {
                 <SearchPage onNavigateAccounts={() => setViewMode('accounts')} />
               ) : viewMode === 'accounts' ? (
                 <AccountsPage onNavigateSearch={() => setViewMode('search')} />
+              ) : viewMode === 'favorites' ? (
+                <FavoritesPage onNavigateAccounts={() => setViewMode('accounts')} />
               ) : null}
             </Suspense>
           </div>

@@ -146,6 +146,9 @@ class UnifiedSearchResult(BaseModel):
     metrics: Dict[str, int] = Field(default_factory=dict)
     rank: int = 0  # original platform rank (0-based)
     grouped_sources: Optional[List[GroupedSource]] = None
+    # Remote favourites may belong to one or more platform folders. Search
+    # results leave this empty; it is public display metadata only.
+    collection_names: List[str] = Field(default_factory=list)
 
     # Allow extra fields from adapters for internal use
     model_config = {"extra": "ignore"}
@@ -211,7 +214,7 @@ class WorkerRequest(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     job_id: str
-    mode: Literal["search", "login"]
+    mode: Literal["search", "login", "favorites"]
     platform: PlatformSlug
     keyword: str = ""
     limit: int = 10

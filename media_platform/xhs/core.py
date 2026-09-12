@@ -123,6 +123,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 await self.search()
+            elif config.CRAWLER_TYPE == "favorites":
+                await self.fetch_favorites()
             else:
                 pass
 
@@ -223,6 +225,26 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         raise
                     utils.logger.error("[XiaoHongShuCrawler.search] Search request failed")
                     break
+
+    async def fetch_favorites(self) -> None:
+        """Fetch a bounded slice of the logged-in account's collections."""
+        remaining = self._result_limit()
+        cursor = ""
+        while remaining > 0:
+            response = await self.xhs_client.get_collected_notes(cursor, min(remaining, 30))
+            items = response.get("items", []) if isinstance(response, dict) else []
+            if not isinstance(items, list) or not items:
+                break
+            self._result_sink_call(items[:remaining])
+            remaining -= len(items[:remaining])
+            if not response.get("has_more"):
+                break
+            next_cursor = response.get("cursor") or response.get("next_cursor")
+            if not isinstance(next_cursor, str) or next_cursor == cursor:
+                break
+            cursor = next_cursor
+            if remaining > 0:
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
     async def create_xhs_client(self, httpx_proxy: Optional[str]) -> XiaoHongShuClient:
         """Create Xiaohongshu client"""

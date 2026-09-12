@@ -34,6 +34,9 @@ function publicResult(value: unknown): UnifiedSearchResult {
       if (typeof count === "number" && Number.isFinite(count) && count >= 0) metrics[key] = count;
     }
   }
+  const collectionNames = Array.isArray(value.collection_names)
+    ? value.collection_names.filter((name): name is string => typeof name === "string" && name.length <= 200).slice(0, 20)
+    : [];
   return {
     platform: value.platform as PlatformSlug, content_id: value.content_id, title: value.title,
     url: safeContentUrl(value.url)!, content_type: typeof value.content_type === "string" ? value.content_type : "note",
@@ -42,6 +45,7 @@ function publicResult(value: unknown): UnifiedSearchResult {
     cover_url: optionalText(value.cover_url), metrics,
     rank: typeof value.rank === "number" && Number.isFinite(value.rank) ? value.rank : 0,
     grouped_sources: null,
+    collection_names: collectionNames,
   };
 }
 

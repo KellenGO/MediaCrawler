@@ -278,6 +278,9 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
             {PLATFORM_LABELS[result.platform] || result.platform}
           </span>
           {contentType && <span className="text-[11px] text-cyber-text-muted">{contentType}</span>}
+          {result.collection_names?.slice(0, 2).map((name) => <span key={name}
+            className="max-w-36 truncate rounded-full border border-brand/25 bg-brand-soft px-2 py-0.5 text-[10px] text-brand-strong"
+            title={name}>{name}</span>)}
         </div>
         <h3 className="text-[15px] sm:text-[16.5px] font-semibold leading-[1.55] tracking-[-0.01em] text-cyber-text-primary line-clamp-2">
           <Highlight text={result.title} query={highlightQuery} />

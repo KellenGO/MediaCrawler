@@ -376,6 +376,14 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         }
         return await self.post(uri, data)
 
+    async def get_collected_notes(self, cursor: str = "", num: int = 20) -> Dict:
+        """Return the current account's collected-note feed (read only)."""
+        return await self.get("/api/sns/web/v1/note/collect/page", {
+            "cursor": cursor,
+            "num": min(max(num, 1), 30),
+            "image_formats": "jpg,webp,avif",
+        })
+
     async def get_note_by_id(
         self,
         note_id: str,

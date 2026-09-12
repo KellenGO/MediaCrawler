@@ -20,6 +20,7 @@
   },
   "nav": {
     "search": "聚合搜索",
+    "favorites": "跨平台收藏",
     "accounts": "设置",
     "console": "爬虫控制台"
   },

@@ -99,9 +99,9 @@ function csvCell(value: string): string {
 }
 
 export function resultsCsv(rows: readonly ExportRow[]): string {
-  const header = ["平台", "标题", "作者", "内容类型", "发布时间", "采集时间", "收藏时间", "备注", "摘要", "原文链接"];
+  const header = ["平台", "平台收藏夹", "标题", "作者", "内容类型", "发布时间", "采集时间", "收藏时间", "备注", "摘要", "原文链接"];
   const values = rows.map(({ result, fetchedAt, savedAt, note }) => [
-    PLATFORM_LABELS[result.platform], result.title, result.author || "", result.content_type,
+    PLATFORM_LABELS[result.platform], (result.collection_names || []).join(" / "), result.title, result.author || "", result.content_type,
     result.published_at || "", fetchedAt || "", savedAt || "", note, result.snippet || "",
     safeContentUrl(result.url) || "",
   ]);
@@ -116,6 +116,7 @@ export function resultsMarkdown(rows: readonly ExportRow[]): string {
     return [
       `## ${markdownText(result.title)}`,
       `平台：${PLATFORM_LABELS[result.platform]} · 作者：${markdownText(result.author || "未知")}`,
+      result.collection_names?.length ? `平台收藏夹：${markdownText(result.collection_names.join(" / "))}` : "",
       `发布时间：${markdownText(result.published_at || "未知")} · 采集时间：${markdownText(fetchedAt || "未知")}`,
       savedAt ? `收藏时间：${markdownText(savedAt)}` : "",
       result.snippet ? markdownText(result.snippet) : "",

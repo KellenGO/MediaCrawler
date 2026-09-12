@@ -100,6 +100,7 @@ class BilibiliAdapter(BasePlatformAdapter):
                     cover_url=cover_url,
                     metrics=metrics,
                     rank=rank,
+                    collection_names=[str(item["_collection_name"])] if item.get("_collection_name") else [],
                 )
             )
         return results
@@ -115,6 +116,9 @@ class BilibiliAdapter(BasePlatformAdapter):
         author = view.get("author")
         if isinstance(author, str) and author:
             return self._safe_str(author)
+        upper = view.get("upper")
+        if isinstance(upper, dict) and upper.get("name"):
+            return self._safe_str(upper.get("name"))
         return None
 
     def _extract_url(self, view: Dict, bvid: str, aid: str) -> str:
@@ -140,7 +144,7 @@ class BilibiliAdapter(BasePlatformAdapter):
     def _extract_metrics(self, raw_item: Dict) -> Dict[str, int]:
         metrics: Dict[str, int] = {}
         # Detail shape: stat: {view, danmaku, reply, favorite, coin, share, like}
-        stats = raw_item.get("stat") or raw_item.get("statistics") or {}
+        stats = raw_item.get("stat") or raw_item.get("statistics") or raw_item.get("cnt_info") or {}
         if isinstance(stats, dict):
             mapping = [
                 ("view", "view_count"),
@@ -150,6 +154,7 @@ class BilibiliAdapter(BasePlatformAdapter):
                 ("coin", "coin_count"),
                 ("share", "share_count"),
                 ("like", "like_count"),
+                ("play", "view_count"),
             ]
             for src, dst in mapping:
                 val = self._safe_int(stats.get(src), 0)

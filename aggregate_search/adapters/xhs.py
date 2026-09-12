@@ -189,6 +189,7 @@ class XhsAdapter(BasePlatformAdapter):
                     cover_url=cover_url,
                     metrics=metrics,
                     rank=rank,
+                    collection_names=[str(item["_collection_name"])] if item.get("_collection_name") else [],
                 )
             )
         return results

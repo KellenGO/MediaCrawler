@@ -308,6 +308,23 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         }
         return await self.get(uri, post_data)
 
+    async def get_created_favorite_folders(self, up_mid: int) -> Dict:
+        return await self.get(
+            "/x/v3/fav/folder/created/list-all",
+            {"up_mid": up_mid},
+            enable_params_sign=False,
+        )
+
+    async def get_favorite_folder_contents(
+        self, media_id: int, page: int = 1, page_size: int = 20,
+    ) -> Dict:
+        return await self.get(
+            "/x/v3/fav/resource/list",
+            {"media_id": media_id, "pn": page, "ps": min(max(page_size, 1), 20),
+             "order": "mtime", "platform": "web"},
+            enable_params_sign=False,
+        )
+
     async def get_video_info(self, aid: Union[int, None] = None, bvid: Union[str, None] = None) -> Dict:
         """
         Bilibli web video detail api, choose one parameter between aid and bvid

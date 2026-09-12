@@ -177,7 +177,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         return await self.request(method="GET", url=f"{self._host}{uri}", params=params, headers=headers)
 
     async def post(self, uri: str, data: dict, headers: Optional[Dict] = None):
-        await self.__process_req_params(uri, data, headers)
+        await self.__process_req_params(uri, data, headers, request_method="POST")
         headers = headers or self.headers
         return await self.request(method="POST", url=f"{self._host}{uri}", data=data, headers=headers)
 
@@ -249,3 +249,10 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         headers = copy.copy(self.headers)
         headers["Referer"] = urllib.parse.quote(referer_url, safe=':/')
         return await self.get("/aweme/v1/web/general/search/single/", query_params, headers=headers)
+
+    async def get_collected_awemes(self, cursor: int = 0, count: int = 20) -> Dict:
+        """Return the current account's collected videos (read only)."""
+        return await self.post("/aweme/v1/web/aweme/listcollection/", {
+            "cursor": str(max(cursor, 0)),
+            "count": str(min(max(count, 1), 20)),
+        })

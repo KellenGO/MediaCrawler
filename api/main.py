@@ -33,6 +33,7 @@ from .routers.search import search_router
 from .schemas.search import HealthResponse
 from .services.environment_health import build_health_response
 from .services.search_job_manager import search_job_manager
+from .services.favorites_job_manager import favorites_job_manager
 
 app = FastAPI(
     title="MediaCrawler WebUI API",
@@ -52,6 +53,7 @@ async def _shutdown_cleanup():
     from .services.accounts import cancel_verify_tasks
 
     await search_job_manager.cleanup()
+    await favorites_job_manager.cleanup()
     await _cleanup_login_on_shutdown()
     await cancel_verify_tasks()
 

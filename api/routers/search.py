@@ -21,6 +21,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..schemas.search import SearchJobRequestSchema, SearchJobResponse
+from ..schemas.favorites import FavoritesJobRequest, FavoritesJobResponse
+from ..services.favorites_job_manager import favorites_job_manager
 from ..services.search_job_manager import (
     search_job_manager, JobConflictError, InvalidPlatformsError,
 )
@@ -359,6 +361,38 @@ async def get_current_job():
 @search_router.get("/statistics")
 async def get_search_statistics():
     return search_job_manager.metrics.snapshot(search_job_manager.cooldowns)
+
+
+@search_router.post("/favorites/jobs", response_model=FavoritesJobResponse, status_code=201)
+async def create_favorites_job(req: FavoritesJobRequest):
+    if search_job_manager.is_search_active():
+        raise HTTPException(status_code=409, detail="搜索进行中，请等待完成后再同步收藏夹。")
+    if not await _operation_coordinator.acquire_exclusive("favorites"):
+        raise HTTPException(status_code=409, detail="账号或收藏夹操作进行中，请稍后再试。")
+    try:
+        response = await favorites_job_manager.create(req)
+        task = favorites_job_manager.active_task()
+        if task:
+            task.add_done_callback(
+                lambda _task: asyncio.ensure_future(
+                    _operation_coordinator.release_exclusive("favorites")))
+        else:
+            await _operation_coordinator.release_exclusive("favorites")
+        return response
+    except RuntimeError:
+        await _operation_coordinator.release_exclusive("favorites")
+        raise HTTPException(status_code=409, detail="收藏夹同步正在进行中。")
+    except Exception:
+        await _operation_coordinator.release_exclusive("favorites")
+        raise
+
+
+@search_router.get("/favorites/jobs/{job_id}", response_model=FavoritesJobResponse)
+async def get_favorites_job(job_id: str):
+    response = await favorites_job_manager.get(job_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="收藏夹同步任务不存在。")
+    return response
 
 
 @search_router.get("/jobs/{job_id}", response_model=SearchJobResponse)

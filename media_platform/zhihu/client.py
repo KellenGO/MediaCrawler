@@ -240,6 +240,18 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         params = {"include": "email,is_active,is_bind_phone"}
         return await self.get("/api/v4/me", params)
 
+    async def get_user_collections(self, url_token: str, offset: int = 0, limit: int = 20) -> Dict:
+        return await self.get(f"/api/v4/people/{url_token}/collections", {
+            "offset": max(offset, 0), "limit": min(max(limit, 1), 20),
+            "include": "data[*].updated_time,answer_count,is_public",
+        })
+
+    async def get_collection_items(self, collection_id: str, offset: int = 0, limit: int = 20) -> Dict:
+        return await self.get(f"/api/v4/collections/{collection_id}/items", {
+            "offset": max(offset, 0), "limit": min(max(limit, 1), 20),
+            "include": "data[*].content.excerpt,data[*].content.author,data[*].content.question",
+        })
+
     async def get_note_by_keyword(
         self,
         keyword: str,

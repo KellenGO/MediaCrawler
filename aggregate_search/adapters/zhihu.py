@@ -71,6 +71,9 @@ class ZhihuAdapter(BasePlatformAdapter):
                 continue
 
             title = clean_title(self._safe_str(item.get("title")))
+            question = item.get("question")
+            if not title and isinstance(question, dict):
+                title = clean_title(self._safe_str(question.get("title")))
             if not title:
                 title = clean_title(self._safe_str(item.get("excerpt", ""))[:100])
 
@@ -105,6 +108,7 @@ class ZhihuAdapter(BasePlatformAdapter):
                     cover_url=cover_url,
                     metrics=metrics,
                     rank=rank,
+                    collection_names=[str(item["_collection_name"])] if item.get("_collection_name") else [],
                 )
             )
         return results

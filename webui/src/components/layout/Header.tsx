@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Search, UserCog, HelpCircle, Wifi, WifiOff, ChevronRight } from 'lucide-react'
+import { Search, UserCog, HelpCircle, Wifi, WifiOff, ChevronRight, Bookmark } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { LanguageSwitch } from './LanguageSwitch'
 import { useAccounts } from '@/hooks/useAccounts'
@@ -22,7 +22,7 @@ import {
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '@/types/search'
 import { environmentHealthWarning, type EnvironmentHealth } from '@/lib/environmentHealth'
 
-export type ViewMode = 'search' | 'accounts'
+export type ViewMode = 'search' | 'favorites' | 'accounts'
 
 interface HeaderProps {
   viewMode: ViewMode
@@ -238,6 +238,7 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
 
   const navItems: { key: ViewMode; label: string; icon: typeof Search }[] = [
     { key: 'search', label: t('nav.search'), icon: Search },
+    { key: 'favorites', label: t('nav.favorites'), icon: Bookmark },
     { key: 'accounts', label: t('nav.accounts'), icon: UserCog },
   ]
 
