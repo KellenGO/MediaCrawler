@@ -72,6 +72,31 @@ export function highlightSegments(text: string, query: string): Array<{ text: st
     .map((part, index) => ({ text: part, matched: index % 2 === 1 }));
 }
 
+/**
+ * 互动数据统一展示顺序：播放 → 点赞 → 投币 → 评论 → 收藏，分享排在最后。
+ * 投币只有 B站 有（且仅详情接口下发），排在点赞之后。弹幕对判断内容质量帮助
+ * 有限，不参与展示。平台不提供的字段不会占位。
+ */
+export const METRIC_ORDER: ReadonlyArray<readonly [string, string]> = [
+  ["view_count", "播放"],
+  ["like_count", "点赞"],
+  ["coin_count", "投币"],
+  ["comment_count", "评论"],
+  ["collect_count", "收藏"],
+  ["share_count", "分享"],
+];
+
+/** 按固定顺序选出真正有值的指标；计数为 0 或缺失时跳过，不占位。 */
+export function orderedMetrics(
+  metrics: Record<string, number> | null | undefined, limit = 6
+): Array<{ key: string; label: string }> {
+  const source = metrics || {};
+  return METRIC_ORDER
+    .filter(([key]) => (source[key] || 0) > 0)
+    .slice(0, limit)
+    .map(([key, label]) => ({ key, label }));
+}
+
 export interface ExportRow {
   result: UnifiedSearchResult;
   fetchedAt: string | null;

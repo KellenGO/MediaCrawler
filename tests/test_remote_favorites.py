@@ -25,11 +25,13 @@ def test_favorites_request_contract_is_bounded_and_unique():
 def test_folder_metadata_survives_bilibili_and_zhihu_adaptation():
     bili = BilibiliAdapter().adapt([{
         "bvid": "BV1test", "title": "视频", "cover": "https://i0.hdslb.com/a.jpg",
-        "upper": {"name": "UP"}, "cnt_info": {"play": 12, "danmaku": 3},
+        "upper": {"name": "UP"},
+        # 收藏夹列表的真实形状：收藏数在 cnt_info.collect（不是详情接口的 favorite）。
+        "cnt_info": {"play": 12, "danmaku": 3, "collect": 5},
         "_collection_name": "稍后学习",
     }])[0]
     assert bili.author == "UP"
-    assert bili.metrics == {"view_count": 12, "danmaku_count": 3}
+    assert bili.metrics == {"view_count": 12, "danmaku_count": 3, "collect_count": 5}
     assert bili.collection_names == ["稍后学习"]
 
     zhihu = ZhihuAdapter().adapt([{
@@ -144,7 +146,7 @@ def test_xhs_collect_feed_cover_and_chinese_counts_are_normalized():
 
 
 @pytest.mark.parametrize("raw,expected", [
-    ("10万", 100000), ("1.2万", 12000), ("1亿", 100000000),
+    ("10万", 100000), ("10万+", 100000), ("1.2万", 12000), ("1亿", 100000000),
     ("1180", 1180), (220, 220), ("", 0), ("点赞", 0), (None, 0),
 ])
 def test_xhs_count_parsing_covers_chinese_units(raw, expected):

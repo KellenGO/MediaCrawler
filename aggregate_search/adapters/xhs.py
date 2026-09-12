@@ -278,7 +278,9 @@ class XhsAdapter(BasePlatformAdapter):
             return 0
         if isinstance(value, (int, float)):
             return int(value)
-        text = str(value).strip().replace(",", "").replace(" ", "")
+        # 收藏列表里大数会写成 ``"10万+"``（表示"不少于"），末尾的 ``+`` 要去掉，
+        # 否则整个数字解析失败、这条内容一个指标都显示不出来。
+        text = str(value).strip().replace(",", "").replace(" ", "").rstrip("+")
         if not text:
             return 0
         for suffix, scale in (("亿", 100_000_000), ("万", 10_000),
@@ -297,13 +299,17 @@ class XhsAdapter(BasePlatformAdapter):
         interact = raw_item.get("interact_info") or {}
         metrics: Dict[str, int] = {}
         if isinstance(interact, dict):
-            for src, dst in [
-                ("liked_count", "like_count"),
-                ("collected_count", "collect_count"),
-                ("comment_count", "comment_count"),
-                ("share_count", "share_count"),
+            # 搜索列表与收藏列表用 ``shared_count``，详情接口用 ``share_count``；
+            # 逐个候选字段取值，命中即止（不猜、不累加）。
+            for sources, dst in [
+                (("liked_count",), "like_count"),
+                (("collected_count",), "collect_count"),
+                (("comment_count",), "comment_count"),
+                (("shared_count", "share_count"), "share_count"),
             ]:
-                val = self._parse_count(interact.get(src))
-                if val > 0:
-                    metrics[dst] = val
+                for src in sources:
+                    val = self._parse_count(interact.get(src))
+                    if val > 0:
+                        metrics[dst] = val
+                        break
         return metrics

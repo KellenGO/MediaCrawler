@@ -175,9 +175,13 @@ class ZhihuAdapter(BasePlatformAdapter):
 
     def _extract_metrics(self, raw_item: Dict) -> Dict[str, int]:
         metrics: Dict[str, int] = {}
+        # 知乎搜索/收藏返回的对象同时带浏览量与收藏数：visits_count 是
+        # 阅读/浏览量（回答、文章、视频通用），favorites_count 是收藏数。
         mapping = [
             ("voteup_count", "like_count"),
             ("comment_count", "comment_count"),
+            ("favorites_count", "collect_count"),
+            ("visits_count", "view_count"),
         ]
         for src, dst in mapping:
             val = self._safe_int(raw_item.get(src), 0)

@@ -570,3 +570,53 @@ class TestInvalidAndDuplicateIds:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+
+
+# ── Adapter：互动数据字段名 ─────────────────────────────────────────────
+
+def test_adapter_reads_shared_count_from_search_shape():
+    """搜索/收藏列表用 ``shared_count``，详情接口用 ``share_count``。
+
+    旧实现只读 ``share_count``，导致搜索结果的分享数一直是 0。
+    """
+    adapter = XhsAdapter()
+    search_item = {
+        "id": "n1",
+        "note_card": {
+            "display_title": "标题",
+            "interact_info": {"liked_count": "10", "shared_count": "7"},
+        },
+    }
+    detail_item = {
+        "note_id": "n2",
+        "title": "详情",
+        "interact_info": {"liked_count": "10", "share_count": "5"},
+    }
+    assert adapter.adapt([search_item])[0].metrics["share_count"] == 7
+    assert adapter.adapt([detail_item])[0].metrics["share_count"] == 5
+
+
+def test_adapter_extracts_full_metric_set_from_search_card():
+    """搜索卡片必须同时给出点赞/评论/收藏/分享，缺一不可。"""
+    item = {
+        "id": "n3",
+        "note_card": {
+            "display_title": "标题",
+            "type": "video",
+            "interact_info": {
+                "liked_count": "47039",
+                "collected_count": "34361",
+                "comment_count": "391",
+                "shared_count": "1667",
+            },
+        },
+    }
+    metrics = XhsAdapter().adapt([item])[0].metrics
+    assert metrics == {
+        "like_count": 47039,
+        "collect_count": 34361,
+        "comment_count": 391,
+        "share_count": 1667,
+    }
+    # 小红书不提供播放量，不得凭空补 0。
+    assert "view_count" not in metrics

@@ -1,8 +1,8 @@
 import { useState, useMemo, type ReactNode } from "react";
-import { ArrowUpRight, ChevronDown, Heart, Eye, MessageCircle, ThumbsUp, Coins, Tv, Share2 } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Heart, Eye, MessageCircle, ThumbsUp, Coins, Share2 } from "lucide-react";
 import type { UnifiedSearchResult } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
-import { highlightSegments, safeContentUrl as safeUrl } from "@/lib/resultTools";
+import { highlightSegments, orderedMetrics, safeContentUrl as safeUrl } from "@/lib/resultTools";
 
 interface ResultCardProps {
   result: UnifiedSearchResult;
@@ -71,20 +71,19 @@ function CoverPlaceholder({ platform }: { platform: string }) {
   );
 }
 
+/** 图标仅表达类别，顺序由 resultTools 的 METRIC_ORDER 统一决定。 */
+const METRIC_ICONS: Record<string, typeof Eye> = {
+  view_count: Eye,
+  like_count: Heart,
+  coin_count: Coins,
+  comment_count: MessageCircle,
+  collect_count: ThumbsUp,
+  share_count: Share2,
+};
+
 function metricSummary(metrics: Record<string, number>): string {
-  const labels: Array<[string, string]> = [
-    ["comment_count", "评论"],
-    ["collect_count", "收藏"],
-    ["coin_count", "投币"],
-    ["share_count", "分享"],
-    ["like_count", "点赞"],
-    ["danmaku_count", "弹幕"],
-    ["view_count", "播放"],
-  ];
-  return labels
-    .filter(([key]) => (metrics[key] || 0) > 0)
-    .slice(0, 2)
-    .map(([key, label]) => `${label} ${formatCount(metrics[key] || 0)}`)
+  return orderedMetrics(metrics, 2)
+    .map(({ key, label }) => `${label} ${formatCount(metrics[key] || 0)}`)
     .join(" · ");
 }
 
@@ -101,20 +100,10 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
     ? [...new Set(groupedSources.map((source) => CONTENT_TYPE_LABELS[source.content_type] || source.content_type).filter(Boolean))].join(" / ")
     : "";
 
-  const metrics = useMemo(() => {
-    const m = result.metrics || {};
-    return [
-      { key: "like_count", icon: Heart, label: "" },
-      { key: "view_count", icon: Eye, label: "" },
-      { key: "comment_count", icon: MessageCircle, label: "" },
-      { key: "collect_count", icon: ThumbsUp, label: "" },
-      { key: "coin_count", icon: Coins, label: "" },
-      { key: "danmaku_count", icon: Tv, label: "" },
-      { key: "share_count", icon: Share2, label: "" },
-    ]
-      .filter(({ key }) => m[key] && m[key] > 0)
-      .slice(0, 4);
-  }, [result.metrics]);
+  const metrics = useMemo(
+    () => orderedMetrics(result.metrics).map(({ key, label }) => ({ key, label, icon: METRIC_ICONS[key] })),
+    [result.metrics],
+  );
 
   if (groupedSources) {
     return (
@@ -171,8 +160,8 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
             )}
             {metrics.length > 0 && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11.5px] text-cyber-text-muted">
-                {metrics.map(({ key, icon: Icon }) => (
-                  <span key={key} className="flex items-center gap-1">
+                {metrics.map(({ key, icon: Icon, label }) => (
+                  <span key={key} className="flex items-center gap-1" title={label} aria-label={label}>
                     <Icon className="w-3 h-3" />
                     <span>{formatCount(result.metrics[key] || 0)}</span>
                   </span>
@@ -306,8 +295,8 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
         )}
         {metrics.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11.5px] text-cyber-text-muted">
-            {metrics.map(({ key, icon: Icon }) => (
-              <span key={key} className="flex items-center gap-1">
+            {metrics.map(({ key, icon: Icon, label }) => (
+              <span key={key} className="flex items-center gap-1" title={label} aria-label={label}>
                 <Icon className="w-3 h-3" />
                 <span>{formatCount(result.metrics[key] || 0)}</span>
               </span>

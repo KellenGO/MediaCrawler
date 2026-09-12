@@ -47,6 +47,7 @@ def _flat_item(i: int) -> dict:
         "video_review": 100 + i,
         "review": 50 + i,
         "favorites": 200 + i,
+        "like": 400 + i,
         "duration": "10:00",
         "mid": 990000 + i,   # 隐私字段必须被 adapter 丢弃
         "upic": f"https://i0.hdslb.com/bfs/face/fake{i}.jpg",
@@ -151,6 +152,9 @@ def test_adapter_extracts_flat_fields():
     assert r.metrics["danmaku_count"] == 103    # video_review
     assert r.metrics["comment_count"] == 53     # review
     assert r.metrics["collect_count"] == 203    # favorites
+    assert r.metrics["like_count"] == 403       # like
+    # 搜索列表不下发投币，只有详情 stat.coin 才有 —— 不得凭空补一个 0。
+    assert "coin_count" not in r.metrics
     # 隐私：mid/upic 绝不能进入 DTO
     dump = r.model_dump_json()
     assert "mid" not in dump
@@ -185,6 +189,7 @@ def test_end_to_end_crawler_sink_adapter_full_dto(monkeypatch):
         assert r.metrics["danmaku_count"] == 100 + i
         assert r.metrics["comment_count"] == 50 + i
         assert r.metrics["collect_count"] == 200 + i
+        assert r.metrics["like_count"] == 400 + i
     dump = results[0].model_dump_json()
     assert "mid" not in dump and "upic" not in dump, "隐私字段绝不能进 DTO"
 

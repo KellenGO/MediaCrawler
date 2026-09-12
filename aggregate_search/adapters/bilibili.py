@@ -144,6 +144,8 @@ class BilibiliAdapter(BasePlatformAdapter):
     def _extract_metrics(self, raw_item: Dict) -> Dict[str, int]:
         metrics: Dict[str, int] = {}
         # Detail shape: stat: {view, danmaku, reply, favorite, coin, share, like}
+        # 收藏夹列表 shape: cnt_info: {play, danmaku, collect, reply, ...} ——
+        # 收藏数在这里叫 ``collect``，不是详情接口的 ``favorite``。
         stats = raw_item.get("stat") or raw_item.get("statistics") or raw_item.get("cnt_info") or {}
         if isinstance(stats, dict):
             mapping = [
@@ -151,6 +153,7 @@ class BilibiliAdapter(BasePlatformAdapter):
                 ("danmaku", "danmaku_count"),
                 ("reply", "comment_count"),
                 ("favorite", "collect_count"),
+                ("collect", "collect_count"),
                 ("coin", "coin_count"),
                 ("share", "share_count"),
                 ("like", "like_count"),
@@ -160,13 +163,15 @@ class BilibiliAdapter(BasePlatformAdapter):
                 val = self._safe_int(stats.get(src), 0)
                 if val > 0:
                     metrics[dst] = val
-        # Flat search-list shape: play / video_review / review / favorites
-        # (only fills keys not already set by the stat dict).
+        # Flat search-list shape: play / video_review / review / favorites / like
+        # (only fills keys not already set by the stat dict). 搜索列表不下发
+        # coin，投币只在详情 stat 里存在。
         flat_mapping = [
             ("play", "view_count"),
             ("video_review", "danmaku_count"),
             ("review", "comment_count"),
             ("favorites", "collect_count"),
+            ("like", "like_count"),
         ]
         for src, dst in flat_mapping:
             if dst not in metrics:

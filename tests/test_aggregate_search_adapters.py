@@ -221,6 +221,24 @@ class TestDouyinAdapter:
         result = DouyinAdapter().adapt([{"aweme_id": "1"}])[0]
         assert result.snippet is None
 
+    def test_share_url_is_never_used_for_navigation(self):
+        """收藏列表的 share_url 指向 iesdouyin.com 且带跟踪参数 —— 必须忽略。
+
+        用 share_url 会让前端域名白名单拒掉这个链接（卡片点不开），还会把
+        u_code / share_sign 带进界面和导出。
+        """
+        result = DouyinAdapter().adapt([{
+            "aweme_id": "7123456789012345678",
+            "desc": "标题",
+            "share_url": ("https://www.iesdouyin.com/share/video/7123456789012345678/"
+                          "?u_code=abc&share_sign=xyz"),
+        }])[0]
+        assert result.url == "https://www.douyin.com/video/7123456789012345678"
+        dump = result.model_dump_json()
+        assert "iesdouyin" not in dump
+        assert "u_code" not in dump
+        assert "share_sign" not in dump
+
     def test_author_privacy(self):
         """Verify no uid/sec_uid in output."""
         adapter = DouyinAdapter()
@@ -323,6 +341,8 @@ ZHIHU_ANSWER_FIXTURE = {
     "created_time": 1736937000,
     "voteup_count": 3200,
     "comment_count": 180,
+    "favorites_count": 640,
+    "visits_count": 52000,
     "excerpt": "作为一个露营5年的老手，我来分享一些经验...",
     "thumbnail": "https://pic1.zhimg.com/80/thumb_abc.jpg",
 }
@@ -391,6 +411,9 @@ class TestZhihuAdapter:
         assert r.cover_url == "https://pic1.zhimg.com/80/thumb_abc.jpg"
         assert r.metrics["like_count"] == 3200
         assert r.metrics["comment_count"] == 180
+        # 浏览量走 visits_count，收藏走 favorites_count。
+        assert r.metrics["view_count"] == 52000
+        assert r.metrics["collect_count"] == 640
 
     def test_title_html_highlight_is_cleaned(self):
         adapter = ZhihuAdapter()

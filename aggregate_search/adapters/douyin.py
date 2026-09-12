@@ -28,7 +28,6 @@ Typical fields:
 - author: {nickname: str, uid: str, sec_uid: str}
 - statistics: {digg_count, collect_count, comment_count, share_count, play_count}
 - video: {cover: {url_list: [str]}, play_addr: {...}}
-- share_url: str
 """
 
 from __future__ import annotations
@@ -66,11 +65,10 @@ class DouyinAdapter(BasePlatformAdapter):
 
             author = self._get_author(item)
 
-            url = (
-                item.get("share_url")
-                or item.get("aweme_url")
-                or f"https://www.douyin.com/video/{aweme_id}"
-            )
+            # 收藏列表（listcollection）会带 share_url，但它指向 iesdouyin.com 并携带
+            # u_code / share_sign 等跟踪参数：域名不在前端白名单内，卡片就不会渲染成
+            # 链接（点不开），而且这些参数还会被带进界面与导出。始终用官方地址。
+            url = f"https://www.douyin.com/video/{aweme_id}"
 
             published_at = _parse_timestamp(item.get("create_time"))
 
