@@ -63,7 +63,7 @@ jobs:
           uv lock
           uv sync
       - name: Run Redis-backed integration tests
-        run: uv run pytest -q --run-integration -m integration test/test_redis_cache.py
+        run: uv run pytest -q --run-integration -m integration tests/test_redis_cache.py
 
   frontend:
     name: Frontend tests

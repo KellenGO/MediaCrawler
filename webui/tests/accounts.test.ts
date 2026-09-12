@@ -15,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  accountCardStatusLabel,
   accountSummaryLabel,
   accountTone,
   consumeUnverifiedWarning,
@@ -363,4 +364,47 @@ test("accountTone: 风控 unavailable 不返回 ok（不显示绿色）", () => 
     accountTone({ status: "unavailable", verified: false, profile_exists: true }),
     "warn",
   );
+});
+
+// ── 状态文案单一来源（卡片 / 诊断行 / 浮层共用同一状态枚举）──────────────
+
+test("accountCardStatusLabel: 卡片语境措辞（与浮层/诊断行语境区分）", () => {
+  assert.equal(accountCardStatusLabel({ status: "connected" }), "已连接");
+  assert.equal(accountCardStatusLabel({ status: "unverified" }), "已导入，未确认登录");
+  assert.equal(accountCardStatusLabel({ status: "failed" }), "失败");
+});
+
+test("accountCardStatusLabel: 与诊断行一致的状态沿用基础文案", () => {
+  assert.equal(accountCardStatusLabel({ status: "disconnected" }), "未同步");
+  assert.equal(accountCardStatusLabel({ status: "syncing" }), "同步中");
+  assert.equal(accountCardStatusLabel({ status: "verifying" }), "验证中");
+  assert.equal(accountCardStatusLabel({ status: "expired" }), "会话失效");
+  assert.equal(accountCardStatusLabel({ status: "unavailable" }), "验证暂不可用");
+});
+
+test("accountCardStatusLabel: 小红书风控特例 → 验证请求受限", () => {
+  assert.equal(
+    accountCardStatusLabel({
+      status: "unavailable",
+      safe_error_code: "login_verification_rate_limited",
+    }),
+    "验证请求受限",
+  );
+});
+
+test("accountCardStatusLabel: 未知状态回退为原始状态码", () => {
+  assert.equal(accountCardStatusLabel({ status: "mystery" }), "mystery");
+});
+
+test("状态文案单一来源：卡片与诊断行对同一状态不再产生两套措辞", () => {
+  // 除卡片显式覆盖的三个语境差异外，两者必须一致
+  const cardOverrides = new Set(["connected", "unverified", "failed"]);
+  for (const status of ["disconnected", "syncing", "verifying", "expired", "unavailable"]) {
+    assert.ok(!cardOverrides.has(status), status);
+    assert.equal(
+      accountCardStatusLabel({ status }),
+      diagnosticAccountStateLabel(status),
+      `状态 ${status} 在两处语境应一致`,
+    );
+  }
 });

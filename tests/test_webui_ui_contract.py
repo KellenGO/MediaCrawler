@@ -28,6 +28,7 @@ _SEARCH_PAGE = (_ROOT / "components" / "search" / "SearchPage.tsx").read_text(en
 _HOOK = (_ROOT / "hooks" / "useAggregateSearch.ts").read_text(encoding="utf-8")
 _EXPERIENCE_HOOK = (_ROOT / "hooks" / "useSearchExperience.ts").read_text(encoding="utf-8")
 _ACCOUNTS = (_ROOT / "components" / "accounts" / "AccountsPage.tsx").read_text(encoding="utf-8")
+_ACCOUNTS_LIB = (_ROOT / "lib" / "accounts.ts").read_text(encoding="utf-8")
 _RESULT_CARD = (_ROOT / "components" / "search" / "ResultCard.tsx").read_text(encoding="utf-8")
 _APP = (_ROOT / "App.tsx").read_text(encoding="utf-8")
 _AUTOSYNC_HOOK = (_ROOT / "hooks" / "useAutoAccountSync.ts").read_text(encoding="utf-8")
@@ -225,6 +226,15 @@ def test_account_gate_fails_open():
     """探测不到账号状态时必须放行，绝不把用户的搜索卡住。"""
     assert "catch {" in _ACCOUNT_GATE
     assert "return true; // 读不到状态 → 放行" in _ACCOUNT_GATE
+
+
+def test_accounts_uses_single_status_label_source():
+    """账号状态文案只能有一处枚举：账号页必须复用 lib/accounts.ts，
+    不能自带第二套 STATUS_TEXT 映射（历史上同状态出现过两种文案）。"""
+    assert "accountCardStatusLabel" in _ACCOUNTS
+    assert "STATUS_TEXT" not in _ACCOUNTS
+    assert "accountCardStatusLabel" in _ACCOUNTS_LIB
+    assert "ACCOUNT_STATUS_LABELS" in _ACCOUNTS_LIB
 
 
 def test_accounts_bulk_progress_total_is_dynamic():

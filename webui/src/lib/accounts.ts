@@ -79,18 +79,50 @@ export function diagnosticSearchModeLabel(mode: PlatformDiagnostic["search_mode"
   return "—";
 }
 
+/**
+ * 账号状态的基础文案 —— 状态集合的**唯一枚举来源**。
+ *
+ * 三处语境（账号设置页卡片 / 卡片里的诊断行 / 顶栏登录浮层）在此之上做少量
+ * 措辞覆盖，避免状态集合散落在多个表里各自漂移（历史上同一状态出现过
+ * "已导入，未确认登录" 与 "未验证" 两种文案）。
+ */
+const ACCOUNT_STATUS_LABELS: Record<string, string> = {
+  connected: "已验证",
+  unverified: "未验证",
+  expired: "会话失效",
+  failed: "同步失败",
+  unavailable: "验证暂不可用",
+  verifying: "验证中",
+  syncing: "同步中",
+  disconnected: "未同步",
+};
+
+/** 诊断行的状态文案（与基础文案一致）。 */
 export function diagnosticAccountStateLabel(state: string): string {
-  const labels: Record<string, string> = {
-    connected: "已验证",
-    unverified: "未验证",
-    expired: "会话失效",
-    failed: "同步失败",
-    unavailable: "验证暂不可用",
-    verifying: "验证中",
-    syncing: "同步中",
-    disconnected: "未同步",
+  return ACCOUNT_STATUS_LABELS[state] || "状态未知";
+}
+
+/**
+ * 账号卡上的状态文案（账号设置页卡片语境）。
+ *
+ * Round 17.2：unavailable + 小红书风控（461/471）→ "验证请求受限"。
+ * 卡片语境与浮层语境措辞不同（卡片要说明"已导入但未确认登录"），
+ * 但特例判定与状态集合统一在本模块维护。
+ */
+export function accountCardStatusLabel(acc: {
+  status: string;
+  safe_error_code?: string | null;
+}): string {
+  if (acc.status === "unavailable"
+      && acc.safe_error_code === "login_verification_rate_limited") {
+    return "验证请求受限";
+  }
+  const cardOverrides: Record<string, string> = {
+    connected: "已连接",
+    unverified: "已导入，未确认登录",
+    failed: "失败",
   };
-  return labels[state] || "状态未知";
+  return cardOverrides[acc.status] || ACCOUNT_STATUS_LABELS[acc.status] || acc.status;
 }
 
 export type AccountTone = "ok" | "warn" | "bad" | "idle";
