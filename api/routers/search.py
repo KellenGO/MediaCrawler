@@ -387,6 +387,19 @@ async def create_favorites_job(req: FavoritesJobRequest):
         raise
 
 
+@search_router.get("/favorites/jobs/latest", response_model=FavoritesJobResponse)
+async def get_latest_favorites_job():
+    """Restore the last favourites result so entering the page needs no sync.
+
+    Declared before ``/favorites/jobs/{job_id}`` so ``latest`` is not captured
+    as a job id.
+    """
+    response = await favorites_job_manager.latest()
+    if response is None:
+        raise HTTPException(status_code=404, detail="暂无可恢复的收藏夹结果。")
+    return response
+
+
 @search_router.get("/favorites/jobs/{job_id}", response_model=FavoritesJobResponse)
 async def get_favorites_job(job_id: str):
     response = await favorites_job_manager.get(job_id)

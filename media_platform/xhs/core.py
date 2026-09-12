@@ -18,6 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import os
 import time
 from typing import Dict, List, Optional
 
@@ -32,6 +33,9 @@ import config
 from base.base_crawler import AbstractCrawler
 from base.runtime_paths import resource_path, writable_path
 from tools import utils
+from tools.browser_launcher import (
+    BrowserUnavailableError, resolve_playwright_browser,
+)
 from tools.cdp_browser import CDPBrowserManager
 from var import crawler_type_var, source_keyword_var
 
@@ -40,6 +44,44 @@ from .exception import DataFetchError
 from .field import SearchSortType
 from .help import get_search_id
 from .login import XiaoHongShuLogin
+
+
+async def _resolve_self_user_id(context_page: Page) -> str:
+    """Read the logged-in account's own user id from the loaded page.
+
+    The v2 collected-notes endpoint requires ``user_id``, and neither the
+    cookies nor the signed client expose it. The SPA keeps the current profile
+    in ``window.__INITIAL_STATE__.user.userInfo``; the sidebar profile link is
+    used as a fallback. Returns ``""`` when neither is available.
+    """
+    try:
+        resolved = await context_page.evaluate("""() => {
+            try {
+                const u = window.__INITIAL_STATE__ &&
+                          window.__INITIAL_STATE__.user;
+                const node = u && u.userInfo;
+                const info = node && node.value !== undefined
+                    ? node.value : node;
+                if (info && typeof info === 'object') {
+                    const id = info.userId || info.user_id || '';
+                    if (id) return String(id);
+                }
+            } catch (e) { /* fall through to the DOM probe */ }
+            try {
+                const links = document.querySelectorAll(
+                    'a[href*="/user/profile/"]');
+                for (const link of links) {
+                    const href = link.getAttribute('href') || '';
+                    const parts = href.split('/').filter(Boolean);
+                    const at = parts.indexOf('profile');
+                    if (at !== -1 && parts[at + 1]) return parts[at + 1];
+                }
+            } catch (e) { return ''; }
+            return '';
+        }""")
+    except Exception:
+        return ""
+    return resolved if isinstance(resolved, str) else ""
 
 
 class XiaoHongShuCrawler(AbstractCrawler):
@@ -229,10 +271,16 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def fetch_favorites(self) -> None:
         """Fetch a bounded slice of the logged-in account's collections."""
         remaining = self._result_limit()
+        user_id = await _resolve_self_user_id(self.context_page)
+        if not user_id:
+            raise DataFetchError(
+                "无法识别当前小红书账号，请前往账号设置重新同步登录状态")
         cursor = ""
         while remaining > 0:
-            response = await self.xhs_client.get_collected_notes(cursor, min(remaining, 30))
-            items = response.get("items", []) if isinstance(response, dict) else []
+            response = await self.xhs_client.get_collected_notes(
+                cursor, min(remaining, 30), user_id)
+            # v2 collect/page 的列表字段是 ``notes``（旧版 v1 用的是 ``items``）。
+            items = response.get("notes") if isinstance(response, dict) else None
             if not isinstance(items, list) or not items:
                 break
             self._result_sink_call(items[:remaining])
@@ -320,6 +368,33 @@ class XiaoHongShuCrawler(AbstractCrawler):
     ) -> BrowserContext:
         """Launch browser and create browser context"""
         utils.logger.info("[XiaoHongShuCrawler.launch_browser] Begin create browser context ...")
+        # Resolve browser: CUSTOM_BROWSER_PATH > Chrome > Edge > bundled Chromium.
+        # Never unconditionally use channel="chrome".
+        executable_path, channel, backend = resolve_playwright_browser()
+        if backend == "playwright-chromium":
+            # Bundled Chromium is the fallback — verify it is actually installed.
+            bundled_path = getattr(chromium, "executable_path", None)
+            if not bundled_path or not os.path.isfile(bundled_path):
+                raise BrowserUnavailableError(
+                    "没有找到可用的浏览器，请安装 Chrome 或 Edge 后重试")
+            executable_path = bundled_path
+        utils.logger.info(
+            f"[XiaoHongShuCrawler.launch_browser] Using browser backend: {backend}")
+        launch_kwargs: Dict = {
+            "accept_downloads": True,
+            "headless": headless,
+            "proxy": playwright_proxy,  # type: ignore
+            "viewport": {
+                "width": 1920,
+                "height": 1080
+            },
+            "user_agent": user_agent,
+        }
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        elif channel:
+            launch_kwargs["channel"] = channel
+
         if config.SAVE_LOGIN_STATE:
             # feat issue #14
             # we will save login state to avoid login every time
@@ -327,18 +402,13 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 "browser_data", config.USER_DATA_DIR % config.PLATFORM))
             browser_context = await chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                accept_downloads=True,
-                headless=headless,
-                proxy=playwright_proxy,  # type: ignore
-                viewport={
-                    "width": 1920,
-                    "height": 1080
-                },
-                user_agent=user_agent,
+                **launch_kwargs,
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(
+                headless=headless, proxy=playwright_proxy,
+                executable_path=executable_path, channel=channel)  # type: ignore
             browser_context = await browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=user_agent)
             return browser_context
 

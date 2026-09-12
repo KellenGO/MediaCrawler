@@ -78,6 +78,17 @@ class FavoritesJobManager:
         job = self._active if self._active and self._active.job_id == job_id else self._recent
         return job.response() if job and job.job_id == job_id else None
 
+    async def latest(self) -> Optional[FavoritesJobResponse]:
+        """Return the most recent favourites job so the page can restore it.
+
+        The snapshot (including per-platform status, results and the original
+        ``completed_at``) lives in process memory only, so the favourites page
+        can render immediately after navigation or a browser refresh without
+        re-reading every platform. It is dropped when the backend restarts,
+        which is also when the cached copy would be gone anyway.
+        """
+        return self._recent.response() if self._recent else None
+
     async def _run(self, job: _Job) -> None:
         try:
             await asyncio.gather(*(self._run_platform(job, platform) for platform in job.order))

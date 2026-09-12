@@ -58,17 +58,31 @@ def test_favorites_job_interleaves_platforms_and_preserves_partial_results():
 @pytest.mark.asyncio
 async def test_xhs_and_douyin_favorites_are_bounded():
     xhs_batches = []
+
+    class XhsPage:
+        """Stand-in for the loaded SPA page that carries the account id."""
+
+        async def evaluate(self, _script):
+            return "self-user-id"
+
     xhs = SimpleNamespace(
         xhs_client=SimpleNamespace(get_collected_notes=lambda *_: None),
+        context_page=XhsPage(),
         _result_limit=lambda: 2,
         _result_sink_call=xhs_batches.append,
     )
+    seen_params = []
 
-    async def xhs_page(*_):
-        return {"items": [{"id": "1"}, {"id": "2"}, {"id": "3"}], "has_more": True, "cursor": "next"}
+    async def xhs_page(cursor, num, user_id):
+        seen_params.append((cursor, num, user_id))
+        return {"notes": [{"note_id": "1"}, {"note_id": "2"}, {"note_id": "3"}],
+                "has_more": True, "cursor": "next"}
+
     xhs.xhs_client.get_collected_notes = xhs_page
     await XiaoHongShuCrawler.fetch_favorites(xhs)
-    assert [item["id"] for item in xhs_batches[0]] == ["1", "2"]
+    assert [item["note_id"] for item in xhs_batches[0]] == ["1", "2"]
+    # v2 collect/page 必须带上当前账号自己的 user_id，否则平台回 -9109。
+    assert seen_params == [("", 2, "self-user-id")]
 
     dy_batches = []
     dy = SimpleNamespace(
@@ -81,6 +95,81 @@ async def test_xhs_and_douyin_favorites_are_bounded():
     dy.dy_client.get_collected_awemes = dy_page
     await DouYinCrawler.fetch_favorites(dy)
     assert [item["aweme_id"] for item in dy_batches[0]] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_xhs_favorites_without_account_id_fails_loudly():
+    """没有账号 id 时必须给出明确错误，而不是静默返回空列表。"""
+    from media_platform.xhs.exception import DataFetchError
+
+    class NoStatePage:
+        async def evaluate(self, _script):
+            return ""
+
+    xhs = SimpleNamespace(
+        xhs_client=SimpleNamespace(), context_page=NoStatePage(),
+        _result_limit=lambda: 5, _result_sink_call=lambda *_: None,
+    )
+    with pytest.raises(DataFetchError):
+        await XiaoHongShuCrawler.fetch_favorites(xhs)
+
+
+def test_xhs_collect_feed_cover_and_chinese_counts_are_normalized():
+    """收藏列表的封面藏在 cover.info_list，互动数是「10万」这种中文单位。"""
+    from aggregate_search.adapters import XhsAdapter
+
+    result = XhsAdapter().adapt([{
+        "note_id": "n1",
+        "display_title": "标题",
+        "type": "video",
+        "cover": {
+            "width": 2880,
+            "height": 3839,
+            "info_list": [
+                {"image_scene": "WB_PRV",
+                 "url": "http://sns-webpic-qc.xhscdn.com/a.jpg"},
+            ],
+        },
+        "interact_info": {"liked": True, "liked_count": "10万"},
+        "user": {"user_id": "u1", "nickname": "作者"},
+    }])[0]
+
+    assert result.cover_url == "http://sns-webpic-qc.xhscdn.com/a.jpg"
+    assert result.metrics == {"like_count": 100000}
+    assert result.content_id == "n1"
+    assert result.content_type == "video"
+    assert result.title == "标题"
+    assert result.author == "作者"
+    assert result.url == "https://www.xiaohongshu.com/explore/n1"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("10万", 100000), ("1.2万", 12000), ("1亿", 100000000),
+    ("1180", 1180), (220, 220), ("", 0), ("点赞", 0), (None, 0),
+])
+def test_xhs_count_parsing_covers_chinese_units(raw, expected):
+    from aggregate_search.adapters import XhsAdapter
+
+    assert XhsAdapter._parse_count(raw) == expected
+
+
+@pytest.mark.asyncio
+async def test_latest_favorites_snapshot_can_be_restored():
+    """页面重新进入时应能取回上一次结果，不必重新同步。"""
+    from api.services.favorites_job_manager import FavoritesJobManager
+
+    manager = FavoritesJobManager()
+    assert await manager.latest() is None
+
+    job = _Job(FavoritesJobRequest(platforms=["xhs"], limit_per_platform=1))
+    job.platforms["xhs"].status = "succeeded"
+    job.platforms["xhs"].result_count = 1
+    manager._recent = job
+
+    restored = await manager.latest()
+    assert restored is not None
+    assert restored.job_id == job.job_id
+    assert restored.platforms["xhs"].status == "succeeded"
 
 
 @pytest.mark.asyncio

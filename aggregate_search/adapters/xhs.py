@@ -225,6 +225,13 @@ class XhsAdapter(BasePlatformAdapter):
                  or cover_obj.get("url"))
             if self._valid_cover_url(c):
                 return c
+            # 收藏列表（v2 collect/page）把真实图片地址放在 cover.info_list[].url，
+            # cover 本身只有 width/height。
+            info_list = cover_obj.get("info_list") or []
+            if isinstance(info_list, list):
+                for info in info_list:
+                    if isinstance(info, dict) and self._valid_cover_url(info.get("url")):
+                        return info.get("url")
         # Image list first
         image_list = raw_item.get("image_list") or []
         if isinstance(image_list, list) and image_list:
@@ -259,6 +266,33 @@ class XhsAdapter(BasePlatformAdapter):
 
         return None
 
+    @staticmethod
+    def _parse_count(value: Any) -> int:
+        """Parse an interaction count that may carry a Chinese unit suffix.
+
+        搜索响应给的是纯数字字符串，而收藏列表给的是 ``"10万"`` / ``"1.2亿"``
+        这类带单位的文本。两者都必须还原成整数，否则互动排序会把所有收藏项
+        当成 0。无法解析时返回 0（不猜数字）。
+        """
+        if isinstance(value, bool) or value is None:
+            return 0
+        if isinstance(value, (int, float)):
+            return int(value)
+        text = str(value).strip().replace(",", "").replace(" ", "")
+        if not text:
+            return 0
+        for suffix, scale in (("亿", 100_000_000), ("万", 10_000),
+                              ("w", 10_000), ("W", 10_000)):
+            if text.endswith(suffix):
+                try:
+                    return int(float(text[: -len(suffix)]) * scale)
+                except ValueError:
+                    return 0
+        try:
+            return int(float(text))
+        except ValueError:
+            return 0
+
     def _extract_metrics(self, raw_item: Dict) -> Dict[str, int]:
         interact = raw_item.get("interact_info") or {}
         metrics: Dict[str, int] = {}
@@ -269,7 +303,7 @@ class XhsAdapter(BasePlatformAdapter):
                 ("comment_count", "comment_count"),
                 ("share_count", "share_count"),
             ]:
-                val = self._safe_int(interact.get(src), 0)
+                val = self._parse_count(interact.get(src))
                 if val > 0:
                     metrics[dst] = val
         return metrics

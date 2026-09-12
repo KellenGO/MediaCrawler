@@ -18,6 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import os
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import (
@@ -32,6 +33,9 @@ import config
 from base.base_crawler import AbstractCrawler
 from base.runtime_paths import resource_path, writable_path
 from tools import utils
+from tools.browser_launcher import (
+    BrowserUnavailableError, resolve_playwright_browser,
+)
 from tools.cdp_browser import CDPBrowserManager
 from var import crawler_type_var, source_keyword_var
 
@@ -330,23 +334,45 @@ class DouYinCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """Launch browser and create browser context"""
+        # Resolve browser: CUSTOM_BROWSER_PATH > Chrome > Edge > bundled Chromium.
+        # Never unconditionally use channel="chrome".
+        executable_path, channel, backend = resolve_playwright_browser()
+        if backend == "playwright-chromium":
+            # Bundled Chromium is the fallback — verify it is actually installed.
+            bundled_path = getattr(chromium, "executable_path", None)
+            if not bundled_path or not os.path.isfile(bundled_path):
+                raise BrowserUnavailableError(
+                    "没有找到可用的浏览器，请安装 Chrome 或 Edge 后重试")
+            executable_path = bundled_path
+        utils.logger.info(
+            f"[DouYinCrawler.launch_browser] Using browser backend: {backend}")
+        launch_kwargs: Dict = {
+            "accept_downloads": True,
+            "headless": headless,
+            "proxy": playwright_proxy,  # type: ignore
+            "viewport": {
+                "width": 1920,
+                "height": 1080
+            },
+            "user_agent": user_agent,
+        }
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        elif channel:
+            launch_kwargs["channel"] = channel
+
         if config.SAVE_LOGIN_STATE:
             user_data_dir = str(writable_path(
                 "browser_data", config.USER_DATA_DIR % config.PLATFORM))
             browser_context = await chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                accept_downloads=True,
-                headless=headless,
-                proxy=playwright_proxy,  # type: ignore
-                viewport={
-                    "width": 1920,
-                    "height": 1080
-                },
-                user_agent=user_agent,
+                **launch_kwargs,
             )  # type: ignore
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(
+                headless=headless, proxy=playwright_proxy,
+                executable_path=executable_path, channel=channel)  # type: ignore
             browser_context = await browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=user_agent)
             return browser_context
 

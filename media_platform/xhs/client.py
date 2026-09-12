@@ -376,11 +376,21 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         }
         return await self.post(uri, data)
 
-    async def get_collected_notes(self, cursor: str = "", num: int = 20) -> Dict:
-        """Return the current account's collected-note feed (read only)."""
-        return await self.get("/api/sns/web/v1/note/collect/page", {
+    async def get_collected_notes(
+        self, cursor: str = "", num: int = 20, user_id: str = "",
+    ) -> Dict:
+        """Return the current account's collected-note feed (read only).
+
+        Round 18: the legacy ``v1`` path was retired by the platform — it now
+        answers ``404 page not found`` with an HTML body, which surfaces as a
+        ``JSONDecodeError``. ``v2`` is the live endpoint and additionally
+        requires the logged-in account's own ``user_id`` (without it the
+        platform answers ``-9109 参数错误``).
+        """
+        return await self.get("/api/sns/web/v2/note/collect/page", {
             "cursor": cursor,
             "num": min(max(num, 1), 30),
+            "user_id": user_id,
             "image_formats": "jpg,webp,avif",
         })
 
