@@ -21,7 +21,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Record process start before heavy imports so worker-ready timing stays stable.
 _PROCESS_START = time.perf_counter()

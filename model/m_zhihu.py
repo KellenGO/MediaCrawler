@@ -42,24 +42,6 @@ class ZhihuContent(BaseModel):
     user_nickname: str = Field(default="", description="User nickname (masked)")
 
 
-class ZhihuComment(BaseModel):
-    """
-    Zhihu comment
-    """
-
-    comment_id: str = Field(default="", description="Comment ID")
-    parent_comment_id: str = Field(default="", description="Parent comment ID")
-    content: str = Field(default="", description="Comment content")
-    publish_time: int = Field(default=0, description="Publish time")
-    sub_comment_count: int = Field(default=0, description="Sub-comment count")
-    like_count: int = Field(default=0, description="Like count")
-    dislike_count: int = Field(default=0, description="Dislike count")
-    content_id: str = Field(default="", description="Content ID")
-    content_type: str = Field(default="", description="Content type (article | answer | zvideo)")
-    creator_hash: str = Field(default="", description="Creator anonymized hash")
-    user_nickname: str = Field(default="", description="User nickname (masked)")
-
-
 class ZhihuCreator(BaseModel):
     """
     Zhihu creator (in-memory only; personal profile is no longer persisted)

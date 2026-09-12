@@ -24,7 +24,6 @@ RUNTIME_DIRECTORIES = (
 RUNTIME_FILES = (
     "MediaCrawler.bat",
     "main.py",
-    "recv_sms.py",
     "var.py",
     "pyproject.toml",
     "requirements.txt",

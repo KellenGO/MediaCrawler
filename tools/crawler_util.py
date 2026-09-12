@@ -26,8 +26,6 @@
 import base64
 import random
 import re
-import urllib
-import urllib.parse
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple, cast
 
@@ -126,13 +124,6 @@ def get_user_agent() -> str:
     return random.choice(ua_list)
 
 
-def get_mobile_user_agent() -> str:
-    ua_list = [
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
-    ]
-    return random.choice(ua_list)
-
-
 def convert_cookies(cookies: Optional[List[Cookie]]) -> Tuple[str, Dict]:
     if not cookies:
         return "", {}
@@ -208,12 +199,3 @@ def extract_text_from_html(html: str) -> str:
     # Remove all other tags
     clean_text = re.sub(r'<[^>]+>', '', clean_html).strip()
     return clean_text
-
-def extract_url_params_to_dict(url: str) -> Dict:
-    """Extract URL parameters to dict"""
-    url_params_dict = dict()
-    if not url:
-        return url_params_dict
-    parsed_url = urllib.parse.urlparse(url)
-    url_params_dict = dict(urllib.parse.parse_qsl(parsed_url.query))
-    return url_params_dict

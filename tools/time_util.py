@@ -27,33 +27,6 @@ import time
 from datetime import datetime, timedelta, timezone
 
 
-def get_current_timestamp() -> int:
-    """
-    Get current timestamp (13 digits): 1701493264496
-    :return:
-    """
-    return int(time.time() * 1000)
-
-
-def get_current_date() -> str:
-    """
-    Get current date: '2023-12-02'
-    :return:
-    """
-    return time.strftime('%Y-%m-%d', time.localtime())
-
-
-def get_time_str_from_unix_time(unixtime):
-    """
-    Unix integer timestamp ==> datetime string
-    :param unixtime:
-    :return:
-    """
-    if int(unixtime) > 1000000000000:
-        unixtime = int(unixtime) / 1000
-    return time.strftime('%Y-%m-%d %X', time.localtime(unixtime))
-
-
 def get_unix_time_from_time_str(time_str):
     """
     Time string ==> Unix integer timestamp, precise to seconds

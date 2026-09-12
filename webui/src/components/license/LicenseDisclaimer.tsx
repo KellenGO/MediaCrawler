@@ -9,11 +9,6 @@ export function isLicenseAccepted(): boolean {
   return localStorage.getItem(LICENSE_KEY) === 'true'
 }
 
-// 清除协议接受状态
-export function clearLicenseAccepted(): void {
-  localStorage.removeItem(LICENSE_KEY)
-}
-
 interface LicenseDisclaimerProps {
   onAccept: () => void
 }

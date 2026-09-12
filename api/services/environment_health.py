@@ -131,12 +131,6 @@ def _platform_statuses() -> Dict[str, HealthPlatformStatus]:
     return result
 
 
-def reset_health_cache() -> None:
-    """Reset the local browser probe cache for tests or development reloads."""
-    global _browser_cache
-    _browser_cache = None
-
-
 async def build_health_response() -> HealthResponse:
     browser_available, browser_backend = await _browser_status()
     import config

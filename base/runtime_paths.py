@@ -28,14 +28,3 @@ def resource_path(*parts: str) -> Path:
 def writable_path(*parts: str) -> Path:
     """Resolve data that must survive restarts outside PyInstaller resources."""
     return application_root().joinpath(*parts)
-
-
-def worker_command(*args: str) -> list[str]:
-    """Build the current-mode command for aggregate worker subprocesses."""
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--aggregate-worker", *args]
-    return [
-        sys.executable,
-        str(resource_path("aggregate_search", "worker.py")),
-        *args,
-    ]

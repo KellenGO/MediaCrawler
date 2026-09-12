@@ -169,17 +169,6 @@ class CookieFormatInvalidError(Exception):
         super().__init__(message)
 
 
-class RequiredLoginCookieMissingError(Exception):
-    """Cookies were read, but none of the platform's login cookies exist."""
-
-    def __init__(self, message: str = "当前浏览器没有读取到有效登录会话，"
-                                      "请确认扩展安装在实际登录账号所使用的 Edge profile 中",
-                 diagnostics: Optional[Dict[str, Any]] = None):
-        self.safe_code = "required_login_cookie_missing"
-        self.diagnostics = diagnostics or {}
-        super().__init__(message)
-
-
 class ExtensionProtocolOutdatedError(Exception):
     """The extension speaks a different wire protocol version."""
 

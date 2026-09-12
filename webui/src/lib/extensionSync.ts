@@ -46,9 +46,6 @@ export const SYNC_RESPONSE_TIMEOUT_MS = 70000;
 export const EXTENSION_PROBE_TOTAL_MS = 6000;
 export const EXTENSION_PROBE_INTERVAL_MS = 400;
 
-/** @deprecated 用 EXTENSION_PROBE_TOTAL_MS；保留导出避免旧引用断裂。 */
-export const EXTENSION_PROBE_TIMEOUT_MS = EXTENSION_PROBE_TOTAL_MS;
-
 export const ACCOUNTS_API_BASE = "/api/search/accounts";
 
 /** 扩展 sync-response 携带的安全字段（无任何 Cookie 值）。 */
