@@ -34,10 +34,12 @@ import {
   createBulkSyncGuard,
   decideAutoSync,
   runBulkSync,
+  shouldAnnounceAutoSync,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
 } from "@/lib/accountBulkSync";
 import {
+  EXTENSION_PROBE_TOTAL_MS,
   detectExtension,
   mapSyncResultToOutcome,
   requestPlatformSync,
@@ -47,10 +49,13 @@ import {
 /** 页面重新可见后，等一小段再评估，避免切换标签时立刻发起同步。 */
 const RESUME_SETTLE_MS = 1000;
 
+/** 同步结束后结果留在页面上的时间（之后自动收起，不长期占用版面）。 */
+const NOTE_VISIBLE_MS = 8000;
+
 export interface AutoAccountSyncState {
   /** 自动同步是否正在进行。 */
   running: boolean;
-  /** 最近一次自动同步的结果文案（null = 还没跑过）。 */
+  /** 最近一次自动同步的结果文案（null = 不需要提示）。 */
   note: string | null;
 }
 
@@ -59,6 +64,20 @@ export function useAutoAccountSync(): AutoAccountSyncState {
   const [extensionState, setExtensionState] = useState<ExtensionState>("checking");
   const [running, setRunning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** 结果提示：留一段时间再收起（自动同步必须让人看得见）。 */
+  const showNote = useCallback((text: string | null) => {
+    if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
+    noteTimerRef.current = null;
+    setNote(text);
+    if (text) {
+      noteTimerRef.current = setTimeout(() => {
+        noteTimerRef.current = null;
+        setNote(null);
+      }, NOTE_VISIBLE_MS);
+    }
+  }, []);
 
   // guard 必须同步持有（React state 在一次事件内可能还没更新）。
   const guardRef = useRef<ReturnType<typeof createBulkSyncGuard> | null>(null);
@@ -91,7 +110,7 @@ export function useAutoAccountSync(): AutoAccountSyncState {
     };
     lastAttemptRef.current = Date.now();
     setRunning(true);
-    setNote("正在自动同步登录状态…");
+    showNote("正在自动同步登录状态…");
     try {
       const result = await runBulkSync({
         platforms,
@@ -124,33 +143,49 @@ export function useAutoAccountSync(): AutoAccountSyncState {
         if (result.blockReason !== "search_in_progress") {
           toast.warning(buildBulkBlockedMessage(result.blockReason));
         }
-        setNote(buildBulkBlockedMessage(result.blockReason));
+        showNote(buildBulkBlockedMessage(result.blockReason));
       } else {
-        const summary = buildBulkSummaryMessage(summarizeBulkOutcomes(result.outcomes));
-        if (summary.tone === "success") {
-          toast.success(summary.title);
-        } else if (summary.tone === "warning") {
-          toast.warning(summary.title, { description: summary.description });
+        const counts = summarizeBulkOutcomes(result.outcomes);
+        if (!shouldAnnounceAutoSync(counts)) {
+          // 浏览器里本来就没有可同步的会话（例如四个平台都没登录过）：
+          // 这不是用户需要立刻处理的事，账号徽章已经说明了状态，保持安静，
+          // 否则每次打开程序都会弹一条失败提示。
+          showNote(null);
+        } else {
+          const summary = buildBulkSummaryMessage(counts);
+          if (summary.tone === "success") {
+            toast.success(summary.title);
+          } else if (summary.tone === "warning") {
+            toast.warning(summary.title, { description: summary.description });
+          } else {
+            // "已导入待确认"这类结果也必须看得见 —— 否则用户会以为什么都没发生。
+            toast.info(summary.title);
+          }
+          showNote(summary.title);
         }
-        setNote(summary.title);
       }
     } finally {
       setRunning(false);
       guard.finish();
     }
-  }, []);
+  }, [showNote]);
 
   /**
    * 评估是否需要自动同步。
    * `scheduleRetry`（回到前台时）会在冷却未到时补一次定时重试，
    * 保证"去浏览器登录完再切回来"最终一定会被处理。
+   * `extensionState` 允许调用方传入刚刚探测到的结果，避免等 React
+   * 重新渲染后才能读到新状态。
    */
-  const evaluate = useCallback((opts?: { scheduleRetry?: boolean }) => {
+  const evaluate = useCallback((opts?: {
+    scheduleRetry?: boolean;
+    extensionState?: ExtensionState;
+  }) => {
     const state = latest.current;
     const last = lastAttemptRef.current;
     const decision = decideAutoSync({
       accounts: state.accounts,
-      extensionState: state.extensionState,
+      extensionState: opts?.extensionState ?? state.extensionState,
       apiRunning: state.apiRunning,
       syncing: state.running,
       msSinceLastAttempt: last === null ? null : Date.now() - last,
@@ -176,18 +211,33 @@ export function useAutoAccountSync(): AutoAccountSyncState {
   }, [evaluate, accounts, apiRunning, extensionState]);
 
   // 页面回到前台：从浏览器登录完再切回来是最常见的场景。
+  // 同时重新探测扩展 —— 用户可能刚在扩展管理页启用/重新加载了扩展，
+  // 或者 content script 直到此刻才注入完成。
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
     const onResume = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => evaluate({ scheduleRetry: true }), RESUME_SETTLE_MS);
+      timer = setTimeout(async () => {
+        let probeState: ExtensionState | undefined;
+        if (latest.current.extensionState !== "connected") {
+          const probe = await detectExtension({ totalMs: EXTENSION_PROBE_TOTAL_MS });
+          if (cancelled) return;
+          probeState = probe.state;
+          setExtensionState(probe.state);
+        }
+        if (cancelled) return;
+        evaluate({ scheduleRetry: true, extensionState: probeState });
+      }, RESUME_SETTLE_MS);
     };
     document.addEventListener("visibilitychange", onResume);
     window.addEventListener("focus", onResume);
     return () => {
+      cancelled = true;
       if (timer) clearTimeout(timer);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
       document.removeEventListener("visibilitychange", onResume);
       window.removeEventListener("focus", onResume);
     };

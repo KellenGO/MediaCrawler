@@ -22,6 +22,8 @@
     "src/lib/searchPopover.ts",
     "src/lib/accounts.ts",
     "src/lib/accountBulkSync.ts",
+    "src/lib/accountGate.ts",
+    "src/lib/extensionSync.ts",
     "src/lib/platformLimits.ts",
     "src/lib/environmentHealth.ts",
     "src/lib/statusDisplay.ts",

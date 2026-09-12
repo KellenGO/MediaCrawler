@@ -18,6 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AUTO_SYNC_COOLDOWN_MS,
   BULK_SYNC_PLATFORM_ORDER,
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
@@ -26,6 +27,7 @@ import {
   platformsNeedingSync,
   resolveBulkTargets,
   runBulkSync,
+  shouldAnnounceAutoSync,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
   type SyncAttemptOutcome,
@@ -345,7 +347,7 @@ const decided = (over: Partial<Parameters<typeof decideAutoSync>[0]> = {}) =>
     extensionState: "connected",
     apiRunning: true,
     syncing: false,
-    alreadyAttempted: false,
+    msSinceLastAttempt: null,
     ...over,
   });
 
@@ -368,10 +370,18 @@ test("decideAutoSync：四个平台全部已验证 → 什么都不做", () => {
   assert.equal(d.skipReason, "nothing_to_sync");
 });
 
-test("decideAutoSync：每个页面生命周期只自动同步一次", () => {
-  const d = decided({ alreadyAttempted: true });
-  assert.equal(d.run, false);
-  assert.equal(d.skipReason, "already_attempted");
+test("decideAutoSync：冷却未到不重复尝试（首次尝试之前不受冷却限制）", () => {
+  // 从未尝试过 → 可以跑
+  assert.equal(decided({ msSinceLastAttempt: null }).run, true);
+  // 刚跑过 → 冷却
+  const cooling = decided({ msSinceLastAttempt: 1000 });
+  assert.equal(cooling.run, false);
+  assert.equal(cooling.skipReason, "cooldown");
+  // 冷却结束 → 可以再跑（覆盖"回前台后发现已登录"的场景）
+  assert.equal(decided({ msSinceLastAttempt: AUTO_SYNC_COOLDOWN_MS }).run, true);
+  // 自定义冷却
+  assert.equal(
+    decided({ msSinceLastAttempt: 5000, cooldownMs: 1000 }).run, true);
 });
 
 test("decideAutoSync：已有队列在跑时不叠加", () => {
@@ -389,10 +399,34 @@ test("decideAutoSync：扩展未连接/过旧、API 不可用时都不启动", (
   assert.equal(decided({ accounts: null }).skipReason, "accounts_loading");
 });
 
-test("decideAutoSync：判定顺序 —— 先看是否已尝试，再看阻断条件", () => {
-  // 已尝试过就不该因为其他条件改变而再次启动
-  const d = decided({ alreadyAttempted: true, extensionState: "connected", apiRunning: true });
-  assert.equal(d.run, false);
-  assert.equal(d.skipReason, "already_attempted");
+test("decideAutoSync：判定顺序 —— 队列在跑 / 冷却优先于其他条件", () => {
+  assert.equal(
+    decided({ syncing: true, extensionState: "not-installed" }).skipReason,
+    "already_syncing");
+  assert.equal(
+    decided({ msSinceLastAttempt: 0, apiRunning: false }).skipReason,
+    "cooldown");
 });
+
+// ── 自动同步的打扰策略 ─────────────────────────────────────────────────
+
+test("shouldAnnounceAutoSync：同步到东西（或有会话待确认）才提示", () => {
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 1, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 1 }), true);
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 0, imported: 1, verifying: 0, unavailable: 0, failed: 0, total: 1 }), true);
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 0, imported: 0, verifying: 1, unavailable: 0, failed: 0, total: 1 }), true);
+});
+
+test("shouldAnnounceAutoSync：全部失败/不可用 → 保持安静", () => {
+  // 浏览器里本来就没登录过：每次打开程序都弹"N 个失败"是噪音
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 0, imported: 0, verifying: 0, unavailable: 0, failed: 4, total: 4 }), false);
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 0, imported: 0, verifying: 0, unavailable: 2, failed: 2, total: 4 }), false);
+  assert.equal(shouldAnnounceAutoSync(
+    { verified: 0, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 0 }), false);
+});
+
 

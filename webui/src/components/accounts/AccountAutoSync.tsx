@@ -11,12 +11,12 @@ import { useAutoAccountSync } from "@/hooks/useAutoAccountSync";
 
 export function AccountAutoSync() {
   const { running, note } = useAutoAccountSync();
-  if (!running) return null;
+  if (!running && !note) return null;
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-3">
       <div className="inline-flex items-center gap-2 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary px-3.5 py-2 text-[12.5px] text-cyber-text-muted">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        {note || "正在自动同步登录状态…"}
+        {running && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        {running ? (note || "正在自动同步登录状态…") : note}
       </div>
     </div>
   );

@@ -35,8 +35,19 @@ export const EXTENSION_MIN_VERSION = "1.1.3";
  */
 export const SYNC_RESPONSE_TIMEOUT_MS = 70000;
 
-/** 检测扩展的默认等待时间（content script 是同步注入的，800ms 足够）。 */
-export const EXTENSION_PROBE_TIMEOUT_MS = 800;
+/**
+ * 探测扩展的总窗口与重复间隔。
+ *
+ * 必须**反复**发 ping，不能只发一次：扩展的 content script 是
+ * ``run_at: document_idle`` 注入的，可能晚于 React 挂载并发出第一次 ping ——
+ * 单次 ping 会石沉大海，把已安装的扩展误判成"未安装"，自动同步就永远不会
+ * 启动。（账号页是懒加载 chunk、挂载较晚，掩盖了这个竞态。）
+ */
+export const EXTENSION_PROBE_TOTAL_MS = 6000;
+export const EXTENSION_PROBE_INTERVAL_MS = 400;
+
+/** @deprecated 用 EXTENSION_PROBE_TOTAL_MS；保留导出避免旧引用断裂。 */
+export const EXTENSION_PROBE_TIMEOUT_MS = EXTENSION_PROBE_TOTAL_MS;
 
 export const ACCOUNTS_API_BASE = "/api/search/accounts";
 
@@ -95,19 +106,27 @@ export function classifyExtensionProbe(
 }
 
 /**
- * 探测扩展是否安装且版本可用：向 content script 发 ping，等一次 pong。
- * 超时未收到 pong → 未安装（或本页在扩展注入前就已加载，需要刷新）。
+ * 探测扩展是否安装且版本可用：反复向 content script 发 ping 直到收到 pong，
+ * 超过总窗口仍未收到才判定"未安装"。
+ *
+ * 为什么必须重试：content script 以 ``document_idle`` 注入，可能晚于应用挂载
+ * 和第一次 ping。只发一次会误判（见 EXTENSION_PROBE_TOTAL_MS 的注释）。
  */
 export function detectExtension(
-  timeoutMs: number = EXTENSION_PROBE_TIMEOUT_MS
+  opts?: { totalMs?: number; intervalMs?: number }
 ): Promise<ExtensionProbe> {
+  const totalMs = opts?.totalMs ?? EXTENSION_PROBE_TOTAL_MS;
+  const intervalMs = opts?.intervalMs ?? EXTENSION_PROBE_INTERVAL_MS;
   return new Promise((resolve) => {
     let settled = false;
+    let poller: ReturnType<typeof setInterval> | null = null;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
     const finish = (probe: ExtensionProbe) => {
       if (settled) return;
       settled = true;
       window.removeEventListener("message", onMessage);
-      clearTimeout(timer);
+      if (poller) clearInterval(poller);
+      if (deadline) clearTimeout(deadline);
       resolve(probe);
     };
     const onMessage = (event: MessageEvent) => {
@@ -119,9 +138,15 @@ export function detectExtension(
         version: typeof msg.extension_version === "string" ? msg.extension_version : "",
       });
     };
-    const timer = setTimeout(() => finish({ state: "not-installed", version: "" }), timeoutMs);
     window.addEventListener("message", onMessage);
-    window.postMessage({ source: "mc-accounts", type: "ping" }, "*");
+    const ping = () => window.postMessage({ source: "mc-accounts", type: "ping" }, "*");
+    ping();
+    poller = setInterval(() => {
+      if (settled) return;
+      ping();
+    }, intervalMs);
+    deadline = setTimeout(
+      () => finish({ state: "not-installed", version: "" }), totalMs);
   });
 }
 

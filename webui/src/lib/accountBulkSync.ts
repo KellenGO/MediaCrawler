@@ -228,6 +228,18 @@ export function buildBulkSummaryMessage(counts: BulkOutcomeCounts): BulkSummaryM
   return { tone: "info", title: `同步完成：${parts.join("，")}` };
 }
 
+/**
+ * 自动同步是否值得提示用户。
+ *
+ * 用户没主动要求这次同步，所以只在真的同步到东西（或有会话待确认）时才提示：
+ * 浏览器里本来就没有可同步的会话时保持安静，否则每次打开程序都会弹一条
+ * "N 个失败"，而账号徽章与平台卡片已经说明了状态。
+ */
+export function shouldAnnounceAutoSync(counts: BulkOutcomeCounts): boolean {
+  if (counts.total === 0) return false;
+  return counts.verified + counts.imported + counts.verifying > 0;
+}
+
 /** 全局阻断提示文案（固定安全文案）。 */
 export function buildBulkBlockedMessage(reason: BulkSyncBlockReason | undefined): string {
   switch (reason) {

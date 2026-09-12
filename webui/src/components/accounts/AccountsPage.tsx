@@ -30,12 +30,9 @@ import {
 } from "@/lib/accountBulkSync";
 import {
   ACCOUNTS_API_BASE,
-  EXTENSION_MIN_VERSION,
-  EXTENSION_PROTOCOL_VERSION,
   SYNC_RESPONSE_TIMEOUT_MS,
   detectExtension,
   requestPlatformSync,
-  versionAtLeast,
   type SyncResult,
 } from "@/lib/extensionSync";
 
@@ -260,35 +257,20 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   const [auxOpen, setAuxOpen] = useState(false);
   const [auxPlatform, setAuxPlatform] = useState<string | null>(null);
   const [auxStatus, setAuxStatus] = useState<LoginStatus | null>(null);
-  const extPong = useRef(false);
   const [extensionVersion, setExtensionVersion] = useState("");
 
-  // ── 扩展检测（content script ping/pong）──────────────────────────────
+  // ── 扩展检测（content script ping/pong，协议实现在 lib/extensionSync）──
   useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      const msg = event.data;
-      if (msg && msg.source === "mc-accounts" && msg.type === "pong") {
-        extPong.current = true;
-        const proto = Number(msg.extension_protocol_version);
-        const ver = typeof msg.extension_version === "string" ? msg.extension_version : "";
-        setExtensionVersion(ver);
-        // 协议版本 2 只是兼容门；实际扩展版本必须 ≥ 1.1.3 —— 否则可能仍是
-        // Round 8 旧脚本（协议同为 2，但 ready/pong 不带 extension_version，
-        // 后端已引入的 login_marker_presence 等字段不会被正确转发）。
-        setExtensionState(
-          proto === EXTENSION_PROTOCOL_VERSION && versionAtLeast(ver, EXTENSION_MIN_VERSION)
-            ? "connected" : "outdated");
-      }
-    };
-    window.addEventListener("message", onMessage);
-    window.postMessage({ source: "mc-accounts", type: "ping" }, "*");
-    const t = setTimeout(() => {
-      if (!extPong.current) setExtensionState("not-installed");
-    }, 800);
-    return () => {
-      window.removeEventListener("message", onMessage);
-      clearTimeout(t);
-    };
+    let cancelled = false;
+    void detectExtension().then((probe) => {
+      if (cancelled) return;
+      setExtensionVersion(probe.version);
+      // 协议版本 2 只是兼容门；实际扩展版本必须 ≥ 1.1.3 —— 否则可能仍是
+      // Round 8 旧脚本（协议同为 2，但 ready/pong 不带 extension_version，
+      // 后端已引入的 login_marker_presence 等字段不会被正确转发）。
+      setExtensionState(probe.state);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const setBusyPlatform = (platform: string | null, label = "") => {
@@ -359,39 +341,9 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       }
       setBusyPlatform(platform, "syncing");
       try {
-        // 1. 申请一次性票据
-        const { data: ticketData } = await axios.post(`${API_BASE}/sync-ticket`, { platform });
-        const ticket: string = ticketData.ticket;
-        // 2. 请求扩展同步
-        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const result = await new Promise<SyncResult | null>((resolve) => {
-          let settled = false;
-          let timeout: ReturnType<typeof setTimeout> | null = null;
-          const onMessage = (event: MessageEvent) => {
-            const msg = event.data;
-            if (!msg || msg.source !== "mc-accounts-response" || msg.type !== "sync-response") return;
-            if (msg.request_id !== requestId) return;
-            if (settled) return;
-            settled = true;
-            if (timeout) clearTimeout(timeout);
-            window.removeEventListener("message", onMessage);
-            resolve(msg);
-          };
-          timeout = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            window.removeEventListener("message", onMessage);
-            resolve(null);
-          }, SYNC_RESPONSE_TIMEOUT_MS);
-          window.addEventListener("message", onMessage);
-          window.postMessage({
-            source: "mc-accounts",
-            type: "sync-request",
-            ticket,
-            platform,
-            request_id: requestId,
-          }, "*");
-        });
+        // 申请一次性票据 → 请求扩展读取并上报当前浏览器的平台会话
+        // （协议往返在 lib/extensionSync，与自动同步共用同一份实现）。
+        const result = await requestPlatformSync(platform);
 
         if (result === null) {
           setBusyPlatform(platform, "");
@@ -553,9 +505,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
    */
   const runSyncQueue = useCallback(async (
     platforms: readonly PlatformSlug[] | undefined,
-    opts?: { silent?: boolean },
   ) => {
-    const silent = opts?.silent === true;
     const guard = bulkGuardRef.current;
     if (!guard || !guard.tryStart()) return; // 双击/并发 guard：拒绝第二套队列
     // 明确全局阻断（扩展未连接/过旧、API 不可用）→ 不启动队列，直接提示。
@@ -568,8 +518,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             ? "api_unavailable"
             : null;
     if (immediateBlock) {
-      if (!silent) toast.warning(buildBulkBlockedMessage(immediateBlock));
-      else setAutoSyncNote(buildBulkBlockedMessage(immediateBlock));
+      toast.warning(buildBulkBlockedMessage(immediateBlock));
       guard.finish();
       return;
     }
@@ -580,6 +529,7 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
     try {
       const result = await runBulkSync({
         platforms,
+        // 单平台 toast 关闭（silent），最终只出一条汇总 toast。
         syncOne: (platform) => syncAccount(platform, { silent: true }),
         checkBlock: () => (
           extensionState !== "connected"
@@ -595,13 +545,10 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       });
       // 汇总：全局阻断 → 一条总体提示；否则 → 一条汇总 toast。
       if (result.blocked && result.blockReason) {
-        const text = buildBulkBlockedMessage(result.blockReason);
-        if (silent) setAutoSyncNote(text); else toast.warning(text);
+        toast.warning(buildBulkBlockedMessage(result.blockReason));
       } else {
         const summary = buildBulkSummaryMessage(summarizeBulkOutcomes(result.outcomes));
-        if (silent) {
-          setAutoSyncNote(summary.title);
-        } else if (summary.tone === "success") {
+        if (summary.tone === "success") {
           toast.success(summary.title);
         } else if (summary.tone === "warning") {
           toast.warning(summary.title, { description: summary.description });
@@ -724,17 +671,9 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
           && `扩展已安装并连接（v${extensionVersion || "?"}，协议 v2）`}
         {extensionState === "outdated"
           && `扩展版本过旧${extensionVersion ? `（检测到 v${extensionVersion}）` : ""}，请在 edge://extensions 点击"重新加载"后刷新本页`}
-        {extensionState === "not-installed" && "未检测到扩展（安装后需刷新本页）"}
+        {extensionState === "not-installed" && "未检测到扩展（安装后刷新本页，或切走再切回以重新检测）"}
         {apiRunning === false && " · 本地 API 未运行"}
       </div>
-
-      {/* 自动同步结果（进页面时自动检测；不弹 toast） */}
-      {autoSyncNote && (
-        <div className="mb-5 -mt-2 px-4 py-2.5 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary text-[12.5px] text-cyber-text-muted w-fit">
-          <ShieldCheck className="w-3.5 h-3.5 inline mr-1.5" />
-          {autoSyncNote}
-        </div>
-      )}
 
       {/* 平台卡片：统一浅色账号卡 */}
       <div className="flex flex-col gap-3">
