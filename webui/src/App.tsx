@@ -4,6 +4,7 @@ import { Header, type ViewMode } from '@/components/layout/Header'
 import { AuthorFooter } from '@/components/layout/AuthorFooter'
 import { LicenseDisclaimer, isLicenseAccepted } from '@/components/license/LicenseDisclaimer'
 import { SearchPage } from '@/components/search/SearchPage'
+import { AccountAutoSync } from '@/components/accounts/AccountAutoSync'
 
 // 非搜索页按需加载，搜索主页面保持同步加载。
 const AccountsPage = lazy(() =>
@@ -50,6 +51,9 @@ function App() {
       {licenseAccepted && !showDisclaimer && (
         <Header viewMode={viewMode} onNavigate={setViewMode} onShowDisclaimer={handleShowDisclaimer} />
       )}
+
+      {/* 打开程序即自动检测并同步登录状态（结果走 toast，进行中给出细提示） */}
+      {licenseAccepted && !showDisclaimer && <AccountAutoSync />}
 
       {/* Main Area */}
       <main className="flex-1 w-full">

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, List, Optional, Sequence
 
@@ -13,6 +14,15 @@ from .models import UnifiedSearchResult, clean_snippet
 HYDRATION_MAX_RESULTS = 12
 HYDRATION_CONCURRENCY = 3
 HYDRATION_TIMEOUT_SECONDS = 8.0
+
+
+def metric_candidates(results: Sequence[UnifiedSearchResult]) -> List[UnifiedSearchResult]:
+    """Counters need their own selection, independent of snippet quality/rank."""
+    from .favorite_metrics import CACHE_TTL, TARGETS
+    return [r for r in results if r.platform in ("bilibili", "zhihu")
+            and not TARGETS[r.platform] <= r.metrics.keys()
+            and not (r.metrics_status in ("partial", "unavailable") and r.metrics_updated_at
+                     and 0 <= time.time() - r.metrics_updated_at < CACHE_TTL)]
 
 
 def _plain(value: Optional[str]) -> str:

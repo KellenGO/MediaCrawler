@@ -21,7 +21,7 @@ from aggregate_search.models import (
     UnifiedSearchResult, interleave_results, make_dedup_key,
     is_valid_platform,
 )
-from aggregate_search.hydration import hydration_candidates
+from aggregate_search.hydration import hydration_candidates, metric_candidates
 from aggregate_search.protocol import parse_event_line, WorkerRequest
 from base.runtime_paths import application_root
 from ..schemas.search import (
@@ -444,7 +444,8 @@ class SearchJobManager:
         # overall becomes terminal immediately, while GET /jobs keeps polling
         # only for the lightweight snippet updates.
         if (not job._cancelled and not job.hydration_cancel_event.is_set()
-                and hydration_candidates(job.response_results())):
+                and (hydration_candidates(job.response_results()) or metric_candidates(
+                    [r for rows in job.platform_results.values() for r in rows]))):
             job.hydration_status = "running"
             job.hydration_task = asyncio.create_task(
                 self._run_hydration(job), name=f"hydrate-{job.job_id}")
@@ -476,7 +477,14 @@ class SearchJobManager:
 
     async def _run_hydration(self, job: "_ActiveJob") -> None:
         hydrator = ResultHydrator()
+        metrics_results = []
         try:
+            metrics_results = metric_candidates(
+                [result for platform, rows in job.platform_results.items() for result in rows
+                 if job.platforms_state[platform].status in ("succeeded", "empty")
+                 and not self.cooldowns.remaining(platform)])
+            if metrics_results:
+                await hydrator.hydrate_metrics(metrics_results, job.hydration_cancel_event, job.update_metrics)
             updates = await hydrator.hydrate(
                 [result for result in job.response_results()
                  if job.platforms_state[result.platform].status in ("succeeded", "empty")
@@ -492,6 +500,8 @@ class SearchJobManager:
             logger.warning("result hydration failed for %s: %s",
                            job.job_id, type(exc).__name__)
         finally:
+            if metrics_results:
+                await hydrator.close()
             job.hydration_status = "completed"
 
     async def _run_platform(self, job: "_ActiveJob", platform: str) -> None:
@@ -1276,6 +1286,23 @@ class _ActiveJob:
             for source in representative.grouped_sources or []:
                 if source.platform == result.platform and source.content_id == result.content_id:
                     source.snippet = snippet
+
+    def update_metrics(self, result: UnifiedSearchResult) -> None:
+        """Keep platform tabs, grouped cards and previous exploration batches aligned."""
+        copies = list(self._final_results or []) + self.platform_results.get(result.platform, [])
+        if self.exploration:
+            copies += self.exploration.results.get(result.platform, [])
+            for batch in self.exploration.batches:
+                copies += batch["results"]
+        for representative in copies:
+            if representative.platform == result.platform and representative.content_id == result.content_id:
+                representative.metrics = dict(result.metrics)
+                representative.metrics_status = result.metrics_status
+                representative.metrics_updated_at = result.metrics_updated_at
+                representative.metrics_approximate = list(result.metrics_approximate)
+            for source in representative.grouped_sources or []:
+                if source.platform == result.platform and source.content_id == result.content_id:
+                    source.metrics = dict(result.metrics)
 
     def _compute_overall(self) -> str:
         if self._cancelled:

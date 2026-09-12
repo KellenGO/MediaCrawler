@@ -131,3 +131,36 @@ def test_accounts_extension_install_instructions_present():
     assert "edge://extensions" in _ACCOUNTS
     assert "开发者模式" in _ACCOUNTS
     assert "browser_extension" in _ACCOUNTS
+
+
+# ── Round 18: 未登录快速提示 + 进页面自动同步 ───────────────────────────
+
+def test_login_required_reason_is_surfaced():
+    """login_required 也必须显示 error_summary（可操作原因），否则用户只看到
+    "需要登录" 却不知道要去账号设置同步。"""
+    assert 'info.error_summary || "需要登录"' in _STATUS_DISPLAY
+
+
+def test_platform_status_exposes_full_status_text():
+    """状态文案被截断时用 title 提供完整内容。"""
+    assert "statusText" in _PLATFORM_STATUS
+    assert "title={statusText}" in _PLATFORM_STATUS
+
+
+def test_accounts_page_runs_autosync_decision():
+    """账号页必须调用生产决策函数决定是否自动同步（不在组件里重写规则）。"""
+    assert "decideAutoSync" in _ACCOUNTS
+    assert "autoSyncAttemptedRef" in _ACCOUNTS
+    assert "runSyncQueue" in _ACCOUNTS
+
+
+def test_accounts_autosync_is_silent_and_bounded():
+    """自动同步必须静默（silent: true）且每个页面生命周期只跑一次。"""
+    assert "autoSyncAttemptedRef.current = true" in _ACCOUNTS
+    assert "void runSyncQueue(decision.platforms, { silent: true })" in _ACCOUNTS
+
+
+def test_accounts_bulk_progress_total_is_dynamic():
+    """自动同步可能只同步部分平台，进度分母不能用写死的 4。"""
+    assert "/4`" not in _ACCOUNTS
+    assert "${bulkCompleted}/${bulkTotal}" in _ACCOUNTS

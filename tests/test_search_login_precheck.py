@@ -38,6 +38,18 @@ _CHROMIUM_EPOCH_OFFSET_SECONDS = 11644473600
 _YEAR_US = 365 * 24 * 3600 * 1_000_000
 
 
+@pytest.fixture(autouse=True)
+def _clean_account_state():
+    """本文件会用各种过期/未登录状态写账号服务，用例之间必须互不影响。"""
+    for platform in acc.PLATFORM_PROFILE_DIRS:
+        acc._platform_state.pop(platform, None)
+        acc._session_snapshots.pop(platform, None)
+    yield
+    for platform in acc.PLATFORM_PROFILE_DIRS:
+        acc._platform_state.pop(platform, None)
+        acc._session_snapshots.pop(platform, None)
+
+
 def _now_chromium() -> int:
     return int((time.time() + _CHROMIUM_EPOCH_OFFSET_SECONDS) * 1_000_000)
 
@@ -225,10 +237,39 @@ def test_block_message_contains_no_secrets(monkeypatch, tmp_path):
 
 
 def test_marker_names_match_pong_requirements():
-    """预检使用的标记正是各平台 pong() 判定登录所依赖的 cookie 名称。"""
-    assert LOGIN_MARKER_NAMES["xhs"] == ("web_session",)
-    assert "SESSDATA" in LOGIN_MARKER_NAMES["bilibili"]
-    assert "z_c0" in LOGIN_MARKER_NAMES["zhihu"]
+    """预检使用的标记正是各平台 pong() 判定登录所依赖的会话 cookie。"""
+    assert acc._SEARCH_LOGIN_MARKERS["xhs"] == ("web_session",)
+    assert acc._SEARCH_LOGIN_MARKERS["bilibili"] == ("SESSDATA",)
+    assert acc._SEARCH_LOGIN_MARKERS["zhihu"] == ("z_c0",)
+
+
+def test_zhihu_d_c0_alone_is_not_login(monkeypatch, tmp_path):
+    """知乎只有 d_c0（访问官网即生成）不算登录 —— pong 仍会返回 False。
+
+    诊断白名单 LOGIN_MARKER_NAMES 含 d_c0，若拿它当预检判据就会漏判，
+    退回"启动浏览器白等十几秒"的老行为。
+    """
+    _isolate(monkeypatch, tmp_path)
+    _write_cookies_db("zhihu", [("d_c0", ".zhihu.com", _now_chromium() + _YEAR_US)])
+    assert acc._live_login_marker_in_profile("zhihu") is False
+    assert search_login_block("zhihu") is not None
+
+
+def test_bilibili_dedeuserid_alone_is_not_login(monkeypatch, tmp_path):
+    """B站只有 DedeUserID（辅助 cookie）不算登录，SESSDATA 才是会话。"""
+    _isolate(monkeypatch, tmp_path)
+    _write_cookies_db(
+        "bilibili", [("DedeUserID", ".bilibili.com", _now_chromium() + _YEAR_US)])
+    assert acc._live_login_marker_in_profile("bilibili") is False
+    assert search_login_block("bilibili") is not None
+
+
+def test_diagnostic_whitelist_is_not_reused_for_precheck():
+    """预检用的标记集必须比诊断白名单更严格（防止有人又合并两者）。"""
+    for platform, markers in acc._SEARCH_LOGIN_MARKERS.items():
+        assert set(markers).issubset(set(LOGIN_MARKER_NAMES[platform]))
+        assert "d_c0" not in markers
+        assert "DedeUserID" not in markers
 
 
 # ── 接入 SearchJobManager：预检命中时绝不 spawn worker ──────────────────
@@ -242,10 +283,14 @@ async def test_manager_reports_login_required_without_spawning_worker(monkeypatc
     """
     import uuid
 
+    import api.services.search_job_manager as sjm
     from api.schemas.search import SearchJobRequestSchema
     from api.services.search_job_manager import SearchJobManager
 
     _isolate(monkeypatch, tmp_path)
+    # conftest 默认把预检设为放行（让伪造 worker 的既有用例与 CI 一致），
+    # 这里装回真实实现，测的才是生产路径。
+    monkeypatch.setattr(sjm, "search_login_block", acc.search_login_block)
     # Playwright 启动过的痕迹：profile 目录在，但里面没有活登录标记。
     acc.profile_dir_for("xhs").mkdir(parents=True)
 
@@ -284,10 +329,12 @@ async def test_manager_still_spawns_worker_when_login_ok(monkeypatch, tmp_path):
     """有活登录标记时预检必须放行，worker 照常启动（防止过度拦截）。"""
     import uuid
 
+    import api.services.search_job_manager as sjm
     from api.schemas.search import SearchJobRequestSchema
     from api.services.search_job_manager import SearchJobManager
 
     _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(sjm, "search_login_block", acc.search_login_block)
     _write_cookies_db(
         "xhs", [("web_session", ".xiaohongshu.com", _now_chromium() + _YEAR_US)])
 

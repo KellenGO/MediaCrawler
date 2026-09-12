@@ -10,7 +10,8 @@
  * - 进度依次为 1/4、2/4、3/4、4/4；
  * - verified/imported/verifying/unavailable/failed 汇总正确；
  * - 双击 guard 的纯状态规则；
- * - 汇总文案不包含 Cookie、ticket、header 或原始响应。
+ * - 汇总文案不包含 Cookie、ticket、header 或原始响应；
+ * - Round 18：子集同步（只同步未确认登录的平台）与进页面自动同步决策。
  */
 
 import { test } from "node:test";
@@ -21,6 +22,9 @@ import {
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
   createBulkSyncGuard,
+  decideAutoSync,
+  platformsNeedingSync,
+  resolveBulkTargets,
   runBulkSync,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
@@ -270,3 +274,125 @@ test("guard 实例相互独立", () => {
   assert.equal(a.tryStart(), true);
   assert.equal(b.tryStart(), true); // 另一实例不受影响
 });
+
+// ── Round 18：子集同步 + 进页面自动同步决策 ────────────────────────────
+
+test("resolveBulkTargets：默认四个平台，按固定顺序", () => {
+  assert.deepEqual(resolveBulkTargets(), ["xhs", "douyin", "bilibili", "zhihu"]);
+});
+
+test("resolveBulkTargets：只保留已知平台并保持固定顺序", () => {
+  // 输入顺序被打乱 → 输出仍按固定顺序
+  assert.deepEqual(
+    resolveBulkTargets(["zhihu", "xhs"] as PlatformSlug[]),
+    ["xhs", "zhihu"]
+  );
+  // 未知 slug 被丢弃，不会进入同步队列
+  assert.deepEqual(
+    resolveBulkTargets(["myspace", "bilibili"] as unknown as PlatformSlug[]),
+    ["bilibili"]
+  );
+  assert.deepEqual(resolveBulkTargets([]), []);
+});
+
+test("runBulkSync：只同步指定子集，其余平台不发请求", async () => {
+  const calls: PlatformSlug[] = [];
+  const result = await runBulkSync({
+    platforms: ["bilibili", "zhihu"] as PlatformSlug[],
+    syncOne: async (p) => {
+      calls.push(p);
+      return OK(p);
+    },
+  });
+  assert.deepEqual(calls, ["bilibili", "zhihu"]);
+  assert.deepEqual(result.outcomes.map((o) => o.platform), ["bilibili", "zhihu"]);
+  assert.equal(result.completedCount, 2);
+});
+
+test("platformsNeedingSync：已连接并验证的平台不需要同步", () => {
+  const accounts = [
+    { platform: "xhs", status: "connected", verified: true },
+    { platform: "douyin", status: "connected", verified: true },
+    { platform: "bilibili", status: "connected", verified: true },
+    { platform: "zhihu", status: "connected", verified: true },
+  ];
+  assert.deepEqual(platformsNeedingSync(accounts), []);
+});
+
+test("platformsNeedingSync：unverified/expired/disconnected 都需要同步", () => {
+  const accounts = [
+    { platform: "xhs", status: "unverified", verified: false },
+    { platform: "douyin", status: "connected", verified: true },
+    { platform: "bilibili", status: "expired", verified: false },
+    { platform: "zhihu", status: "disconnected", verified: false },
+  ];
+  assert.deepEqual(platformsNeedingSync(accounts), ["xhs", "bilibili", "zhihu"]);
+});
+
+test("platformsNeedingSync：status=connected 但 verified=false 仍算未确认", () => {
+  // 后端不变量是 connected 必须 verified；这里防的是前端凭 status 冒充已登录。
+  const accounts = [{ platform: "xhs", status: "connected", verified: false }];
+  assert.deepEqual(platformsNeedingSync(accounts), ["xhs"]);
+});
+
+test("platformsNeedingSync：null（未加载）不需要同步", () => {
+  assert.deepEqual(platformsNeedingSync(null), []);
+});
+
+const decided = (over: Partial<Parameters<typeof decideAutoSync>[0]> = {}) =>
+  decideAutoSync({
+    accounts: [{ platform: "xhs", status: "unverified", verified: false }],
+    extensionState: "connected",
+    apiRunning: true,
+    syncing: false,
+    alreadyAttempted: false,
+    ...over,
+  });
+
+test("decideAutoSync：扩展已连接 + 有未验证平台 → 自动同步这些平台", () => {
+  const d = decided();
+  assert.equal(d.run, true);
+  assert.deepEqual(d.platforms, ["xhs"]);
+});
+
+test("decideAutoSync：四个平台全部已验证 → 什么都不做", () => {
+  const d = decided({
+    accounts: [
+      { platform: "xhs", status: "connected", verified: true },
+      { platform: "douyin", status: "connected", verified: true },
+      { platform: "bilibili", status: "connected", verified: true },
+      { platform: "zhihu", status: "connected", verified: true },
+    ],
+  });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "nothing_to_sync");
+});
+
+test("decideAutoSync：每个页面生命周期只自动同步一次", () => {
+  const d = decided({ alreadyAttempted: true });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "already_attempted");
+});
+
+test("decideAutoSync：已有队列在跑时不叠加", () => {
+  const d = decided({ syncing: true });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "already_syncing");
+});
+
+test("decideAutoSync：扩展未连接/过旧、API 不可用时都不启动", () => {
+  assert.equal(decided({ extensionState: "not-installed" }).skipReason, "extension_not_connected");
+  assert.equal(decided({ extensionState: "checking" }).skipReason, "extension_not_connected");
+  assert.equal(decided({ extensionState: "outdated" }).skipReason, "extension_outdated");
+  assert.equal(decided({ apiRunning: false }).skipReason, "api_unavailable");
+  assert.equal(decided({ apiRunning: null }).skipReason, "api_unavailable");
+  assert.equal(decided({ accounts: null }).skipReason, "accounts_loading");
+});
+
+test("decideAutoSync：判定顺序 —— 先看是否已尝试，再看阻断条件", () => {
+  // 已尝试过就不该因为其他条件改变而再次启动
+  const d = decided({ alreadyAttempted: true, extensionState: "connected", apiRunning: true });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "already_attempted");
+});
+

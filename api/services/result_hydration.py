@@ -11,10 +11,11 @@ import asyncio
 import logging
 import os
 import re
+import time
 from typing import Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from aggregate_search.hydration import hydrate_results
+from aggregate_search.hydration import hydrate_results, metric_candidates
 from aggregate_search.models import UnifiedSearchResult, clean_snippet
 from .accounts import ensure_session_snapshot, get_session_snapshot
 
@@ -126,6 +127,98 @@ class ResultHydrator:
     def __init__(self) -> None:
         self._clients: Dict[str, object] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._metric_details: Dict[tuple, dict] = {}
+        self._metric_stopped: set[str] = set()
+        self.metric_errors: Dict[str, dict] = {}
+
+    async def hydrate_metrics(self, results, cancel_event, on_update):
+        from aggregate_search.favorite_metrics import enrich_favorites
+
+        candidates = metric_candidates(results)
+
+        async def platform_batch(platform):
+            selected = [r for r in candidates if r.platform == platform]
+            if not selected or cancel_event.is_set():
+                return
+            unsupported = [r for r in selected if platform == "bilibili"
+                           and urlsplit(r.url).path.startswith(("/cheese/", "/bangumi/"))]
+            for result in unsupported:
+                result.metrics_status = "unavailable"
+                result.metrics_updated_at = time.time()
+                on_update(result)
+            selected = [r for r in selected if r not in unsupported]
+            if not selected:
+                return
+            for result in selected:
+                result.metrics_status = "pending"
+                on_update(result)
+            try:
+                if platform == "bilibili":
+                    client = await self._get_bilibili()
+                else:
+                    snapshot = get_session_snapshot("zhihu") or await ensure_session_snapshot("zhihu")
+                    if not snapshot or not snapshot.get("d_c0"):
+                        raise RuntimeError("missing_session")
+                    client = await self._get_zhihu(snapshot)
+                by_key = {}
+                rows = []
+                for result in selected:
+                    row = {"id": result.content_id, "type": result.content_type}
+                    if platform == "bilibili" and result.content_id.upper().startswith("BV"):
+                        row["bvid"] = result.content_id
+                    rows.append(row)
+                    by_key[(result.content_type, result.content_id)] = result
+
+                # Keep successful raw details in memory to reuse their descriptions.
+                details = self._metric_details
+
+                class DetailClient:
+                    async def get_video_info(self, **kwargs):
+                        value = await client.get_video_info(**kwargs)
+                        if isinstance(value, dict):
+                            details[(platform, "video", str(kwargs.get("bvid") or kwargs.get("aid")))] = value.get("View", value)
+                        return value
+
+                    async def get(self, uri, params):
+                        value = await client.get(uri, params)
+                        if isinstance(value, dict):
+                            kind = uri.split("/")[-2][:-1]
+                            details[(platform, kind, uri.split("/")[-1])] = value
+                        return value
+
+                def receive(batch):
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    for row in batch:
+                        result = by_key[(row["type"], row["id"])]
+                        counters = row.get("_favorite_metrics", {})
+                        if row.get("_metrics_cached"):
+                            counters = {k: v for k, v in counters.items() if k not in result.metrics}
+                        result.metrics.update(counters)
+                        result.metrics_status = row["_metrics_status"]
+                        result.metrics_updated_at = row.get("_metrics_updated_at")
+                        result.metrics_approximate = sorted(
+                            (set(result.metrics_approximate) - counters.keys()) |
+                            {k for k in row.get("_metrics_approximate", []) if k in counters})
+                        on_update(result)
+
+                await enrich_favorites(platform, DetailClient(), rows, receive)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._metric_stopped.add(platform)
+                self.metric_errors[platform] = {"type": type(exc).__name__,
+                    "http_status": getattr(exc, "http_status", None),
+                    "platform_code": getattr(exc, "platform_code", None)}
+                logger.warning("search metric hydration stopped for %s: %s", platform, type(exc).__name__)
+            finally:
+                for result in selected:
+                    if result.metrics_status == "pending":
+                        result.metrics_status = "failed"
+                        if not cancel_event.is_set():
+                            on_update(result)
+
+        await asyncio.gather(*(platform_batch(p) for p in ("bilibili", "zhihu")))
 
     async def hydrate(self, results, cancel_event: asyncio.Event):
         try:
@@ -149,6 +242,11 @@ class ResultHydrator:
                     pass
 
     async def fetch_snippet(self, result: UnifiedSearchResult) -> Optional[str]:
+        detail = self._metric_details.get((result.platform, result.content_type, result.content_id))
+        if detail is not None:
+            return clean_snippet(detail.get("desc") or detail.get("description") or detail.get("excerpt") or detail.get("content"))
+        if result.platform in self._metric_stopped:
+            return None
         if result.platform == "bilibili":
             return await self._fetch_bilibili(result)
         if result.platform == "xhs":
@@ -168,6 +266,7 @@ class ResultHydrator:
         )
         if not isinstance(detail, dict):
             return None
+        detail = detail.get("View", detail)
         return clean_snippet(detail.get("desc") or detail.get("description"))
 
     async def _fetch_xhs(self, result: UnifiedSearchResult) -> Optional[str]:

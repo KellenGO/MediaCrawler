@@ -22,13 +22,22 @@ import {
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
   createBulkSyncGuard,
-  decideAutoSync,
   resolveBulkTargets,
   runBulkSync,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
   type SyncAttemptOutcome,
 } from "@/lib/accountBulkSync";
+import {
+  ACCOUNTS_API_BASE,
+  EXTENSION_MIN_VERSION,
+  EXTENSION_PROTOCOL_VERSION,
+  SYNC_RESPONSE_TIMEOUT_MS,
+  detectExtension,
+  requestPlatformSync,
+  versionAtLeast,
+  type SyncResult,
+} from "@/lib/extensionSync";
 
 interface LoginStatus {
   job_id: string;
@@ -37,52 +46,7 @@ interface LoginStatus {
   message: string;
 }
 
-/** 扩展 sync-response 携带的安全字段（无任何 Cookie 值）。 */
-interface SyncResult {
-  success: boolean;
-  verified: boolean;
-  status: string;
-  safe_error_code: string;
-  safe_message: string;
-  sync_stage: string;
-  received_cookie_count: number | null;
-  accepted_cookie_count: number | null;
-  skipped_cookie_count: number | null;
-  required_cookie_present: boolean | null;
-  /** 白名单登录标记的布尔诊断（仅名称+true/false，无 Cookie 值）。 */
-  login_marker_presence: Record<string, boolean> | null;
-}
-
-const API_BASE = "/api/search/accounts";
-
-/** 与 browser_extension/sync_protocol.js 的 EXTENSION_PROTOCOL_VERSION 一致。 */
-const EXTENSION_PROTOCOL_VERSION = 2;
-
-/**
- * 最低可用的扩展版本（manifest 1.1.3 起 ready/pong 才携带真实
- * extension_version，网页才能区分 Round 8 的旧脚本）。
- */
-const EXTENSION_MIN_VERSION = "1.1.3";
-
-/** semver 三段比较："1.1.3" >= "1.1.2" → true。非字符串视为不可用。 */
-export function versionAtLeast(v: unknown, min: string): boolean {
-  if (typeof v !== "string" || !v) return false;
-  const a = v.split(".").map((s) => parseInt(s, 10) || 0);
-  const b = min.split(".").map((s) => parseInt(s, 10) || 0);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x > y;
-  }
-  return true;
-}
-
-/**
- * 扩展响应超时。后端账号服务在导入后会做有界验证
- * （SYNC_VERIFY_TIMEOUT_SECONDS=45s），加上 Cookie 读取、导入和网络往返，
- * 前端超时绝不能短于后端 —— 否则会先于后端报"扩展未响应"。
- */
-const SYNC_RESPONSE_TIMEOUT_MS = 70000;
+const API_BASE = ACCOUNTS_API_BASE;
 
 const SYNC_STAGE_TEXT: Record<string, string> = {
   profile_import: "导入 Cookie",
@@ -576,19 +540,16 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   const [bulkSyncing, setBulkSyncing] = useState(false);
   const [bulkActive, setBulkActive] = useState<PlatformSlug[]>([]);
   const [bulkCompleted, setBulkCompleted] = useState(0);
-  /** 本次队列的平台总数（自动同步可能只同步部分平台，不能用固定 4）。 */
+  /** 本次队列的平台总数（只同步部分平台时不能用固定 4）。 */
   const [bulkTotal, setBulkTotal] = useState(BULK_SYNC_PLATFORM_ORDER.length);
-  /** 自动同步的内联结果（不弹 toast，避免每次进页面都打扰）。 */
-  const [autoSyncNote, setAutoSyncNote] = useState<string | null>(null);
-  /** 本次页面生命周期只自动同步一次。 */
-  const autoSyncAttemptedRef = useRef(false);
   // 双击 guard：同步 ref（不能只依赖异步 React state）。
   const bulkGuardRef = useRef<ReturnType<typeof createBulkSyncGuard> | null>(null);
   if (bulkGuardRef.current === null) bulkGuardRef.current = createBulkSyncGuard();
 
   /**
-   * 同步队列（手动"一键同步"与自动同步共用）。
-   * silent=true 时不弹 toast，只更新内联状态 —— 自动同步必须安静。
+   * 手动"一键同步四个平台"队列。
+   * 打开程序时的自动同步由应用根部的 useAutoAccountSync 负责（Round 18），
+   * 本页只保留用户主动触发的这一条路径。
    */
   const runSyncQueue = useCallback(async (
     platforms: readonly PlatformSlug[] | undefined,
@@ -656,25 +617,6 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   }, [extensionState, apiRunning, syncAccount]);
 
   const handleBulkSync = useCallback(() => runSyncQueue(undefined), [runSyncQueue]);
-
-  // ── 进入本页自动检测登录状态并同步（Round 18）────────────────────────
-  // 用户通常先在浏览器里登录平台，再回到这里；原来必须手动点"一键同步"。
-  // 这里在后端无法确认某个平台已登录时，自动让扩展重新读一次浏览器会话。
-  // 守卫：每个页面生命周期只跑一次、扩展已连接、API 可用、无队列在跑；
-  // 四个平台都已验证登录则什么都不做（平时打开页面零额外请求）。
-  useEffect(() => {
-    const decision = decideAutoSync({
-      accounts,
-      extensionState,
-      apiRunning,
-      syncing: bulkSyncing,
-      alreadyAttempted: autoSyncAttemptedRef.current,
-    });
-    if (!decision.run) return;
-    autoSyncAttemptedRef.current = true;
-    setAutoSyncNote("正在自动同步登录状态…");
-    void runSyncQueue(decision.platforms, { silent: true });
-  }, [accounts, extensionState, apiRunning, bulkSyncing, runSyncQueue]);
 
   // ── 备用辅助登录（默认折叠，仅用户主动点击）──────────────────────────
   const startAuxLogin = useCallback(async (platform: string) => {

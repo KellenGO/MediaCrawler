@@ -694,20 +694,34 @@ _PROFILE_COOKIE_DB_RELPATHS: tuple = (
 # 1601-01-01 → 1970-01-01 的秒数（Chromium expires_utc 基准）。
 _CHROMIUM_EPOCH_OFFSET_SECONDS = 11644473600
 
+# 搜索预检只认**真正承载登录态**的 cookie。
+#
+# 不复用上面的 LOGIN_MARKER_NAMES：那是导入期诊断白名单，包含 d_c0、
+# DedeUserID 这类匿名/辅助 cookie —— 它们存在并不代表已登录（知乎访问一次
+# 官网就会生成 d_c0，`_pong_with_profile` 里 d_c0 单独存在时 pong 仍返回
+# False）。用诊断白名单做预检会把"没登录"判成"可能已登录"，从而退回到
+# 启动浏览器白等十几秒的老行为。
+#
+# 这三项正是各平台 pong() 判定登录所依赖的会话 cookie：
+# xhs query_self() / bilibili /x/web-interface/nav isLogin / zhihu get_current_user_info()。
+_SEARCH_LOGIN_MARKERS: Dict[str, tuple] = {
+    "xhs": ("web_session",),
+    "bilibili": ("SESSDATA",),
+    "zhihu": ("z_c0",),
+}
+
 
 def _live_login_marker_in_profile(platform: str) -> bool:
-    """profile 的 cookie 库里是否存在**尚未过期**的登录标记 cookie。
+    """profile 的 cookie 库里是否存在**尚未过期**的登录会话 cookie。
 
     只读取 cookie NAME + 过期时间，绝不读取 cookie 值（Windows 上值是
-    DPAPI 加密的，本函数也不需要它）。登录标记取自 LOGIN_MARKER_NAMES ——
-    它正是各平台 ``pong()`` 判定登录所依赖的那些 cookie（xhs web_session、
-    bilibili SESSDATA、zhihu z_c0）。
+    DPAPI 加密的，本函数也不需要它）。
 
     **失败开放（fail-open）**：任何异常（库不存在/被浏览器占用/表结构变化）
     一律返回 True，即"未能证伪就放行"。这样预检永远不会把本来能成功的
     浏览器备用路径拦掉，最坏情况只是退回原来的慢路径。
     """
-    marker_names = LOGIN_MARKER_NAMES.get(platform)
+    marker_names = _SEARCH_LOGIN_MARKERS.get(platform)
     domain = (PLATFORM_COOKIE_DOMAINS.get(platform) or (None,))[0]
     if not marker_names or not domain:
         return True

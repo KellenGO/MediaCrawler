@@ -282,12 +282,21 @@ export interface AutoSyncInput {
   apiRunning: boolean | null;
   /** 已有同步队列在跑（手动点击或上一次自动同步）。 */
   syncing: boolean;
-  /** 本次页面生命周期内是否已经自动同步过。 */
-  alreadyAttempted: boolean;
+  /**
+   * 距上一次自动同步尝试的毫秒数；null 表示本次页面生命周期内还没试过。
+   * 打开程序 / 回到页面 / 状态变化都会重新评估，但两次尝试之间有冷却，
+   * 避免为一个始终无法同步的平台反复启动浏览器。
+   */
+  msSinceLastAttempt: number | null;
+  /** 两次自动同步的最小间隔（默认 AUTO_SYNC_COOLDOWN_MS）。 */
+  cooldownMs?: number;
 }
 
+/** 两次自动同步尝试之间的最小间隔。 */
+export const AUTO_SYNC_COOLDOWN_MS = 30_000;
+
 export type AutoSyncSkipReason =
-  | "already_attempted"
+  | "cooldown"
   | "already_syncing"
   | "accounts_loading"
   | "api_unavailable"
@@ -321,17 +330,22 @@ export function platformsNeedingSync(
 }
 
 /**
- * 进入账号设置页时的自动同步决策：
- * - 每个页面生命周期最多自动同步一次（alreadyAttempted）；
- * - 已有队列在跑时不叠加（already_syncing）；
- * - API 不可用 / 扩展未连接 / 扩展过旧时不启动（这些都需要用户先处理）；
- * - 四个平台全部已验证登录时什么都不做（nothing_to_sync）—— 平时打开页面
+ * 自动同步决策（打开程序、回到页面、账号状态变化时都会评估）：
+ * - 冷却未到 → 不重复尝试（cooldown）；
+ * - 已有队列在跑 → 不叠加（already_syncing）；
+ * - API 不可用 / 扩展未连接 / 扩展过旧 → 不启动（这些需要用户先处理）；
+ * - 四个平台全部已验证登录 → 什么都不做（nothing_to_sync）—— 平时打开程序
  *   不会产生任何额外请求或浏览器启动。
  */
 export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
-  const { accounts, extensionState, apiRunning, syncing, alreadyAttempted } = input;
-  if (alreadyAttempted) return { run: false, platforms: [], skipReason: "already_attempted" };
+  const {
+    accounts, extensionState, apiRunning, syncing,
+    msSinceLastAttempt, cooldownMs = AUTO_SYNC_COOLDOWN_MS,
+  } = input;
   if (syncing) return { run: false, platforms: [], skipReason: "already_syncing" };
+  if (msSinceLastAttempt !== null && msSinceLastAttempt < cooldownMs) {
+    return { run: false, platforms: [], skipReason: "cooldown" };
+  }
   if (apiRunning !== true) return { run: false, platforms: [], skipReason: "api_unavailable" };
   if (extensionState === "outdated") {
     return { run: false, platforms: [], skipReason: "extension_outdated" };

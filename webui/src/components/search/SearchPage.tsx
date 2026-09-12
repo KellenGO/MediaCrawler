@@ -371,6 +371,9 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             </div>
           )}
 
+          {displayJobResponse.hydration_status === "running" && (
+            <p role="status" className="mt-3 text-xs text-cyber-text-muted">正在补充指标和简介，已有结果可以先查看。</p>
+          )}
           <ResultTabs
             results={displayJobResponse.results}
             keyword={displayJobResponse.keyword}

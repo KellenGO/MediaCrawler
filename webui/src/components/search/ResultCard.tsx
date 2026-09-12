@@ -88,9 +88,25 @@ const METRIC_ICONS: Record<string, MetricIcon> = {
 };
 
 function metricSummary(metrics: Record<string, number>): string {
-  return orderedMetrics(metrics, 2)
+  return orderedMetrics(metrics)
     .map(({ key, label }) => `${label} ${formatCount(metrics[key] || 0)}`)
     .join(" · ");
+}
+
+function MetricStatus({ result }: { result: UnifiedSearchResult }) {
+  if (!result.metrics_status || result.metrics_status === "complete") return null;
+  const names: Record<string, string> = {
+    view_count: result.platform === "zhihu" ? "阅读/播放" : "播放",
+    like_count: "点赞", comment_count: "评论", collect_count: "收藏", coin_count: "投币",
+  };
+  const targets = result.platform === "bilibili"
+    ? ["view_count", "like_count", "coin_count", "comment_count", "collect_count"]
+    : result.platform === "zhihu" ? ["view_count", "like_count", "comment_count", "collect_count"] : [];
+  const missing = targets.filter((key) => !(key in result.metrics)).map((key) => names[key]);
+  if (!missing.length) return null;
+  const prefix = result.metrics_status === "pending" ? "正在补充"
+    : result.metrics_status === "failed" ? "补充未完成" : "暂未获取";
+  return <p className="mt-1 text-[10.5px] text-cyber-text-muted">{prefix}：{missing.join("、")}</p>;
 }
 
 export function ResultCard({ result, highlightQuery = "", renderBookmark }: ResultCardProps) {
@@ -174,6 +190,7 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
                 ))}
               </div>
             )}
+            <MetricStatus result={result} />
             <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-white/60 p-2">
               <span className="mr-1 text-[10.5px] font-semibold text-cyber-text-muted">来源</span>
               {groupedSources.map((source) => (
@@ -230,7 +247,7 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
                       <p className="mt-1 text-[11.5px] leading-[1.5] text-cyber-text-secondary line-clamp-2"><Highlight text={source.snippet} query={highlightQuery} /></p>
                     )}
                     {metricSummary(source.metrics) && (
-                      <p className="mt-1 text-[10.5px] text-cyber-text-muted truncate">{metricSummary(source.metrics)}</p>
+                      <p className="mt-1 text-[10.5px] text-cyber-text-muted">{metricSummary(source.metrics)}</p>
                     )}
                   </div>
                   <ArrowUpRight className="w-3.5 h-3.5 mt-1 flex-shrink-0 text-cyber-text-muted" />
@@ -309,6 +326,7 @@ export function ResultCard({ result, highlightQuery = "", renderBookmark }: Resu
             ))}
           </div>
         )}
+        <MetricStatus result={result} />
       </div>
 
       {/* 右侧跳转图标 */}

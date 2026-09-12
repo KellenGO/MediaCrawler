@@ -45,6 +45,30 @@ def _default_oneshot_worker_mode():
     sjm.SEARCH_WORKER_MODE = prev
 
 
+@pytest.fixture(autouse=True)
+def _default_search_login_precheck_allow(monkeypatch):
+    """默认让"搜索前登录预检"放行，使既有用例与 CI/干净检出保持一致。
+
+    预检（``accounts.search_login_block``）读取真实 ``browser_data`` 里的
+    profile 判断平台能否搜索。CI 与干净检出上没有任何 profile，预检会把
+    xhs / bilibili / zhihu 全部拦掉 —— 而本目录大量用例是"伪造 worker 后
+    断言 worker 收到什么"的，它们假设搜索会真的启动 worker。
+
+    需要验证预检本身的用例，请自行把真实函数装回去（见
+    ``tests/test_search_login_precheck.py``）：
+
+        import api.services.search_job_manager as sjm
+        import api.services.accounts as accounts
+        monkeypatch.setattr(sjm, "search_login_block", accounts.search_login_block)
+
+    （``search_job_manager`` 是 ``from .accounts import search_login_block``
+    按名导入的，所以必须 patch 它自己的模块属性。）
+    """
+    import api.services.search_job_manager as sjm
+
+    monkeypatch.setattr(sjm, "search_login_block", lambda platform: None)
+
+
 @pytest.fixture(scope="session")
 def project_root_path():
     """Return project root path"""
