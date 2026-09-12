@@ -27,6 +27,7 @@ import math
 import os
 import secrets
 import shutil
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -674,6 +675,109 @@ def mark_login_required_from_search(platform: str) -> None:
     # Clear the in-memory snapshot with the account state so stale cookies
     # cannot survive a login-expiry transition.
     _clear_snapshot_sync(platform)
+
+
+# ── 搜索前登录预检 ──────────────────────────────────────────────────────
+
+# 聚合搜索必须依赖有效会话的平台。抖音走的是公开搜索接口，未登录也能搜，
+# 因此绝不参与预检（否则会拦掉本来可用的匿名搜索）。
+SEARCH_NEEDS_SESSION = frozenset({"xhs", "bilibili", "zhihu"})
+
+# Chromium cookie 库在 persistent profile 中的相对位置（新版在 Default/Network
+# 下，旧版在 Default 或 profile 根目录），按存在顺序探测。
+_PROFILE_COOKIE_DB_RELPATHS: tuple = (
+    os.path.join("Default", "Network", "Cookies"),
+    os.path.join("Default", "Cookies"),
+    "Cookies",
+)
+
+# 1601-01-01 → 1970-01-01 的秒数（Chromium expires_utc 基准）。
+_CHROMIUM_EPOCH_OFFSET_SECONDS = 11644473600
+
+
+def _live_login_marker_in_profile(platform: str) -> bool:
+    """profile 的 cookie 库里是否存在**尚未过期**的登录标记 cookie。
+
+    只读取 cookie NAME + 过期时间，绝不读取 cookie 值（Windows 上值是
+    DPAPI 加密的，本函数也不需要它）。登录标记取自 LOGIN_MARKER_NAMES ——
+    它正是各平台 ``pong()`` 判定登录所依赖的那些 cookie（xhs web_session、
+    bilibili SESSDATA、zhihu z_c0）。
+
+    **失败开放（fail-open）**：任何异常（库不存在/被浏览器占用/表结构变化）
+    一律返回 True，即"未能证伪就放行"。这样预检永远不会把本来能成功的
+    浏览器备用路径拦掉，最坏情况只是退回原来的慢路径。
+    """
+    marker_names = LOGIN_MARKER_NAMES.get(platform)
+    domain = (PLATFORM_COOKIE_DOMAINS.get(platform) or (None,))[0]
+    if not marker_names or not domain:
+        return True
+    profile_dir = profile_dir_for(platform)
+    now_chromium = int((time.time() + _CHROMIUM_EPOCH_OFFSET_SECONDS) * 1_000_000)
+    placeholders = ", ".join("?" for _ in marker_names)
+    query = (
+        f"SELECT 1 FROM cookies WHERE name IN ({placeholders}) "
+        "AND host_key LIKE ? AND (expires_utc = 0 OR expires_utc > ?) LIMIT 1"
+    )
+    for rel in _PROFILE_COOKIE_DB_RELPATHS:
+        db_path = profile_dir / rel
+        try:
+            if not db_path.is_file():
+                continue
+        except OSError:
+            return True
+        try:
+            # 只读 + 立即完成，不创建任何 journal/WAL 文件。
+            conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+            try:
+                row = conn.execute(
+                    query, (*marker_names, f"%{domain}", now_chromium)).fetchone()
+            finally:
+                conn.close()
+            return row is not None
+        except Exception:
+            # 库文件存在但读不了（被正在运行的浏览器独占等）：不阻断搜索。
+            return True
+    # 没有任何 cookie 库 → profile 里确实没有登录态。
+    return False
+
+
+def search_login_block(platform: str) -> Optional[str]:
+    """搜索开始前的本地登录判定：确定搜不了时返回原因，否则返回 None。
+
+    完全本地：不联网、不启动浏览器，因此是毫秒级的。只拦截三种"必然失败"
+    的情况，避免把本来能成功的浏览器备用路径也拦掉：
+
+    0. 存在内存会话快照 → 直接放行（快速路径可以直接用这份会话）；
+    1. 账号状态已被判定为 ``expired`` / ``disconnected``；
+    2. 既没有内存会话快照、也没有本地 profile（从未同步过）；
+    3. profile 存在但 cookie 库里没有任何**未过期**的登录标记 cookie ——
+       浏览器路径必然走到 ``pong() == False``，也就是必然要花十几秒启动
+       浏览器、导航之后才报"需要登录"。
+
+    第 3 条是这套预检的关键：Playwright 一旦启动就会创建 profile 目录，
+    所以"有没有 profile 目录"在真实使用中几乎恒为真，单靠目录判断等于
+    没有预检。真正的判据是 profile 里有没有活的登录标记。
+
+    快照判定放在状态判定之前是安全的：所有把状态降级为
+    ``expired``/``disconnected`` 的路径（verify 判定非 verified、
+    mark_login_required_from_search、删除会话）都会同时清除快照，
+    所以"有快照"与"已失效"不会共存。
+
+    只要本地还剩活的登录标记，就仍可能通过浏览器路径搜到内容，放行。
+    """
+    if platform not in SEARCH_NEEDS_SESSION:
+        return None
+    name = PLATFORM_DISPLAY_NAMES.get(platform, platform)
+    if get_session_snapshot(platform) is not None:
+        return None
+    state = _state_of(platform)
+    if state.get("status") in ("expired", "disconnected"):
+        return f"{name}尚未登录或登录已失效，请先到账号设置同步登录状态。"
+    if not profile_dir_for(platform).is_dir():
+        return f"{name}尚未登录，请先到账号设置同步登录状态。"
+    if not _live_login_marker_in_profile(platform):
+        return f"{name}尚未登录或登录已失效，请先到账号设置同步登录状态。"
+    return None
 
 
 # ── Browser resolution (server side) ────────────────────────────────────

@@ -95,6 +95,7 @@ export function PlatformStatus({
           if (!info) return null;
 
           const status: PStatus = info.status;
+          const statusText = statusLine(status, info);
           const freshness = freshnessLine(info);
           const remaining = cooldownSeconds(info.cooldown_until, nowMs);
           const isRetrying = retryingPlatform === p;
@@ -123,8 +124,8 @@ export function PlatformStatus({
               </span>
               <div className="min-w-0 flex-1">
                 <strong className="text-[13px] text-cyber-text-primary block">{PLATFORM_LABELS[p]}</strong>
-                <small className="text-[11px] text-cyber-text-muted block truncate">
-                  {statusLine(status, info)}
+                <small className="text-[11px] text-cyber-text-muted block truncate" title={statusText}>
+                  {statusText}
                 </small>
                 {freshness && (
                   <small className="text-[11px] text-cyber-text-muted block truncate" title={freshness}>

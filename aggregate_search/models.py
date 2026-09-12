@@ -149,6 +149,9 @@ class UnifiedSearchResult(BaseModel):
     # Remote favourites may belong to one or more platform folders. Search
     # results leave this empty; it is public display metadata only.
     collection_names: List[str] = Field(default_factory=list)
+    metrics_status: Optional[Literal["pending", "complete", "partial", "unavailable", "failed"]] = None
+    metrics_updated_at: Optional[float] = None
+    metrics_approximate: List[str] = Field(default_factory=list)
 
     # Allow extra fields from adapters for internal use
     model_config = {"extra": "ignore"}

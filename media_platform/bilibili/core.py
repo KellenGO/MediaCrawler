@@ -151,6 +151,7 @@ class BilibiliCrawler(AbstractCrawler):
         folders = folders_response.get("list", []) if isinstance(folders_response, dict) else []
         remaining = self._result_limit()
         seen: set[str] = set()
+        detail_rows = []
         for folder in folders if isinstance(folders, list) else []:
             if remaining <= 0 or not isinstance(folder, dict):
                 break
@@ -182,6 +183,7 @@ class BilibiliCrawler(AbstractCrawler):
                         break
                 if batch:
                     self._result_sink_call(batch)
+                    detail_rows.extend(batch)
                     remaining -= len(batch)
                 has_more = bool(response.get("has_more")) or (
                     isinstance(medias, list) and len(medias) >= min(remaining + len(batch), 20))
@@ -189,6 +191,9 @@ class BilibiliCrawler(AbstractCrawler):
                     break
                 page += 1
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+        from aggregate_search.favorite_metrics import enrich_favorites
+        await enrich_favorites("bilibili", self.bili_client, detail_rows, self._result_sink_call)
 
     async def search_by_keywords(self):
         """

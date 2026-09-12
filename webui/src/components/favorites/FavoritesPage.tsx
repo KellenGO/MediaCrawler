@@ -62,8 +62,25 @@ export function FavoritesPage({ onNavigateAccounts }: { onNavigateAccounts: () =
 
     <div className="mt-4 flex items-start gap-2 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary px-4 py-3 text-xs text-cyber-text-muted">
       <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
-      <span>只读取收藏列表，不会添加、删除或移动平台中的收藏。每个平台单次最多读取 20 条，减少账号请求压力。</span>
+      <span>每个平台单次最多读取 20 条收藏，先显示列表，再逐条补充可获取的指标；详情指标缓存 6 小时。平台未提供的浏览量等数据可能仍缺失；“万”“万+”等展示值换算后为近似计数。不会添加、删除或移动平台中的收藏。</span>
     </div>
+
+    {data && <div className="mt-3 space-y-1 text-xs text-cyber-text-muted" aria-live="polite">
+      {PLATFORMS.filter((platform) => platform !== "douyin").map((platform) => {
+        const rows = data.results.filter((item) => item.platform === platform);
+        if (!rows.length) return null;
+        const checked = rows.filter((item) => item.metrics_status === "complete" || item.metrics_status === "partial");
+        const unavailable = rows.filter((item) => item.metrics_status === "unavailable").length;
+        const failed = rows.filter((item) => item.metrics_status === "failed").length;
+        const timestamps = checked.flatMap((item) => item.metrics_updated_at ? [item.metrics_updated_at] : []);
+        return <p key={platform}>{PLATFORM_LABELS[platform]}：已读取详情指标 {checked.length}/{rows.length}
+          {unavailable > 0 && ` · ${unavailable} 条暂不可补全`}
+          {failed > 0 && ` · ${failed} 条补全未完成`}
+          {checked.some((item) => item.metrics_approximate?.length) && " · 含平台近似计数"}
+          {timestamps.length > 0 && ` · 最早采集于 ${new Date(Math.min(...timestamps) * 1000).toLocaleString()}`}
+        </p>;
+      })}
+    </div>}
 
     {remote.error && <div role="alert" className="mt-4 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
       <AlertTriangle className="h-4 w-4" />{errorMessage(remote.error)}

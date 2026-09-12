@@ -86,13 +86,13 @@ export const METRIC_ORDER: ReadonlyArray<readonly [string, string]> = [
   ["share_count", "分享"],
 ];
 
-/** 按固定顺序选出真正有值的指标；计数为 0 或缺失时跳过，不占位。 */
+/** 按固定顺序显示已知指标，包括真实的 0；缺失或非法值不占位。 */
 export function orderedMetrics(
   metrics: Record<string, number> | null | undefined, limit = 6
 ): Array<{ key: string; label: string }> {
   const source = metrics || {};
   return METRIC_ORDER
-    .filter(([key]) => (source[key] || 0) > 0)
+    .filter(([key]) => Number.isFinite(source[key]) && source[key] >= 0)
     .slice(0, limit)
     .map(([key, label]) => ({ key, label }));
 }

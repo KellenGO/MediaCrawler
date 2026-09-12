@@ -271,6 +271,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def fetch_favorites(self) -> None:
         """Fetch a bounded slice of the logged-in account's collections."""
         remaining = self._result_limit()
+        detail_rows = []
         user_id = await _resolve_self_user_id(self.context_page)
         if not user_id:
             raise DataFetchError(
@@ -284,6 +285,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
             if not isinstance(items, list) or not items:
                 break
             self._result_sink_call(items[:remaining])
+            detail_rows.extend(items[:remaining])
             remaining -= len(items[:remaining])
             if not response.get("has_more"):
                 break
@@ -293,6 +295,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
             cursor = next_cursor
             if remaining > 0:
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+        from aggregate_search.favorite_metrics import enrich_favorites
+        await enrich_favorites("xhs", self.xhs_client, detail_rows, self._result_sink_call)
 
     async def create_xhs_client(self, httpx_proxy: Optional[str]) -> XiaoHongShuClient:
         """Create Xiaohongshu client"""

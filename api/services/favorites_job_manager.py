@@ -15,7 +15,7 @@ from .accounts import mark_login_required_from_search
 
 _ROOT = application_root()
 _WORKER = str(_ROOT / "aggregate_search" / "worker.py")
-_TIMEOUT = 100
+_TIMEOUT = 190
 
 
 def _command() -> List[str]:
@@ -39,6 +39,15 @@ class _Job:
     def terminal(self) -> bool:
         return self.completed_at is not None
 
+    def upsert(self, platform: str, data: dict) -> None:
+        result = UnifiedSearchResult(**data)
+        for index, existing in enumerate(self.items[platform]):
+            if (existing.content_id, existing.content_type) == (result.content_id, result.content_type):
+                self.items[platform][index] = result
+                return
+        if len(self.items[platform]) < self.limit:
+            self.items[platform].append(result)
+
     def response(self) -> FavoritesJobResponse:
         merged: List[UnifiedSearchResult] = []
         maximum = max((len(v) for v in self.items.values()), default=0)
@@ -49,7 +58,7 @@ class _Job:
         statuses = [info.status for info in self.platforms.values()]
         success = sum(s in ("succeeded", "empty") for s in statuses)
         overall = "running" if not self.terminal() else (
-            "completed" if success == len(statuses) else "partial" if success else "failed")
+            "completed" if success == len(statuses) else "partial" if success or merged else "failed")
         return FavoritesJobResponse(
             job_id=self.job_id, overall=overall, created_at=self.created_at,
             completed_at=self.completed_at, platforms=self.platforms, results=merged)
@@ -125,7 +134,7 @@ class FavoritesJobManager:
                         continue
                     if event.event == "result" and isinstance(event.data, dict):
                         try:
-                            job.items[platform].append(UnifiedSearchResult(**event.data))
+                            job.upsert(platform, event.data)
                             info.result_count = len(job.items[platform])
                         except Exception:
                             pass

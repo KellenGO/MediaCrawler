@@ -175,7 +175,9 @@ async def test_latest_favorites_snapshot_can_be_restored():
 
 
 @pytest.mark.asyncio
-async def test_folder_fetchers_flatten_and_report_duplicate_membership():
+async def test_folder_fetchers_flatten_and_report_duplicate_membership(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("aggregate_search.favorite_metrics.enrich_favorites", AsyncMock())
     bili_batches = []
 
     class BiliClient:

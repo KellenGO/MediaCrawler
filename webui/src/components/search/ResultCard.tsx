@@ -1,5 +1,6 @@
-import { useState, useMemo, type ReactNode } from "react";
-import { ArrowUpRight, ChevronDown, Heart, Eye, MessageCircle, ThumbsUp, Coins, Share2 } from "lucide-react";
+import { useState, useMemo, type ComponentType, type ReactNode } from "react";
+import { ArrowUpRight, ChevronDown, Eye, MessageCircle, ThumbsUp, Star, Share2 } from "lucide-react";
+import { BilibiliCoinIcon } from "@/components/icons/BilibiliCoinIcon";
 import type { UnifiedSearchResult } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import { highlightSegments, orderedMetrics, safeContentUrl as safeUrl } from "@/lib/resultTools";
@@ -71,13 +72,18 @@ function CoverPlaceholder({ platform }: { platform: string }) {
   );
 }
 
-/** 图标仅表达类别，顺序由 resultTools 的 METRIC_ORDER 统一决定。 */
-const METRIC_ICONS: Record<string, typeof Eye> = {
+/**
+ * 图标仅表达类别，顺序由 resultTools 的 METRIC_ORDER 统一决定。
+ * 点赞=大拇指、评论=消息气泡、投币=B站官方硬币、浏览=眼睛、收藏=星星。
+ */
+type MetricIcon = ComponentType<{ className?: string }>;
+
+const METRIC_ICONS: Record<string, MetricIcon> = {
   view_count: Eye,
-  like_count: Heart,
-  coin_count: Coins,
+  like_count: ThumbsUp,
+  coin_count: BilibiliCoinIcon,
   comment_count: MessageCircle,
-  collect_count: ThumbsUp,
+  collect_count: Star,
   share_count: Share2,
 };
 

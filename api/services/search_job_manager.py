@@ -33,6 +33,7 @@ from .accounts import (
     get_session_snapshot,
     mark_login_required_from_search,
     record_search_outcome,
+    search_login_block,
 )
 from . import result_cache
 from .result_hydration import ResultHydrator
@@ -523,6 +524,15 @@ class SearchJobManager:
                     job.page_checkpoints.add(platform)
                 return
         info = job.platforms_state[platform]
+        # 登录预检（毫秒级、不启浏览器）：确定搜不了就直接回报 login_required，
+        # 不再 spawn worker。否则浏览器路径要先启动浏览器 + 导航十几秒，才在
+        # pong() 处失败 —— 这段时间对用户完全是浪费。
+        # 放在缓存回放之后：已有缓存仍然可以离线回放，不需要登录。
+        login_block = search_login_block(platform)
+        if login_block:
+            job.set_platform_status(platform, "login_required",
+                                    error_summary=login_block)
+            return
         if self.cooldowns.remaining(platform):
             job.set_platform_status(platform, "rate_limited", error_summary="平台冷却中，请倒计时结束后手动重试")
             info.cooldown_until = self.cooldowns.until(platform)

@@ -16,6 +16,7 @@
  */
 
 import type { PlatformSlug } from "../types/search.js";
+import { isAccountVerified } from "./accounts.js";
 
 /** 固定平台顺序（一键同步与测试共用）。 */
 export const BULK_SYNC_PLATFORM_ORDER: readonly PlatformSlug[] = [
@@ -73,6 +74,19 @@ export interface BulkSyncOptions {
   /** 每个平台开始前检查的全局阻断（扩展/API 状态等）。 */
   checkBlock?: GlobalBlockCheckFn;
   onProgress?: BulkProgressCallback;
+  /**
+   * 只同步这些平台（默认全部四个）。自动同步只针对"尚未确认登录"的平台，
+   * 不必为了其中一个未登录平台重新同步另外三个。输出仍按固定平台顺序。
+   */
+  platforms?: readonly PlatformSlug[];
+}
+
+/** 解析实际同步目标：只保留固定顺序里的已知平台（默认全部四个）。 */
+export function resolveBulkTargets(
+  platforms?: readonly PlatformSlug[]
+): PlatformSlug[] {
+  if (!platforms) return [...BULK_SYNC_PLATFORM_ORDER];
+  return BULK_SYNC_PLATFORM_ORDER.filter((p) => platforms.includes(p));
 }
 
 /**
@@ -81,8 +95,9 @@ export interface BulkSyncOptions {
  * outcomes 按固定平台顺序返回。
  */
 export async function runBulkSync(options: BulkSyncOptions): Promise<BulkSyncResult> {
-  const { syncOne, checkBlock, onProgress } = options;
+  const { syncOne, checkBlock, onProgress, platforms } = options;
   const totalCount = BULK_SYNC_PLATFORM_ORDER.length;
+  const targets = resolveBulkTargets(platforms);
   const results = new Map<PlatformSlug, SyncAttemptOutcome>();
   const active = new Set<PlatformSlug>();
   let blocked = false;
@@ -125,7 +140,7 @@ export async function runBulkSync(options: BulkSyncOptions): Promise<BulkSyncRes
   };
 
   const workers = new Set<Promise<void>>();
-  const queue = [...BULK_SYNC_PLATFORM_ORDER];
+  const queue = [...targets];
   while (queue.length > 0) {
     // 填满空位（最多并发 2）；已阻断则不再启动新平台。
     while (queue.length > 0 && workers.size < BULK_SYNC_MAX_CONCURRENCY && !blocked) {
@@ -250,4 +265,84 @@ export function createBulkSyncGuard(): {
       running = false;
     },
   };
+}
+
+// ── 自动同步决策（Round 18，纯函数；无 React 依赖）─────────────────────
+
+/** 自动同步判定的账号最小字段集（与 GET /api/search/accounts 对齐）。 */
+export interface AutoSyncAccount {
+  platform: string;
+  status: string;
+  verified: boolean;
+}
+
+export interface AutoSyncInput {
+  accounts: readonly AutoSyncAccount[] | null;
+  extensionState: "checking" | "connected" | "outdated" | "not-installed" | "unknown";
+  apiRunning: boolean | null;
+  /** 已有同步队列在跑（手动点击或上一次自动同步）。 */
+  syncing: boolean;
+  /** 本次页面生命周期内是否已经自动同步过。 */
+  alreadyAttempted: boolean;
+}
+
+export type AutoSyncSkipReason =
+  | "already_attempted"
+  | "already_syncing"
+  | "accounts_loading"
+  | "api_unavailable"
+  | "extension_outdated"
+  | "extension_not_connected"
+  | "nothing_to_sync";
+
+export interface AutoSyncDecision {
+  run: boolean;
+  /** 需要同步的平台（固定顺序 xhs → douyin → bilibili → zhihu）。 */
+  platforms: PlatformSlug[];
+  skipReason?: AutoSyncSkipReason;
+}
+
+/**
+ * 需要同步的平台 = 尚未"已验证登录"（status==="connected" 且 verified）的平台。
+ *
+ * 注意这里**不**区分 unverified / expired / disconnected：只要后端不能确认
+ * 这个平台已登录，就值得让扩展重新读一次当前浏览器的会话 —— 用户刚在浏览器
+ * 里登录完正是这种状态。抖音同样参与：它虽然可以匿名搜索，但登录后能拿到
+ * 更完整的结果，且同步失败不会阻断匿名搜索。
+ */
+export function platformsNeedingSync(
+  accounts: readonly AutoSyncAccount[] | null
+): PlatformSlug[] {
+  if (!accounts) return [];
+  const need = new Set(
+    accounts.filter((a) => !isAccountVerified(a)).map((a) => a.platform)
+  );
+  return BULK_SYNC_PLATFORM_ORDER.filter((p) => need.has(p));
+}
+
+/**
+ * 进入账号设置页时的自动同步决策：
+ * - 每个页面生命周期最多自动同步一次（alreadyAttempted）；
+ * - 已有队列在跑时不叠加（already_syncing）；
+ * - API 不可用 / 扩展未连接 / 扩展过旧时不启动（这些都需要用户先处理）；
+ * - 四个平台全部已验证登录时什么都不做（nothing_to_sync）—— 平时打开页面
+ *   不会产生任何额外请求或浏览器启动。
+ */
+export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
+  const { accounts, extensionState, apiRunning, syncing, alreadyAttempted } = input;
+  if (alreadyAttempted) return { run: false, platforms: [], skipReason: "already_attempted" };
+  if (syncing) return { run: false, platforms: [], skipReason: "already_syncing" };
+  if (apiRunning !== true) return { run: false, platforms: [], skipReason: "api_unavailable" };
+  if (extensionState === "outdated") {
+    return { run: false, platforms: [], skipReason: "extension_outdated" };
+  }
+  if (extensionState !== "connected") {
+    return { run: false, platforms: [], skipReason: "extension_not_connected" };
+  }
+  if (!accounts) return { run: false, platforms: [], skipReason: "accounts_loading" };
+  const platforms = platformsNeedingSync(accounts);
+  if (platforms.length === 0) {
+    return { run: false, platforms: [], skipReason: "nothing_to_sync" };
+  }
+  return { run: true, platforms };
 }

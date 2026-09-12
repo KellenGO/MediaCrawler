@@ -18,9 +18,12 @@ import {
 } from "@/lib/accounts";
 import { MAX_PLATFORM_LIMIT, MIN_PLATFORM_LIMIT, PLATFORM_ORDER, parsePlatformLimitInput } from "@/lib/platformLimits";
 import {
+  BULK_SYNC_PLATFORM_ORDER,
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
   createBulkSyncGuard,
+  decideAutoSync,
+  resolveBulkTargets,
   runBulkSync,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
@@ -573,13 +576,27 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
   const [bulkSyncing, setBulkSyncing] = useState(false);
   const [bulkActive, setBulkActive] = useState<PlatformSlug[]>([]);
   const [bulkCompleted, setBulkCompleted] = useState(0);
+  /** 本次队列的平台总数（自动同步可能只同步部分平台，不能用固定 4）。 */
+  const [bulkTotal, setBulkTotal] = useState(BULK_SYNC_PLATFORM_ORDER.length);
+  /** 自动同步的内联结果（不弹 toast，避免每次进页面都打扰）。 */
+  const [autoSyncNote, setAutoSyncNote] = useState<string | null>(null);
+  /** 本次页面生命周期只自动同步一次。 */
+  const autoSyncAttemptedRef = useRef(false);
   // 双击 guard：同步 ref（不能只依赖异步 React state）。
   const bulkGuardRef = useRef<ReturnType<typeof createBulkSyncGuard> | null>(null);
   if (bulkGuardRef.current === null) bulkGuardRef.current = createBulkSyncGuard();
 
-  const handleBulkSync = useCallback(async () => {
+  /**
+   * 同步队列（手动"一键同步"与自动同步共用）。
+   * silent=true 时不弹 toast，只更新内联状态 —— 自动同步必须安静。
+   */
+  const runSyncQueue = useCallback(async (
+    platforms: readonly PlatformSlug[] | undefined,
+    opts?: { silent?: boolean },
+  ) => {
+    const silent = opts?.silent === true;
     const guard = bulkGuardRef.current;
-    if (!guard || !guard.tryStart()) return; // 双击 guard：拒绝第二套队列
+    if (!guard || !guard.tryStart()) return; // 双击/并发 guard：拒绝第二套队列
     // 明确全局阻断（扩展未连接/过旧、API 不可用）→ 不启动队列，直接提示。
     const immediateBlock: BulkSyncBlockReason | null =
       extensionState === "outdated"
@@ -590,15 +607,18 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             ? "api_unavailable"
             : null;
     if (immediateBlock) {
-      toast.warning(buildBulkBlockedMessage(immediateBlock));
+      if (!silent) toast.warning(buildBulkBlockedMessage(immediateBlock));
+      else setAutoSyncNote(buildBulkBlockedMessage(immediateBlock));
       guard.finish();
       return;
     }
     setBulkSyncing(true);
     setBulkActive([]);
     setBulkCompleted(0);
+    setBulkTotal(resolveBulkTargets(platforms).length);
     try {
       const result = await runBulkSync({
+        platforms,
         syncOne: (platform) => syncAccount(platform, { silent: true }),
         checkBlock: () => (
           extensionState !== "connected"
@@ -614,10 +634,13 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       });
       // 汇总：全局阻断 → 一条总体提示；否则 → 一条汇总 toast。
       if (result.blocked && result.blockReason) {
-        toast.warning(buildBulkBlockedMessage(result.blockReason));
+        const text = buildBulkBlockedMessage(result.blockReason);
+        if (silent) setAutoSyncNote(text); else toast.warning(text);
       } else {
         const summary = buildBulkSummaryMessage(summarizeBulkOutcomes(result.outcomes));
-        if (summary.tone === "success") {
+        if (silent) {
+          setAutoSyncNote(summary.title);
+        } else if (summary.tone === "success") {
           toast.success(summary.title);
         } else if (summary.tone === "warning") {
           toast.warning(summary.title, { description: summary.description });
@@ -631,6 +654,27 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
       guard.finish();
     }
   }, [extensionState, apiRunning, syncAccount]);
+
+  const handleBulkSync = useCallback(() => runSyncQueue(undefined), [runSyncQueue]);
+
+  // ── 进入本页自动检测登录状态并同步（Round 18）────────────────────────
+  // 用户通常先在浏览器里登录平台，再回到这里；原来必须手动点"一键同步"。
+  // 这里在后端无法确认某个平台已登录时，自动让扩展重新读一次浏览器会话。
+  // 守卫：每个页面生命周期只跑一次、扩展已连接、API 可用、无队列在跑；
+  // 四个平台都已验证登录则什么都不做（平时打开页面零额外请求）。
+  useEffect(() => {
+    const decision = decideAutoSync({
+      accounts,
+      extensionState,
+      apiRunning,
+      syncing: bulkSyncing,
+      alreadyAttempted: autoSyncAttemptedRef.current,
+    });
+    if (!decision.run) return;
+    autoSyncAttemptedRef.current = true;
+    setAutoSyncNote("正在自动同步登录状态…");
+    void runSyncQueue(decision.platforms, { silent: true });
+  }, [accounts, extensionState, apiRunning, bulkSyncing, runSyncQueue]);
 
   // ── 备用辅助登录（默认折叠，仅用户主动点击）──────────────────────────
   const startAuxLogin = useCallback(async (platform: string) => {
@@ -712,8 +756,8 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 {bulkActive.length > 0
-                  ? `正在同步：${bulkActive.map((p) => PLATFORM_LABELS[p]).join("、")} · ${Math.min(bulkCompleted + bulkActive.length, 4)}/4`
-                  : `${bulkCompleted}/4`}
+                  ? `正在同步：${bulkActive.map((p) => PLATFORM_LABELS[p]).join("、")} · ${Math.min(bulkCompleted + bulkActive.length, bulkTotal)}/${bulkTotal}`
+                  : `${bulkCompleted}/${bulkTotal}`}
               </>
             ) : (
               <>
@@ -741,6 +785,14 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
         {extensionState === "not-installed" && "未检测到扩展（安装后需刷新本页）"}
         {apiRunning === false && " · 本地 API 未运行"}
       </div>
+
+      {/* 自动同步结果（进页面时自动检测；不弹 toast） */}
+      {autoSyncNote && (
+        <div className="mb-5 -mt-2 px-4 py-2.5 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary text-[12.5px] text-cyber-text-muted w-fit">
+          <ShieldCheck className="w-3.5 h-3.5 inline mr-1.5" />
+          {autoSyncNote}
+        </div>
+      )}
 
       {/* 平台卡片：统一浅色账号卡 */}
       <div className="flex flex-col gap-3">

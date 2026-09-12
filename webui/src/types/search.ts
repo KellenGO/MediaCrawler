@@ -43,6 +43,9 @@ export interface UnifiedSearchResult {
   rank: number;
   grouped_sources?: GroupedSource[] | null;
   collection_names?: string[];
+  metrics_status?: "pending" | "complete" | "partial" | "unavailable" | "failed" | null;
+  metrics_updated_at?: number | null;
+  metrics_approximate?: string[];
 }
 
 export interface FavoritePlatformInfo {

@@ -62,8 +62,9 @@ test("orderedMetrics: 平台缺项时保持相对顺序，不占位", () => {
   );
 });
 
-test("orderedMetrics: 零值、缺失与非对象输入都不产生指标", () => {
-  assert.deepEqual(keysOf({ like_count: 0, view_count: 0 }), []);
+test("orderedMetrics: 真实零值显示，缺失和非法值不占位", () => {
+  assert.deepEqual(keysOf({ like_count: 0, view_count: 0 }), ["view_count", "like_count"]);
+  assert.deepEqual(keysOf({ like_count: NaN, view_count: -1, comment_count: Infinity }), []);
   assert.deepEqual(keysOf({}), []);
   assert.deepEqual(orderedMetrics(null), []);
   assert.deepEqual(orderedMetrics(undefined), []);

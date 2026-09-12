@@ -222,6 +222,7 @@ class ZhihuCrawler(AbstractCrawler):
         collections = collections_response.get("data", []) if isinstance(collections_response, dict) else []
         remaining = self._result_limit()
         seen: set[str] = set()
+        detail_rows = []
         for collection in collections if isinstance(collections, list) else []:
             if remaining <= 0 or not isinstance(collection, dict):
                 break
@@ -252,12 +253,16 @@ class ZhihuCrawler(AbstractCrawler):
                         break
                 if batch:
                     self._result_sink_call(batch)
+                    detail_rows.extend(batch)
                     remaining -= len(batch)
                 paging = response.get("paging", {}) if isinstance(response, dict) else {}
                 if not rows or (isinstance(paging, dict) and paging.get("is_end")):
                     break
                 offset += len(rows)
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+        from aggregate_search.favorite_metrics import enrich_favorites
+        await enrich_favorites("zhihu", self.zhihu_client, detail_rows, self._result_sink_call)
 
     async def create_zhihu_client(self, httpx_proxy: Optional[str]) -> ZhiHuClient:
         """Create zhihu client"""

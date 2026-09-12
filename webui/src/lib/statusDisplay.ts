@@ -59,7 +59,10 @@ export function statusLine(status: PStatus, info: PlatformStatusInfo): string {
       base = "无结果";
       break;
     case "login_required":
-      base = "需要登录";
+      // 搜索前登录预检会在 error_summary 里给出可操作原因
+      // （"…尚未登录或登录已失效，请先到账号设置同步登录状态。"）；
+      // 没有原因时保持原来的短文案。
+      base = info.error_summary || "需要登录";
       break;
     case "rate_limited":
       base = "请求受限";

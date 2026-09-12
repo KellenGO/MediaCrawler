@@ -358,6 +358,7 @@ async def _run_standard_search(
 async def _run_favorites(job_id: str, platform: str, limit: int) -> None:
     """Read a bounded slice of a logged-in account's remote favourites."""
     from main import CrawlerFactory
+    from aggregate_search.favorite_metrics import list_approximations
 
     core_platform = agg_to_core_platform(platform)
     adapter = _ADAPTERS[platform]
@@ -366,17 +367,38 @@ async def _run_favorites(job_id: str, platform: str, limit: int) -> None:
     def handle_results(native_batch: List[Any]) -> None:
         rows = [item.model_dump() if hasattr(item, "model_dump") else item
                 for item in native_batch if isinstance(item, dict) or hasattr(item, "model_dump")]
-        for result in adapter.adapt(rows):
-            key = f"{platform}:{result.content_id}"
-            if key in pending:
-                existing = pending[key]
-                existing.collection_names = list(dict.fromkeys(
-                    [*existing.collection_names, *result.collection_names]))
-                continue
-            if len(pending) >= limit:
-                continue
-            result.rank = len(pending)
-            pending[key] = result
+        for row in rows:
+            for result in adapter.adapt([row]):
+                key = f"{platform}:{result.content_type}:{result.content_id}"
+                result.metrics_approximate = list_approximations(platform, row)
+                if "_metrics_status" in row:
+                    result.metrics_status = row["_metrics_status"]
+                    result.metrics_updated_at = row.get("_metrics_updated_at")
+                    detail_metrics = row.get("_favorite_metrics", {})
+                    if row.get("_metrics_cached"):
+                        detail_metrics = {k: v for k, v in detail_metrics.items() if k not in result.metrics}
+                    result.metrics.update(detail_metrics)
+                    result.metrics_approximate = sorted(
+                        (set(result.metrics_approximate) - detail_metrics.keys()) |
+                        {k for k in row.get("_metrics_approximate", []) if k in detail_metrics})
+                if key in pending:
+                    existing = pending[key]
+                    existing.collection_names = list(dict.fromkeys(
+                        [*existing.collection_names, *result.collection_names]))
+                    # A duplicate folder membership must not overwrite fresher detail counters.
+                    if result.metrics_status is not None:
+                        existing.metrics.update(result.metrics)
+                        existing.metrics_status = result.metrics_status
+                        existing.metrics_updated_at = result.metrics_updated_at
+                        existing.metrics_approximate = result.metrics_approximate
+                    emit_result(job_id, platform, existing.model_dump())
+                    continue
+                if len(pending) >= limit:
+                    continue
+                result.rank = len(pending)
+                result.metrics_status = result.metrics_status or ("pending" if platform != "douyin" else "partial")
+                pending[key] = result
+                emit_result(job_id, platform, result.model_dump())
 
     config.PLATFORM = core_platform
     config.KEYWORDS = ""
@@ -398,15 +420,17 @@ async def _run_favorites(job_id: str, platform: str, limit: int) -> None:
             result_limit=limit, strict_errors=True, headless=True,
             reuse_http_client=True, light_page=True,
         )
-        await asyncio.wait_for(crawler.start(), timeout=WORKER_TIMEOUT_SECONDS)
-        for result in pending.values():
-            emit_result(job_id, platform, result.model_dump())
+        await asyncio.wait_for(crawler.start(), timeout=180)
         emit_status(job_id, platform, "succeeded" if pending else "empty")
     except asyncio.TimeoutError:
         emit_error(job_id, platform, "timed_out", "收藏夹同步超时")
     except Exception as exc:
         emit_error(job_id, platform, _classify_error(exc), _safe_error_message(exc))
     finally:
+        for result in pending.values():
+            if result.metrics_status == "pending":
+                result.metrics_status = "failed"
+                emit_result(job_id, platform, result.model_dump())
         await _cleanup_crawler(crawler)
     emit_done(job_id, platform)
 
