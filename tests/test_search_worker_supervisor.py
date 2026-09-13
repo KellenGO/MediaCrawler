@@ -109,9 +109,9 @@ class TestResidentSupervisor:
         assert second.platforms["xhs"].result_count == 1
         pid2 = _worker_pid(manager, "xhs")
         assert pid2 == pid1
-        # 已有驻留进程 → 第二次 spawn 开销应明显更小。
+        # 已有驻留进程 → 第二次 spawn 开销不应更大。毫秒取整时两次都可能为 0。
         spawn2 = second.platforms["xhs"].timings.spawn_ms
-        assert spawn2 < spawn1
+        assert spawn2 <= spawn1
 
     @pytest.mark.asyncio
     async def test_max_requests_restart_spawns_new_pid(self, manager, monkeypatch):
@@ -242,7 +242,7 @@ class TestResidentSupervisor:
         assert first.platforms["xhs"].timings.reused_worker is False
         second = await _run_to_completion(manager, _req("__result_1__"))
         assert second.platforms["xhs"].timings.reused_worker is True
-        assert second.platforms["xhs"].timings.spawn_ms < \
+        assert second.platforms["xhs"].timings.spawn_ms <= \
             first.platforms["xhs"].timings.spawn_ms
 
     @pytest.mark.asyncio
