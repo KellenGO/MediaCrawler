@@ -10,18 +10,18 @@
 
 ![四野搜索结果页：小红书、抖音、B站、知乎结果合并展示](site/shot-search.png)
 
-- 推广落地页：[`site/index.html`](site/index.html)（单文件，无依赖，可直接部署到静态托管）
-- 使用说明：[`docs/使用说明.md`](docs/使用说明.md)（网页版 [`site/guide.html`](site/guide.html)，面向普通用户）
+- 推广落地页：<https://kellengo.github.io/MediaCrawler/>（仓库内 `site/index.html`，单文件无依赖，可直接部署到静态托管）
+- 使用说明：<https://kellengo.github.io/MediaCrawler/guide.html>（仓库内 `docs/使用说明.md`）
 - 首页与账号设置截图：`site/shot-home.png`、`site/shot-account.png`
 
 ## 文档入口
 
-| 开始了解    | 看哪里                            |
-| ------- | ------------------------------ |
-| 新朋友？➡️  | [落地页](site/index.html)         |
-| 如何使用？➡️ | [使用说明](docs/使用说明.md)           |
-| 维护记录➡️  | [`site/维护说明.md`](site/维护说明.md) |
-| 源码学习    | 本文下面的「快速开始」「项目架构」「测试」          |
+| 开始了解    | 看哪里                                                                          |
+| ------- | ---------------------------------------------------------------------------- |
+| 新朋友？➡️  | [落地页](https://kellengo.github.io/MediaCrawler/)（仓库文件 `site/index.html`）         |
+| 如何使用？➡️ | [使用说明](https://kellengo.github.io/MediaCrawler/guide.html)（仓库文件 `docs/使用说明.md`） |
+| 维护记录➡️  | [`site/维护说明.md`](site/维护说明.md)                                              |
+| 源码学习    | 本文下面的「快速开始」「项目架构」「测试」                                                      |
 
 ## 为什么做这个项目
 
