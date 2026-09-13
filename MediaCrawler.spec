@@ -69,9 +69,13 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
+python_options = [
+    ("X utf8", None, "OPTION"),
+]
 exe = EXE(
     pyz,
     a.scripts,
+    python_options,
     exclude_binaries=True,
     name="MediaCrawler",
     debug=False,
