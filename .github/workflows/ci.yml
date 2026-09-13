@@ -42,8 +42,7 @@ jobs:
         ports:
           - 6379:6379
         options: >-
-          --requirepass 123456
-          --health-cmd "redis-cli -a 123456 ping"
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -64,6 +63,8 @@ jobs:
           uv lock
           uv sync
       - name: Run Redis-backed integration tests
+        env:
+          REDIS_DB_PWD: ""
         run: uv run pytest -q --run-integration -m integration tests/test_redis_cache.py
 
   frontend:
