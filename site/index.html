@@ -37,8 +37,11 @@
   "operatingSystem": "Windows 10/11 (x64)",
   "description": "跨平台中文社交内容聚合搜索：一次搜索小红书、抖音、B站、知乎，统一排序、跨平台去重、筛选、收藏与导出，全部在本机运行。",
   "url": "https://kellengo.github.io/MediaCrawler/",
-  "downloadUrl": "https://github.com/KellenGO/MediaCrawler/releases/latest",
+  "downloadUrl": "https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip",
   "codeRepository": "https://github.com/KellenGO/MediaCrawler",
+  "softwareVersion": "0.1.0",
+  "releaseNotes": "https://github.com/KellenGO/MediaCrawler/releases",
+  "screenshot": "https://kellengo.github.io/MediaCrawler/og.png",
   "license": "https://github.com/KellenGO/MediaCrawler/blob/master/LICENSE",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
 }
@@ -46,6 +49,7 @@
 
 <!-- 主题在首帧之前定好，避免深色模式用户看到一闪的白屏 -->
 <script>
+document.documentElement.classList.add('js');   /* JS 可用才启用滚动显现等增强 */
 (function () {
   try {
     var saved = localStorage.getItem('siye-landing-theme');
@@ -202,6 +206,8 @@ html.dark .btn.primary:hover{color:#101525}
 .card:hover{border-color:var(--line-strong)}
 
 section{padding:78px 0}
+section[id]{scroll-margin-top:84px}   /* 锚点定位时给 sticky 顶栏留出高度 */
+section.tint{background:var(--soft)}
 @media (max-width:700px){section{padding:54px 0}}
 .section-head{margin-bottom:36px}
 .center{text-align:center}
@@ -280,8 +286,6 @@ html.dark .i-moon{display:none}
 .scope .scope-label{margin-right:8px}
 .platform-choice{display:flex;align-items:center;gap:7px;padding:5px 10px;color:var(--ink);border-radius:7px;font-size:12.5px}
 .platform-choice .check{width:12px;color:var(--brand-ink);font-size:11px}
-
-.home-note{margin-top:26px;font-size:12px;color:var(--muted)}
 
 /* ---------- 界面示意（纯 HTML/CSS 复刻新版结果页） ---------- */
 .mock-wrap{margin-top:56px}
@@ -382,6 +386,20 @@ html.dark .i-moon{display:none}
 .card .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;margin-bottom:14px;
   background:var(--brand-soft);color:var(--brand-ink)}
 .card .ic svg{width:16px;height:16px}
+
+/* 次要功能折叠区（复用 FAQ 的 chevron 语言） */
+.more{margin-top:18px;border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
+  padding:0 24px;transition:border-color .15s}
+.more[open]{border-color:var(--line-strong);padding-bottom:22px}
+.more summary{cursor:pointer;list-style:none;padding:16px 0;font-size:14px;font-weight:600;color:var(--secondary);
+  display:flex;align-items:center;gap:10px}
+.more summary::-webkit-details-marker{display:none}
+.more summary:hover{color:var(--brand-ink)}
+.more summary::after{content:"";margin-left:auto;width:8px;height:8px;flex:none;
+  border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);
+  transform:rotate(45deg) translateY(-2px);transition:transform .2s}
+.more[open] summary::after{transform:rotate(225deg) translateY(-2px)}
+.more .cards{margin-top:4px}
 
 /* ---------- 平台表 ---------- */
 .plat-table{width:100%;border-collapse:collapse;font-size:14px}
@@ -491,8 +509,10 @@ footer a:hover{color:var(--brand-ink)}
 .foot-slogan{margin:0 0 14px;font-size:16px;font-weight:650;letter-spacing:-.3px;color:var(--ink)}
 
 /* ---------- 滚动显现 ---------- */
-.reveal{opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease}
-.reveal.in{opacity:1;transform:none}
+/* 滚动显现只在 JS 可用时启用（html.js 由首帧脚本添加）：
+   JS 被禁用或脚本报错时内容直接可见，不会整页空白 */
+html.js .reveal{opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease}
+html.js .reveal.in{opacity:1;transform:none}
 
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -526,6 +546,7 @@ footer a:hover{color:var(--brand-ink)}
       <a href="#download">下载</a>
       <a href="#source">源码运行</a>
       <a href="#faq">常见问题</a>
+      <a href="#license">许可</a>
     </nav>
 
     <div class="actions">
@@ -537,7 +558,7 @@ footer a:hover{color:var(--brand-ink)}
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.4 9.4 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
         <span class="github-text">GitHub</span>
       </a>
-      <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">下载</a>
+      <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip" target="_blank" rel="noopener">下载</a>
     </div>
   </div>
 </header>
@@ -559,7 +580,7 @@ footer a:hover{color:var(--brand-ink)}
     </p>
 
     <div class="cta-row">
-      <a class="btn primary large" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">
+      <a class="btn primary large" href="https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
         下载 Windows 版
       </a>
@@ -582,8 +603,6 @@ footer a:hover{color:var(--brand-ink)}
       <span class="platform-choice"><i class="pd bilibili"></i>B站<span class="check">✓</span></span>
       <span class="platform-choice"><i class="pd zhihu"></i>知乎<span class="check">✓</span></span>
     </div>
-
-    <p class="home-note">小红书、抖音、B站、知乎 · 一次搜索，几种视角。</p>
 
     <!-- 界面示意：纯 HTML/CSS 复刻新版结果页，无外部图片。
          想换成真实截图：把下面的 .mock 整块替换成 <img src="shot-search.png" alt="四野 搜索结果页"> 即可。 -->
@@ -734,7 +753,7 @@ footer a:hover{color:var(--brand-ink)}
 </section>
 
 <!-- ============ 功能 ============ -->
-<section id="features">
+<section id="features" class="tint">
   <div class="wrap">
     <div class="section-head reveal">
       <p class="eyebrow">Features</p>
@@ -760,7 +779,7 @@ footer a:hover{color:var(--brand-ink)}
       <article class="card reveal">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/><path d="M3 21h18"/></svg></span>
         <h3>三种排序</h3>
-        <p>「综合」把关键词相关性、平台原始 rank、新鲜度、平台内互动表现和平台多样性放在一起算；「最新」按时间；「互动最多」让评论、收藏、投币、分享等深度互动权重大于播放量。</p>
+        <p>「综合」合并关键词相关性、新鲜度、互动表现与平台多样性；「最新」按时间；「互动最多」让评论、收藏等深度互动权重大于播放量。</p>
       </article>
 
       <article class="card reveal">
@@ -798,32 +817,38 @@ footer a:hover{color:var(--brand-ink)}
       </article>
 
       <article class="card reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
-        <h3>摘要补全与缓存</h3>
-        <p>先用 snippet 摘要，缺少有效摘要的前排结果由后台补全，不阻塞首屏。90 秒短期内存结果缓存，可强制重新搜索。</p>
-      </article>
-
-      <article class="card reveal">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span>
         <h3>搜索前登录预检</h3>
         <p>启动浏览器前先做一次完全本地的登录预检（实测约 1 毫秒）：确定搜不了的平台立刻提示「需要登录」并指向账号设置，不再白等十几秒。</p>
         <p class="note">cookie 库读不出来时一律放行，绝不因为读不出文件就把搜索拦掉。</p>
       </article>
 
-      <article class="card reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16"/><rect x="5" y="11" width="3.4" height="6" rx="1"/><rect x="10.3" y="7" width="3.4" height="10" rx="1"/><rect x="15.6" y="13" width="3.4" height="4" rx="1"/></svg></span>
-        <h3>搜索统计与限流冷却</h3>
-        <p>最近 100 次搜索的耗时、平台成功率、缓存命中率、备用路径使用率和失败原因一目了然，也可直接读接口做对比。</p>
-        <p class="note">平台明确限流后进入 60 秒冷却，重复触发依次延长为 120 / 240 / 300 秒封顶；其他平台继续搜。</p>
-      </article>
-
-      <article class="card reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span>
-        <h3>账号状态与平台诊断</h3>
-        <p>打开程序即自动检测账号状态，为未确认登录的平台自动同步；平台诊断会分别展示账号状态、当前搜索路径和 fallback 能力。</p>
-        <p class="note">账号状态不等同于搜索能力，没登录也可能完成公开搜索。</p>
-      </article>
     </div>
+
+    <details class="more reveal">
+      <summary>更多底层能力：摘要补全与缓存、搜索统计与限流、账号诊断</summary>
+      <div class="cards">
+        <article class="card">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <h3>摘要补全与缓存</h3>
+          <p>先用 snippet 摘要，缺少有效摘要的前排结果由后台补全，不阻塞首屏。90 秒短期内存结果缓存，可强制重新搜索。</p>
+        </article>
+
+        <article class="card">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16"/><rect x="5" y="11" width="3.4" height="6" rx="1"/><rect x="10.3" y="7" width="3.4" height="10" rx="1"/><rect x="15.6" y="13" width="3.4" height="4" rx="1"/></svg></span>
+          <h3>搜索统计与限流冷却</h3>
+          <p>最近 100 次搜索的耗时、平台成功率、缓存命中率、备用路径使用率和失败原因一目了然，也可直接读接口做对比。</p>
+          <p class="note">平台明确限流后进入 60 秒冷却，重复触发依次延长为 120 / 240 / 300 秒封顶；其他平台继续搜。</p>
+        </article>
+
+        <article class="card">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span>
+          <h3>账号状态与平台诊断</h3>
+          <p>打开程序即自动检测账号状态，为未确认登录的平台自动同步；平台诊断会分别展示账号状态、当前搜索路径和 fallback 能力。</p>
+          <p class="note">账号状态不等同于搜索能力，没登录也可能完成公开搜索。</p>
+        </article>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -861,7 +886,7 @@ footer a:hover{color:var(--brand-ink)}
           <tr>
             <th scope="row" class="nm"><i class="pd zhihu"></i>知乎</th>
             <td><span class="yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>支持</span></td>
-            <td>收藏夹名称会保留</td>
+            <td>搜索结果不含收藏数；收藏夹名称会保留</td>
           </tr>
         </tbody>
       </table>
@@ -1059,7 +1084,7 @@ npm run dev   # http://localhost:5173，/api 代理到 8080</pre>
 </section>
 
 <!-- ============ FAQ ============ -->
-<section id="faq">
+<section id="faq" class="tint">
   <div class="wrap">
     <div class="section-head reveal">
       <p class="eyebrow">FAQ</p>
@@ -1208,7 +1233,7 @@ npm run dev   # http://localhost:5173，/api 代理到 8080</pre>
 <!-- ============ 移动端固定下载条 ============ -->
 <div class="mobile-cta">
   <a class="btn" href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">GitHub</a>
-  <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">下载 Windows 版</a>
+  <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip" target="_blank" rel="noopener">下载 Windows 版</a>
 </div>
 
 <script>

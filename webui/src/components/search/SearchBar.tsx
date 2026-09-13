@@ -141,8 +141,20 @@ export function SearchBar({
     >
       {/* 搜索行：输入 + 按钮 */}
       <div className="search-box search-row flex items-stretch gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-[21px] h-[21px] text-cyber-text-muted pointer-events-none" />
+        <div className="search-leading" aria-hidden={!keyword || isSearching}>
+          {keyword && !isSearching ? (
+            <button
+              type="button"
+              onClick={() => onKeywordChange("")}
+              aria-label="清空关键词"
+            >
+              <X />
+            </button>
+          ) : (
+            <Search aria-hidden="true" />
+          )}
+        </div>
+        <div className="search-input-wrap">
           <input
             type="text"
             value={keyword}
@@ -153,18 +165,8 @@ export function SearchBar({
             // Round 14.1：只有输入框聚焦打开浮层；关闭由 document pointerdown
             // 外部点击 / Escape / 提交搜索驱动，不再依赖 blur。
             onFocus={() => dispatchPopover({ type: "focus_within" })}
-            className="w-full h-[58px] pl-12 pr-11 rounded-full border-0 bg-transparent text-[16px] text-cyber-text-primary placeholder:text-cyber-text-muted focus:outline-none disabled:opacity-50"
+            className="w-full h-[58px] rounded-full border-0 bg-transparent text-[16px] text-cyber-text-primary placeholder:text-cyber-text-muted focus:outline-none disabled:opacity-50"
           />
-          {keyword && !isSearching && (
-            <button
-              type="button"
-              onClick={() => onKeywordChange("")}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-cyber-text-muted hover:text-cyber-text-primary"
-              aria-label="清空关键词"
-            >
-              <X className="w-[18px] h-[18px]" />
-            </button>
-          )}
 
           {/* 聚焦浮层：最近搜索 + 推荐搜索（必须 === "open"，"closed" 也是 truthy 字符串） */}
           {popoverOpen === "open" && (

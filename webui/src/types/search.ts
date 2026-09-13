@@ -146,10 +146,10 @@ export const PLATFORM_LABELS: Record<PlatformSlug, string> = {
 };
 
 export const PLATFORM_COLORS: Record<PlatformSlug, string> = {
-  xhs: "#ff4d6d",
-  douyin: "#202945",
-  bilibili: "#ff5c8a",
-  zhihu: "#0f88eb",
+  xhs: "#ef3340",
+  douyin: "#111111",
+  bilibili: "#23ade5",
+  zhihu: "#1677c8",
 };
 
 export const STATUS_LABELS: Record<PlatformStatus, string> = {

@@ -207,10 +207,10 @@ export function Header({ viewMode, onNavigate }: HeaderProps) {
     <header className="app-header site-header bg-cyber-bg-primary">
       <div className="header-inner">
         {/* 字标：保持纯文字，品牌色只出现在交互状态 */}
-        <button type="button" className="brand-link" onClick={() => onNavigate('search')} aria-label="四野主页">
+        <div className="brand-link" aria-label="四野，聚合搜索">
           <strong className="brand-name">{t('brand.name')}</strong>
           <span className="brand-caption">聚合搜索</span>
-        </button>
+        </div>
 
         {/* 导航 */}
         <nav className="nav" aria-label="主导航">

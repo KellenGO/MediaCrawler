@@ -103,7 +103,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col relative">
+    <div className={`min-h-screen flex flex-col relative ${viewMode === 'search' && homeRoute ? 'home-route' : ''}`}>
       {/* License Disclaimer Modal - Shows first or when triggered */}
       {(!licenseAccepted || showDisclaimer) && (
         <LicenseDisclaimer onAccept={handleLicenseAccept} />

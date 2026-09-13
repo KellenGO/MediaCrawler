@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Clock3, RotateCcw, Loader2, UserCog, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Clock3, RotateCcw, Loader2, UserCog, RefreshCw, Search } from "lucide-react";
 import { SearchBar } from "./SearchBar";
 import { PlatformStatus } from "./PlatformStatus";
 import { ResultTabs } from "./ResultTabs";
 import { useSearchExperience } from "@/hooks/useSearchExperience";
 import { usePlatformLimits } from "@/hooks/usePlatformLimits";
 import type { PlatformSlug } from "@/types/search";
-import { PLATFORM_LABELS } from "@/types/search";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { TOOL_BUTTON } from "./ResultTools";
 import { useHomePreferencesStore } from "@/store/homePreferencesStore";
+import { safeContentUrl } from "@/lib/resultTools";
 
 interface SearchPageProps {
   homeRequested?: boolean;
@@ -142,6 +143,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
   const showInitialIdle = !displayJobResponse && !busy && !hasError;
   const showInitialLoading = !displayJobResponse && busy && !hasError;
   const isHome = homeRequested;
+  const recentResults = latestJobResponse?.results.slice(0, 3) ?? [];
 
   // Round 15.1: 本次搜索中真正返回 login_required 的平台。
   // 只取 displayJobResponse.platforms 的 key 并按 status 筛选，不解析
@@ -192,9 +194,21 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
             <p className="panel-footnote">{history.length ? "从上次的好奇，继续探索。" : "搜索过的关键词会出现在这里。"}</p>
           </section>}
           {homePreferences.recent && <section className="panel">
-            <div className="panel-heading"><h2>最近搜到</h2><Search /></div>
-            <p className="secondary text-[13px]">还没有搜到的内容。</p>
-            <p className="panel-footnote">完成搜索后，在这里继续阅读。</p>
+            <div className="panel-heading"><h2>最近搜到</h2>{recentResults.length ? <button type="button" className="text-link" onClick={onSearchStarted}>查看结果</button> : <Search />}</div>
+            {recentResults.length ? (
+              <div className="recent-results">
+                {recentResults.map((result) => {
+                  const url = safeContentUrl(result.url);
+                  const content = <><span className="recent-result-title">{result.title}</span><small>{PLATFORM_LABELS[result.platform]}{result.author ? ` · ${result.author}` : ""}</small></>;
+                  return <div className="recent-result" key={`${result.platform}-${result.content_id}`}>
+                    <i className="pd" style={{ backgroundColor: PLATFORM_COLORS[result.platform] }} />
+                    {url ? <a href={url} target="_blank" rel="noreferrer">{content}</a> : <span className="recent-result-body">{content}</span>}
+                    {url && <ArrowUpRight aria-hidden="true" />}
+                  </div>;
+                })}
+              </div>
+            ) : <p className="secondary text-[13px]">还没有搜到的内容。</p>}
+            <p className="panel-footnote">{recentResults.length ? "上次搜索获取的内容，可直接继续阅读。" : "完成搜索后，在这里继续阅读。"}</p>
           </section>}
         </div>
       )}
