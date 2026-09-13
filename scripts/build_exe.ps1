@@ -20,7 +20,7 @@ $pythonPrefix = @()
 $pythonCommand = $null
 if ($PythonPath) {
     if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-        throw "未找到指定的 Python 构建环境: $PythonPath"
+        throw "The specified Python build environment was not found: $PythonPath"
     }
     $pythonCommand = (Resolve-Path -LiteralPath $PythonPath).Path
 } else {
@@ -28,7 +28,7 @@ if ($PythonPath) {
     if (-not $python) {
         $python = Get-Command py -ErrorAction SilentlyContinue
     }
-    if (-not $python) { throw "未找到 Python 3.11+ 构建环境" }
+    if (-not $python) { throw "Python 3.11+ build environment was not found" }
     $pythonCommand = $python.Source
     if ($python.Name -eq "py.exe") { $pythonPrefix = @("-3") }
 }
@@ -58,12 +58,12 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $distribution "README.md") -Force
 
 $baseVersion = & $pythonCommand @pythonPrefix -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
-if ($LASTEXITCODE -ne 0) { throw "无法读取 pyproject.toml 版本" }
+if ($LASTEXITCODE -ne 0) { throw "Unable to read the version from pyproject.toml" }
 $releaseVersion = $baseVersion.Trim()
 if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME) {
     $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
     if ($tagVersion -ne $releaseVersion) {
-        throw "Git tag $($env:GITHUB_REF_NAME) 与 pyproject.toml 版本 $releaseVersion 不一致"
+        throw "Git tag $($env:GITHUB_REF_NAME) does not match pyproject.toml version $releaseVersion"
     }
 }
 $versionFile = Join-Path $distribution "RELEASE_VERSION"
