@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { ArrowUpRight, ChevronDown, Eye, MessageCircle, Share2, Star, ThumbsUp } from "lucide-react";
 import { BilibiliCoinIcon } from "@/components/icons/BilibiliCoinIcon";
 import type { GroupedSource, UnifiedSearchResult } from "@/types/search";
@@ -59,13 +59,30 @@ function SourceLine({ source, query }: { source: GroupedSource; query: string })
 }
 
 export function ResultCard({ result, index = 0, highlightQuery = "", renderBookmark }: ResultCardProps) {
-  const [groupExpanded, setGroupExpanded] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [contentClipped, setContentClipped] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const descriptionRef = useRef<HTMLParagraphElement>(null);
+  const metaRef = useRef<HTMLDivElement>(null);
   const url = safeUrl(result.url);
   const groupedSources = result.grouped_sources && result.grouped_sources.length >= 2 ? result.grouped_sources : null;
   const title = <><Highlight text={result.title} query={highlightQuery} />{url && <ArrowUpRight />}</>;
   const metrics = orderedMetrics(result.metrics);
   const type = CONTENT_TYPE_LABELS[result.content_type] || result.content_type || "";
+  const hasDetails = contentClipped || !!groupedSources;
+
+  useLayoutEffect(() => {
+    if (detailsExpanded) return;
+    const elements = [titleRef.current, descriptionRef.current, metaRef.current].filter(Boolean) as HTMLElement[];
+    const checkOverflow = () => setContentClipped(elements.some((element) =>
+      element.scrollHeight > element.clientHeight + 1 || element.scrollWidth > element.clientWidth + 1));
+    checkOverflow();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(checkOverflow);
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [detailsExpanded, result.title, result.snippet, result.metrics, type]);
 
   return (
     <article className="result-row">
@@ -74,17 +91,17 @@ export function ResultCard({ result, index = 0, highlightQuery = "", renderBookm
         <div className="result-cover">
           <img
             src={result.cover_url}
-            alt=""
+            alt={result.title}
             loading="lazy"
             referrerPolicy="no-referrer"
             onError={() => setCoverFailed(true)}
           />
         </div>
       )}
-      <div className="result-content">
-        <h2>{url ? <a className="result-title" href={url} target="_blank" rel="noreferrer">{title}</a> : <span className="result-title">{title}</span>}</h2>
-        {result.snippet && <p className="result-description"><Highlight text={result.snippet} query={highlightQuery} /></p>}
-        <div className="result-meta">
+      <div className={`result-content result-preview ${detailsExpanded ? "is-expanded" : ""}`}>
+        <h2 ref={titleRef}>{url ? <a className="result-title" href={url} target="_blank" rel="noreferrer">{title}</a> : <span className="result-title">{title}</span>}</h2>
+        {result.snippet && <p ref={descriptionRef} className="result-description"><Highlight text={result.snippet} query={highlightQuery} /></p>}
+        <div ref={metaRef} className="result-meta">
           <span className="source"><i className="pd" style={{ backgroundColor: PLATFORM_COLORS[result.platform] }} />{groupedSources ? "跨平台聚合" : PLATFORM_LABELS[result.platform]}</span>
           {result.author && <span>{result.author}</span>}
           {result.published_at && <span>{formatTime(result.published_at)}</span>}
@@ -97,12 +114,22 @@ export function ResultCard({ result, index = 0, highlightQuery = "", renderBookm
             return <span key={key} className="result-metric" title={`${label} ${value}`} aria-label={`${label} ${value}`}><Icon />{value}</span>;
           })}
         </div>
-        {groupedSources && <>
-          <div className="result-group-summary"><span>{groupedSources.length} 个平台有同内容</span><button type="button" className="text-link" onClick={() => setGroupExpanded((value) => !value)}>{groupExpanded ? "收起平台版本" : "查看各平台版本"}<ChevronDown className={groupExpanded ? "rotate-180" : ""} /></button></div>
-          {groupExpanded && <div className="result-sources">{groupedSources.map((source) => <SourceLine key={`${source.platform}-${source.content_id}`} source={source} query={highlightQuery} />)}</div>}
-        </>}
+        {detailsExpanded && groupedSources && <div className="result-expanded-sources">
+          <div className="result-details-heading">{groupedSources.length} 个平台的内容版本</div>
+          {groupedSources.map((source) => <SourceLine key={`${source.platform}-${source.content_id}`} source={source} query={highlightQuery} />)}
+        </div>}
       </div>
-      {renderBookmark && <div className="row-actions">{renderBookmark(result)}</div>}
+      {(renderBookmark || hasDetails) && <div className="row-actions">
+        {renderBookmark?.(result)}
+        {hasDetails && <button
+          type="button"
+          className="details-toggle"
+          aria-expanded={detailsExpanded}
+          aria-label={detailsExpanded ? "收起完整内容" : "展开完整内容"}
+          title={detailsExpanded ? "收起完整内容" : "展开完整内容"}
+          onClick={() => setDetailsExpanded((value) => !value)}
+        ><ChevronDown /></button>}
+      </div>}
     </article>
   );
 }

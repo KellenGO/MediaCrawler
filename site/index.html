@@ -287,71 +287,10 @@ html.dark .i-moon{display:none}
 .platform-choice{display:flex;align-items:center;gap:7px;padding:5px 10px;color:var(--ink);border-radius:7px;font-size:12.5px}
 .platform-choice .check{width:12px;color:var(--brand-ink);font-size:11px}
 
-/* ---------- 界面示意（纯 HTML/CSS 复刻新版结果页） ---------- */
+/* ---------- 界面示意（真实结果页截图，作者与互动数据已抹除） ---------- */
 .mock-wrap{margin-top:56px}
-.mock{
-  border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
-  box-shadow:var(--shadow);padding:22px 26px 26px;text-align:left;
-  font-size:clamp(10px,1.05vw,12.5px);
-}
-@media (max-width:700px){.mock{padding:18px 16px 20px}}
-
-.mock-search{display:flex;align-items:center;gap:.9em;max-width:34em;margin:0 auto 1.6em;
-  border:1px solid var(--brand);border-radius:var(--r-pill);height:3.3em;padding:.4em .5em .4em 1.4em}
-.mock-search svg{width:1.5em;height:1.5em;color:var(--muted);flex:none}
-.mock-search .kw{flex:1;min-width:0;font-size:1.25em;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mock-search .kw::after{content:"";display:inline-block;width:1px;height:1em;background:var(--brand);margin-left:.15em;vertical-align:-.12em;animation:blink 1.1s step-end infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-.mock-search .go{width:2.6em;height:2.6em;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;flex:none}
-
-.mock-headline{display:flex;align-items:baseline;gap:.9em;margin-bottom:1.1em;flex-wrap:wrap}
-.mock-headline b{font-size:1.7em;font-weight:650;letter-spacing:-.5px;color:var(--ink)}
-.mock-headline span{font-size:.95em;color:var(--muted)}
-
-.mock-progress{display:flex;align-items:center;flex-wrap:wrap;gap:.7em 1.7em;
-  padding:.9em 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:1.3em;
-  font-size:.95em;color:var(--secondary)}
-.mock-progress .item{display:flex;align-items:center;gap:.5em}
-.mock-progress small{font-size:.88em;color:var(--muted)}
-.mock-progress .link{margin-left:auto;color:var(--secondary)}
-
-.mock-status{display:flex;align-items:center;justify-content:space-between;gap:1em;
-  border:1px solid var(--line);border-radius:10px;padding:.8em 1.1em;color:var(--secondary);
-  font-size:.95em;margin-bottom:1.3em}
-.mock-status .msg{display:flex;align-items:center;gap:.7em;min-width:0}
-.mock-status svg{width:1.2em;height:1.2em;color:var(--warn);flex:none}
-.mock-status .retry{color:var(--warn)}
-
-.mock-tabs{display:flex;align-items:center;gap:1.8em;border-bottom:1px solid var(--line);margin-bottom:1.5em;
-  overflow-x:auto;scrollbar-width:none}
-.mock-tabs::-webkit-scrollbar{display:none}
-.mock-tabs span{padding-bottom:.9em;color:var(--secondary);font-size:1em;border-bottom:2px solid transparent;
-  margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:.4em}
-.mock-tabs .on{border-color:var(--brand);color:var(--ink);font-weight:600}
-.mock-tabs em{font-style:normal;font-size:.86em;color:var(--muted)}
-
-.mock-toolbar{display:flex;align-items:center;justify-content:space-between;gap:1em;margin-bottom:1.4em;flex-wrap:wrap}
-.mock-toolbar .fields{display:flex;gap:.7em;flex-wrap:wrap}
-.mock-field{border:1px solid var(--line-strong);border-radius:8px;padding:.45em .8em;color:var(--secondary);font-size:.95em;white-space:nowrap}
-.mock-toolbar .link{color:var(--secondary);font-size:.95em;display:flex;align-items:center;gap:.4em}
-
-.mock-row{display:flex;gap:1.1em;padding:1.15em 0;border-bottom:1px solid var(--line)}
-.mock-row:last-child{border-bottom:0;padding-bottom:.3em}
-.mock-num{color:var(--muted);font-size:.95em;font-variant-numeric:tabular-nums;padding-top:.25em;flex:none}
-.mock-body{flex:1;min-width:0}
-.mock-body h4{font-size:1.25em;font-weight:600;color:var(--ink);line-height:1.5;letter-spacing:-.1px;margin-bottom:.4em}
-.mock-body h4 svg{width:.85em;height:.85em;color:var(--muted);margin-left:.35em;vertical-align:0}
-.mock-body p{color:var(--secondary);font-size:1em;line-height:1.75;margin-bottom:.6em;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.mock-meta{display:flex;align-items:center;gap:.8em;flex-wrap:wrap;color:var(--muted);font-size:.9em}
-.mock-meta .src{display:flex;align-items:center;gap:.5em;color:var(--secondary)}
-.mock-meta .divider{width:1px;height:.9em;background:var(--line-strong)}
-.mock-actions{display:flex;align-items:flex-start;gap:.3em;flex:none}
-.mock-actions span{width:2.2em;height:2.2em;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
-.mock-actions svg{width:1.3em;height:1.3em}
-.mock-actions .on{color:var(--brand-ink)}
-.mock-actions .on svg{fill:var(--brand-soft)}
-
+.shot{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r-panel);
+  background:var(--surface);box-shadow:var(--shadow)}
 .mock-cap{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
 
 /* ---------- 痛点对比 ---------- */
@@ -516,8 +455,7 @@ html.js .reveal.in{opacity:1;transform:none}
 
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  .reveal{opacity:1;transform:none;transition:none}
-  .mock-search .kw::after{animation:none}
+  html.js .reveal{opacity:1;transform:none;transition:none}
   .btn:hover{transform:none}
 }
 
@@ -604,100 +542,11 @@ html.js .reveal.in{opacity:1;transform:none}
       <span class="platform-choice"><i class="pd zhihu"></i>知乎<span class="check">✓</span></span>
     </div>
 
-    <!-- 界面示意：纯 HTML/CSS 复刻新版结果页，无外部图片。
-         想换成真实截图：把下面的 .mock 整块替换成 <img src="shot-search.png" alt="四野 搜索结果页"> 即可。 -->
+    <!-- 界面示意：真实结果页截图（已抹除作者名与互动数据），本地相对路径，随 site/ 一起部署。 -->
     <div class="mock-wrap">
-      <div class="mock" aria-hidden="true">
-        <div class="mock-search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="7.1"/><path d="m16 16 4.5 4.5"/></svg>
-          <span class="kw">露营装备</span>
-          <span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:1.2em;height:1.2em"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span>
-        </div>
-
-        <div class="mock-headline">
-          <b>露营装备</b>
-          <span>相关内容 · 示例结果</span>
-        </div>
-
-        <div class="mock-progress">
-          <span class="item"><i class="pd xhs"></i>小红书 <small>3 条</small></span>
-          <span class="item"><i class="pd douyin"></i>抖音 <small>3 条</small></span>
-          <span class="item"><i class="pd bilibili"></i>B站 <small>3 条</small></span>
-          <span class="item"><i class="pd zhihu"></i>知乎 <small>未完成</small></span>
-          <span class="link">重新搜索</span>
-        </div>
-
-        <div class="mock-status">
-          <span class="msg">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>
-            知乎暂时未响应，其他平台的结果已保留。
-          </span>
-          <span class="retry">重试</span>
-        </div>
-
-        <div class="mock-tabs">
-          <span class="on">全部 <em>9</em></span>
-          <span>小红书 <em>3</em></span>
-          <span>抖音 <em>3</em></span>
-          <span>B站 <em>3</em></span>
-          <span>知乎 <em>0</em></span>
-        </div>
-
-        <div class="mock-toolbar">
-          <span class="fields">
-            <span class="mock-field">综合排序 ▾</span>
-            <span class="mock-field">在结果中查找…</span>
-          </span>
-          <span class="link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:1.15em;height:1.15em"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
-            导出 / 复制
-          </span>
-        </div>
-
-        <div class="mock-row">
-          <span class="mock-num">01</span>
-          <div class="mock-body">
-            <h4>第一次露营，真正需要带的只有这些<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
-            <p>从帐篷、睡垫到照明，把三次露营后的经验整理成一张清单。哪些可以先租，哪些值得买好一点，以及新手最容易多带的五样东西。</p>
-            <div class="mock-meta">
-              <span class="src"><i class="pd xhs"></i>小红书</span>
-              <span>山野之间</span><span>2 天前</span>
-              <span class="divider"></span><span>图文笔记</span><span>点赞 2.4 万</span>
-            </div>
-          </div>
-          <div class="mock-actions"><span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
-        </div>
-
-        <div class="mock-row">
-          <span class="mock-num">02</span>
-          <div class="mock-body">
-            <h4>花了三年才明白，露营装备应该这样选<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
-            <p>六顶帐篷、四种睡垫的实际使用体验。聊聊防水、通风与收纳体积，也聊聊为什么我开始减少装备。附适合周末出行的入门搭配。</p>
-            <div class="mock-meta">
-              <span class="src"><i class="pd bilibili"></i>B站</span>
-              <span>阿森的户外日记</span><span>昨天</span>
-              <span class="divider"></span><span>视频 · 18:42</span><span>点赞 1.9 万</span>
-            </div>
-          </div>
-          <div class="mock-actions"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
-        </div>
-
-        <div class="mock-row">
-          <span class="mock-num">03</span>
-          <div class="mock-body">
-            <h4>第一次和朋友去露营，需要提前准备什么？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
-            <p>先看营地条件，再决定装备清单。能否开车抵达、有没有饮用水和卫生间，比买哪款帐篷更重要。这里按过夜与不过夜分别列出准备事项。</p>
-            <div class="mock-meta">
-              <span class="src"><i class="pd douyin"></i>抖音</span>
-              <span>小岛出走计划</span><span>5 小时前</span>
-              <span class="divider"></span><span>短视频 · 03:26</span><span>点赞 1.5 万</span>
-            </div>
-          </div>
-          <div class="mock-actions"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
-        </div>
-      </div>
-
-      <p class="mock-cap">界面示意：四个平台的搜索结果合并在一页，统一排序、可筛选、可收藏、可导出。</p>
+      <img class="shot" src="shot-search.png" width="2550" height="1116"
+           alt="四野搜索结果页截图：关键词「拍摄技巧」，小红书、抖音、B站、知乎四平台的结果合并到同一页，顶部显示各平台结果数与耗时，下方结果统一编号排序">
+      <p class="mock-cap">真实界面：四个平台的搜索结果合并在一页，统一排序、可筛选、可收藏、可导出（截图已隐去作者与互动数据）。</p>
     </div>
   </div>
 </section>

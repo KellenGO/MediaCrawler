@@ -51,21 +51,20 @@ python -m http.server 8811 --directory site
    ```shell
    uv run python scripts/build_landing_og.py
    ```
-3. **下载按钮**指向 `https://github.com/KellenGO/MediaCrawler/releases/latest`。仓库现在还没有 Release，建议推广前先建一个（下面有步骤），否则访问者点进去看到的是空页面。
-4. **首屏界面示意图**是纯 CSS 画的。换成真实截图更有说服力，见下一节。
+3. **下载按钮**：主 CTA（顶栏、首屏、移动端底条）现在指向稳定直链 `releases/latest/download/MediaCrawler-Windows-x64.zip`（与 release workflow 的产物名一致，Release 发布后即自动生效，少一次页面跳转）；下载面板里的「前往 Releases 下载」仍指向 Releases 页，用户在那里拿 `.sha256` 校验文件。仓库现在还没有 Release，建议推广前先建一个（下面有步骤），否则所有下载按钮都是 404。
+4. **首屏界面图**已换成真实结果页截图 `site/shot-search.png`（2550×1116，HiDPI 2x）。截图里的作者名与互动数据已用纯色块抹除；想换新图就覆盖这个文件（保持宽高比大致一致即可，页面按宽度自适应缩放）。
 
-### 换成真实截图
+### 界面截图（已换成真实截图）
 
-首屏那张结果是**纯 HTML/CSS 复刻的新版结果页**（搜索框、平台进度条、Tabs、编号结果行都与真实界面同一套样式），不依赖任何图片。
+首屏那张结果是真实结果页截图 `site/shot-search.png`（2026-09 由 App 实拍，关键词「拍摄技巧」），
+原 CSS 复刻版已从 `site/index.html` 移除。处理截图的方法，下次更新截图时照做：
 
-换真图的方法：在 `site/index.html` 里搜 `界面示意`，把 `<div class="mock" ...>...</div>` 整块删掉，替换成：
+1. 截一张结果页（建议 1440 或 1600 逻辑宽、浅色主题、HiDPI 2x，能看到平台进度条和 2–3 条结果）；
+2. 用 Pillow 把每条结果的 metadata 行（作者名、互动数据）用白色矩形覆盖，避免泄露他人信息；
+3. 裁掉底部被截断的半条结果，覆盖保存为 `site/shot-search.png`；
+4. 重新生成 `og.png`（见上文脚本）。
 
-```html
-<img src="shot-search.png" alt="四野 搜索结果页：小红书、抖音、B站、知乎 结果合并展示"
-     style="width:100%;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)">
-```
-
-下面那行 `.mock-cap`（图注）可以保留。截图建议：1440 或 1600 宽、浅色主题、搜索关键词与示例一致（现在是「露营装备」）、能看到平台进度条和 3–4 条结果。图片放进 `site/` 目录用相对路径引用，别用图床外链。改完记得重新生成 `og.png`。
+`index.html` 里对应的是 `<img class="shot" src="shot-search.png" ...>` 与 `.shot` 样式，图注在 `.mock-cap`。
 
 ### 改文案 / 改配色
 
@@ -125,5 +124,5 @@ python -m http.server 8811 --directory site
 - [ ] `site/index.html` 双击能打开，浅色 / 深色都正常，手机上不横向滚动
 - [ ] 首屏「下载」按钮真的能下到 zip（Release 已发布）
 - [ ] `canonical` / `og:url` 换成了真实地址
-- [ ] 至少替换了首屏界面图为真实截图
+- [x] 首屏界面图已换成真实截图（shot-search.png，作者与数据已抹除）
 - [ ] 分享链接到微信 / 群里，看一眼卡片标题和描述
