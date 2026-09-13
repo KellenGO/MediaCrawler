@@ -28,6 +28,7 @@ _SEARCH_PAGE = (_ROOT / "components" / "search" / "SearchPage.tsx").read_text(en
 _HOOK = (_ROOT / "hooks" / "useAggregateSearch.ts").read_text(encoding="utf-8")
 _EXPERIENCE_HOOK = (_ROOT / "hooks" / "useSearchExperience.ts").read_text(encoding="utf-8")
 _ACCOUNTS = (_ROOT / "components" / "accounts" / "AccountsPage.tsx").read_text(encoding="utf-8")
+_HELP = (_ROOT / "components" / "help" / "HelpPage.tsx").read_text(encoding="utf-8")
 _ACCOUNTS_LIB = (_ROOT / "lib" / "accounts.ts").read_text(encoding="utf-8")
 _RESULT_CARD = (_ROOT / "components" / "search" / "ResultCard.tsx").read_text(encoding="utf-8")
 _APP = (_ROOT / "App.tsx").read_text(encoding="utf-8")
@@ -41,9 +42,9 @@ _ACCOUNT_GATE = (_ROOT / "lib" / "accountGate.ts").read_text(encoding="utf-8")
 
 def test_overall_badge_texts():
     """cancelling → 正在取消; cancelled → 搜索已取消; failed → ✗ 搜索失败."""
-    assert "正在取消" in _PLATFORM_STATUS
-    assert "搜索已取消" in _PLATFORM_STATUS
-    assert "✗ 搜索失败" in _PLATFORM_STATUS
+    assert "正在取消" in _SEARCH_PAGE
+    assert "搜索已取消" in _SEARCH_PAGE
+    assert "所有平台搜索失败" in _SEARCH_PAGE
 
 
 def test_platform_status_has_cancelled_case():
@@ -59,7 +60,8 @@ def test_status_label_cancelled():
 
 def test_result_card_renders_optional_snippet():
     assert "result.snippet" in _RESULT_CARD
-    assert "line-clamp-3" in _RESULT_CARD
+    assert "result-description" in _RESULT_CARD
+    assert "detailsExpanded" in _RESULT_CARD
 
 
 def test_search_request_cache_bypass_is_wired():
@@ -135,10 +137,11 @@ def test_accounts_sync_uses_ticket_flow():
 
 
 def test_accounts_extension_install_instructions_present():
-    assert "chrome://extensions" in _ACCOUNTS
-    assert "edge://extensions" in _ACCOUNTS
-    assert "开发者模式" in _ACCOUNTS
-    assert "browser_extension" in _ACCOUNTS
+    assert "onNavigateHelp" in _ACCOUNTS
+    assert "chrome://extensions" in _HELP
+    assert "edge://extensions" in _HELP
+    assert "开发者模式" in _HELP
+    assert "browser_extension" in _HELP
 
 
 # ── Round 18: 未登录快速提示 + 打开程序即自动同步 ───────────────────────
@@ -152,7 +155,7 @@ def test_login_required_reason_is_surfaced():
 def test_platform_status_exposes_full_status_text():
     """状态文案被截断时用 title 提供完整内容。"""
     assert "statusText" in _PLATFORM_STATUS
-    assert "title={statusText}" in _PLATFORM_STATUS
+    assert "title={[statusText, freshness]" in _PLATFORM_STATUS
 
 
 def test_app_root_mounts_autosync():

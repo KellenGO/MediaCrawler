@@ -18,6 +18,9 @@ def validate(distribution: Path) -> None:
     required = (
         distribution / "MediaCrawler.exe",
         distribution / "browser_extension",
+        distribution / "LICENSE",
+        distribution / "README.md",
+        distribution / "RELEASE_VERSION",
     )
     missing = [str(path.relative_to(distribution)) for path in required
                if not path.exists()]

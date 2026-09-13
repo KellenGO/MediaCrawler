@@ -48,16 +48,26 @@ if (-not $SkipTests) {
 
 Invoke-Checked $pythonCommand ($pythonPrefix + @("-m", "PyInstaller", "--clean", "--noconfirm", "MediaCrawler.spec"))
 
-$extensionTarget = Join-Path $repoRoot "dist\MediaCrawler\browser_extension"
+$distribution = Join-Path $repoRoot "dist\MediaCrawler"
+$extensionTarget = Join-Path $distribution "browser_extension"
 if (Test-Path $extensionTarget) {
     Remove-Item -LiteralPath $extensionTarget -Recurse -Force
 }
 Copy-Item -LiteralPath (Join-Path $repoRoot "browser_extension") -Destination $extensionTarget -Recurse
+Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $distribution "LICENSE") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $distribution "README.md") -Force
 
 $baseVersion = & $pythonCommand @pythonPrefix -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
 if ($LASTEXITCODE -ne 0) { throw "无法读取 pyproject.toml 版本" }
-$versionFile = Join-Path $repoRoot "dist\MediaCrawler\RELEASE_VERSION"
-Set-Content -LiteralPath $versionFile -Value ($baseVersion.Trim() + "-rc1") -Encoding ascii
+$releaseVersion = $baseVersion.Trim()
+if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME) {
+    $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+    if ($tagVersion -ne $releaseVersion) {
+        throw "Git tag $($env:GITHUB_REF_NAME) 与 pyproject.toml 版本 $releaseVersion 不一致"
+    }
+}
+$versionFile = Join-Path $distribution "RELEASE_VERSION"
+Set-Content -LiteralPath $versionFile -Value $releaseVersion -Encoding ascii
 
 Invoke-Checked $pythonCommand ($pythonPrefix + @("scripts/package_exe.py", "--distribution", "dist/MediaCrawler", "--output", "dist"))
 Write-Host "EXE distribution ready: dist/MediaCrawler/MediaCrawler.exe" -ForegroundColor Green

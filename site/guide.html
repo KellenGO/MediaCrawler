@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四野使用说明 · 先登录、装插件，然后开始搜索</title>
+<meta name="description" content="四野使用说明：开始前必须做的两件事（在浏览器登录四个平台、安装四野浏览器插件），以及下载启动、搜索、收藏导出与常见问题。">
+<meta name="author" content="KellenGO">
+<meta name="theme-color" content="#6573ff">
+<link rel="canonical" href="https://kellengo.github.io/MediaCrawler/guide.html">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop stop-color='%236677fb'/%3E%3Cstop offset='1' stop-color='%2329ddcc'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='%23eef0ff'/%3E%3Crect x='13' y='28' width='38' height='9' rx='4.5' fill='url(%23g)'/%3E%3C/svg%3E">
+
+<script>
+document.documentElement.classList.add('js');
+(function () {
+  try {
+    var saved = localStorage.getItem('siye-landing-theme');
+    var dark = saved === 'dark' || (saved !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (dark) document.documentElement.classList.add('dark');
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) {}
+})();
+</script>
+
+<style>
+/* ===== 与落地页共用的样式（由 scripts 从 index.html 同步，勿手改） ===== */
+
+/* ============================================================
+   四野 · 推广落地页
+   视觉对齐当前 App（webui/src/index.css 的新版设计系统 +
+   style-preview/9-full-preview.html）：
+   纯白底 / 发丝细线 / 单一靛蓝强调色 / 无毛玻璃 / 无光晕。
+   品牌色 #6573ff，字标「四野」下方一条 #6677fb → #29ddcc 渐变条。
+   单文件、零外部请求、可离线打开。
+   ============================================================ */
+
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  color-scheme:light;
+
+  --bg:#ffffff;
+  --surface:#ffffff;
+  --soft:#f8f9fc;
+
+  --ink:#202945;
+  --secondary:#5b6478;
+  --muted:#7f869e;
+
+  --line:#e8eaf1;         /* 发丝线（border-subtle） */
+  --line-strong:#d9dce8;  /* 常规描边（border-default） */
+
+  --brand:#6573ff;
+  --brand-2:#4f5bd2;
+  --brand-soft:#eef0ff;
+  --brand-ink:#4f5bd2;
+
+  --ok:#12a67a;   --ok-soft:#e7f9f3;
+  --warn:#9d6728; --warn-soft:#fcf4e5;
+  --danger:#bf4958; --danger-soft:#fdf0f0;
+
+  --xhs:#ed5374;
+  --douyin:#505872;
+  --bili:#e85c8c;
+  --zhihu:#2687d9;
+
+  --grad:linear-gradient(90deg,#6677fb,#29ddcc);
+  --shadow:0 16px 50px #20294514;
+
+  --r-panel:16px;
+  --r-btn:9px;
+  --r-pill:99px;
+
+  --ff:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"Cascadia Code",Consolas,"Courier New",monospace;
+
+  --max:1080px;
+}
+
+html.dark{
+  color-scheme:dark;
+
+  --bg:#101219;
+  --surface:#161922;
+  --soft:#181a22;
+
+  --ink:#e9ecf5;
+  --secondary:#a7adc0;
+  --muted:#7b8195;
+
+  --line:#23252f;
+  --line-strong:#31343f;
+
+  --brand:#8b95ff;
+  --brand-2:#a8b0ff;
+  --brand-soft:#1d203e;
+  --brand-ink:#a8b0ff;
+
+  --ok:#38c79c;   --ok-soft:#19352d;
+  --warn:#e0b477; --warn-soft:#392d1f;
+  --danger:#ef8b97; --danger-soft:#41232a;
+
+  --douyin:#aab4d0;
+  --zhihu:#69b3f1;
+
+  --shadow:0 16px 50px #00000055;
+}
+
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+
+body{
+  margin:0;
+  font-family:var(--ff);
+  font-size:15px;
+  line-height:1.65;
+  letter-spacing:-.005em;
+  color:var(--ink);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+img{max-width:100%;display:block}
+a{color:var(--brand-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:4px}
+h1,h2,h3,h4,p{margin:0}
+:focus-visible{outline:2px solid var(--brand);outline-offset:4px;border-radius:6px}
+::selection{background:var(--brand-soft);color:var(--brand-ink)}
+html.dark ::selection{background:var(--brand-soft);color:var(--brand-ink)}
+
+.wrap{width:min(var(--max),calc(100% - 64px));margin:0 auto;max-width:var(--max)}
+@media (max-width:700px){.wrap{width:calc(100% - 40px)}}
+.skip{position:absolute;left:-9999px;top:0;background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);padding:10px 16px;border-radius:0 0 var(--r-btn) 0;z-index:99}
+.skip:focus{left:0}
+
+/* ---------- 通用零件 ---------- */
+.pill{
+  font-size:11.5px;border:1px solid var(--line);padding:3px 10px;border-radius:var(--r-pill);
+  color:var(--secondary);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.pill.brand{color:var(--brand-ink);border-color:var(--brand-soft);background:var(--brand-soft)}
+
+.eyebrow{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;margin-bottom:12px}
+h2.title{font-size:clamp(24px,3.4vw,31px);font-weight:650;letter-spacing:-.8px;line-height:1.35;margin-bottom:14px}
+.description{color:var(--secondary);font-size:14px;line-height:1.85;max-width:64ch}
+
+.btn{
+  display:inline-flex;justify-content:center;align-items:center;gap:8px;
+  min-height:39px;padding:9px 16px;border:1px solid var(--line-strong);border-radius:var(--r-btn);
+  background:var(--surface);color:var(--ink);font-size:13.5px;font-weight:500;
+  white-space:nowrap;cursor:pointer;transition:border-color .15s,color .15s,background-color .15s;
+  font-family:inherit;
+}
+.btn:hover{border-color:var(--brand);color:var(--brand-ink);text-decoration:none}
+.btn svg{width:16px;height:16px;flex:none}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:hover{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
+html.dark .btn.primary{color:#101525}
+html.dark .btn.primary:hover{color:#101525}
+.btn.ghost{border-color:transparent;background:none}
+.btn.ghost:hover{border-color:var(--line-strong)}
+.btn.large{min-height:46px;padding:12px 22px;font-size:14.5px}
+.btn.block{width:100%}
+
+.card{
+  border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
+  padding:22px 24px;transition:border-color .15s;
+}
+.card:hover{border-color:var(--line-strong)}
+
+section{padding:78px 0}
+section[id]{scroll-margin-top:84px}   /* 锚点定位时给 sticky 顶栏留出高度 */
+section.tint{background:var(--soft)}
+@media (max-width:700px){section{padding:54px 0}}
+.section-head{margin-bottom:36px}
+.center{text-align:center}
+.center .description{margin-inline:auto}
+
+.sr{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+
+.pd{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+.pd.xhs{background:var(--xhs)}
+.pd.douyin{background:var(--douyin)}
+.pd.bilibili{background:var(--bili)}
+.pd.zhihu{background:var(--zhihu)}
+
+/* ---------- 顶部导航 ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:var(--bg);
+  border-bottom:1px solid transparent;
+  transition:border-color .2s;
+}
+.topbar.stuck{border-bottom-color:var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:20px;min-height:70px}
+
+.logo{display:flex;align-items:center;gap:12px;color:var(--ink)}
+.logo:hover{text-decoration:none}
+.logo .mark{display:inline-flex;flex-direction:column;align-items:center;font-size:21px;font-weight:700;letter-spacing:-1px;line-height:1.1}
+.logo .mark i{display:block;width:32px;height:4px;border-radius:var(--r-pill);background:var(--grad);margin-top:3px}
+.logo .caption{font-size:11px;color:var(--muted);border-left:1px solid var(--line);padding-left:12px;letter-spacing:1px}
+@media (max-width:560px){.logo .caption{display:none}}
+
+.nav{display:none;gap:2px;margin-left:auto}
+@media (min-width:940px){.nav{display:flex}}
+.nav a{font-size:13px;color:var(--secondary);padding:8px 11px;border-radius:7px}
+.nav a:hover{color:var(--brand-ink);text-decoration:none;background:var(--soft)}
+
+.actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+@media (min-width:940px){.actions{margin-left:0}}
+.icon-btn{
+  width:36px;height:36px;flex:none;display:grid;place-items:center;
+  border:1px solid transparent;border-radius:8px;background:none;color:var(--muted);cursor:pointer;
+  transition:color .15s,background-color .15s;
+}
+.icon-btn:hover{color:var(--brand-ink);background:var(--soft)}
+.icon-btn svg{width:18px;height:18px}
+html:not(.dark) .i-sun{display:none}
+html.dark .i-moon{display:none}
+@media (max-width:560px){.actions .github-text{display:none}}
+
+/* ---------- Hero（学 App 首页：居中字标 + 渐变条） ---------- */
+.hero{padding:66px 0 64px;text-align:center}
+@media (max-width:700px){.hero{padding:44px 0 46px}}
+
+/* 徽章要独占一行：.wordmark 是 inline-flex，若徽章也是 inline 级会并排挤在一起 */
+.hero .pill{display:flex;width:fit-content;margin:0 auto 24px}
+
+.wordmark{display:inline-flex;flex-direction:column;align-items:center;color:var(--ink);
+  font-size:56px;font-weight:700;letter-spacing:-2px;line-height:1.1}
+.wordmark i{display:block;width:118px;height:8px;border-radius:var(--r-pill);background:var(--grad);margin-top:9px}
+@media (max-width:700px){.wordmark{font-size:46px}.wordmark i{width:94px;height:7px}}
+
+.hero h1{
+  font-size:clamp(26px,3.8vw,36px);font-weight:650;letter-spacing:-1.1px;line-height:1.35;
+  margin:30px auto 16px;max-width:20ch;
+}
+.hero .description{font-size:15.5px;max-width:56ch;margin:0 auto 28px}
+.hero .description strong{color:var(--ink);font-weight:600}
+
+.cta-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:24px}
+
+.checks{display:flex;flex-wrap:wrap;gap:8px 22px;justify-content:center;font-size:13px;color:var(--secondary);
+  margin:0 0 26px;padding:0;list-style:none}
+.checks li{display:flex;align-items:center;gap:7px}
+.checks svg{width:15px;height:15px;color:var(--brand);flex:none}
+
+.scope{display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.scope .scope-label{margin-right:8px}
+.platform-choice{display:flex;align-items:center;gap:7px;padding:5px 10px;color:var(--ink);border-radius:7px;font-size:12.5px}
+.platform-choice .check{width:12px;color:var(--brand-ink);font-size:11px}
+
+/* ---------- 界面示意（真实结果页截图，作者与互动数据已抹除） ---------- */
+.mock-wrap{margin-top:56px}
+.shot{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r-panel);
+  background:var(--surface);box-shadow:var(--shadow)}
+.mock-cap{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
+
+/* ---------- 痛点对比 ---------- */
+.compare{display:grid;gap:18px}
+@media (min-width:840px){.compare{grid-template-columns:1fr auto 1fr;align-items:stretch}}
+.compare-card{padding:24px 26px}
+.compare-card .k{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:1.4px;
+  text-transform:uppercase;margin-bottom:14px}
+.compare-card.before .k{color:var(--danger)}
+.compare-card.after .k{color:var(--ok)}
+.compare-card h3{font-size:18px;font-weight:650;letter-spacing:-.4px;margin-bottom:14px}
+.steps{margin:0;padding:0;list-style:none;display:grid;gap:9px;grid-template-columns:minmax(0,1fr);
+  font-size:13.5px;color:var(--secondary)}
+.steps li{position:relative;padding-left:16px}
+.steps li::before{content:"";position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--line-strong)}
+.compare-card.after .steps li::before{background:rgba(18,166,122,.5)}
+.steps code{font-family:var(--mono);font-size:.9em;background:var(--brand-soft);color:var(--brand-ink);padding:1px 5px;border-radius:5px}
+.arrow-mid{display:grid;place-items:center;padding:6px 0}
+.arrow-mid span{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--brand-ink);
+  border:1px solid var(--brand-soft);background:var(--brand-soft);border-radius:var(--r-pill);padding:7px 15px;white-space:nowrap}
+.arrow-mid svg{width:15px;height:15px}
+@media (max-width:839px){.arrow-mid svg{transform:rotate(90deg)}}
+
+/* ---------- 功能卡片 ---------- */
+.cards{display:grid;gap:16px}
+@media (min-width:640px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:980px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.cards>*{min-width:0}
+.card h3{font-size:15.5px;font-weight:650;letter-spacing:-.2px;margin-bottom:8px}
+.card p{color:var(--secondary);font-size:13.5px;line-height:1.8}
+.card .note{margin-top:12px;padding-top:11px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+.card .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;margin-bottom:14px;
+  background:var(--brand-soft);color:var(--brand-ink)}
+.card .ic svg{width:16px;height:16px}
+
+/* 次要功能折叠区（复用 FAQ 的 chevron 语言） */
+.more{margin-top:18px;border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
+  padding:0 24px;transition:border-color .15s}
+.more[open]{border-color:var(--line-strong);padding-bottom:22px}
+.more summary{cursor:pointer;list-style:none;padding:16px 0;font-size:14px;font-weight:600;color:var(--secondary);
+  display:flex;align-items:center;gap:10px}
+.more summary::-webkit-details-marker{display:none}
+.more summary:hover{color:var(--brand-ink)}
+.more summary::after{content:"";margin-left:auto;width:8px;height:8px;flex:none;
+  border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);
+  transform:rotate(45deg) translateY(-2px);transition:transform .2s}
+.more[open] summary::after{transform:rotate(225deg) translateY(-2px)}
+.more .cards{margin-top:4px}
+
+/* ---------- 平台表 ---------- */
+.plat-table{width:100%;border-collapse:collapse;font-size:14px}
+.plat-table th,.plat-table td{padding:15px 18px;text-align:left;border-bottom:1px solid var(--line)}
+.plat-table thead th{font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);
+  background:var(--soft)}
+.plat-table tbody th{font-size:14px;font-weight:500;text-transform:none;letter-spacing:0}
+.plat-table tr:last-child th,.plat-table tr:last-child td{border-bottom:0}
+.plat-table .yes{color:var(--ok);font-weight:600;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.plat-table .yes svg{width:15px;height:15px}
+.plat-table .nm{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.table-wrap{border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden}
+@media (max-width:640px){
+  .plat-table thead{position:absolute;left:-9999px}
+  .plat-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px 12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .plat-table tr:last-child{border-bottom:0}
+  .plat-table th,.plat-table td{padding:0;border:0}
+  .plat-table tbody th{grid-column:1;grid-row:1}
+  .plat-table td:nth-child(2){grid-column:2;grid-row:1;text-align:right}
+  .plat-table td:nth-child(3){grid-column:1/-1;grid-row:2;font-size:12.5px;color:var(--muted)}
+}
+.small-note{font-size:12.5px;color:var(--muted);line-height:1.8;margin-top:14px}
+.small-note code,.description code,.card code,.req code{
+  font-family:var(--mono);font-size:.92em;background:var(--brand-soft);color:var(--brand-ink);
+  padding:1px 5px;border-radius:5px;
+}
+
+/* ---------- 步骤 / 下载 ---------- */
+.steps-grid{display:grid;gap:16px}
+@media (min-width:760px){.steps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.steps-grid>*{min-width:0}
+.step .num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;margin-bottom:14px;
+  background:var(--brand-soft);color:var(--brand-ink);font-weight:650;font-size:12.5px}
+.step h3{font-size:15.5px;font-weight:650;margin-bottom:8px}
+.step p{color:var(--secondary);font-size:13.5px;line-height:1.8}
+
+.panel{border:1px solid var(--line);border-radius:var(--r-panel);padding:26px 28px}
+.dl-panel{margin-top:18px}
+@media (min-width:900px){.dl-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:40px;align-items:start}}
+.dl-panel>*{min-width:0}
+.dl-panel h3{font-size:19px;font-weight:650;letter-spacing:-.4px;margin-bottom:10px}
+.dl-panel>div>p{color:var(--secondary);font-size:13.5px;line-height:1.8;margin-bottom:20px}
+.req{list-style:none;margin:0;padding:0;display:grid;gap:11px;font-size:13.5px;color:var(--secondary)}
+.req li{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.req li>span{min-width:0;overflow-wrap:anywhere}
+.req svg{width:16px;height:16px;color:var(--brand);flex:none;margin-top:3px}
+.req b{color:var(--ink);font-weight:600}
+
+/* ---------- 代码块 ---------- */
+.code-label{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;font-weight:600;margin:20px 0 0}
+.code-label .tag{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:var(--r-pill);padding:2px 9px}
+.code{position:relative;margin-top:10px;border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
+.code pre{margin:0;padding:15px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.8;
+  color:var(--ink);max-width:100%}
+.code .copy{position:absolute;top:8px;right:8px;font-family:inherit;font-size:11.5px;padding:5px 10px;
+  border:1px solid var(--line-strong);border-radius:7px;background:var(--surface);color:var(--secondary);cursor:pointer;
+  transition:color .15s,border-color .15s}
+.code .copy:hover{color:var(--brand-ink);border-color:var(--brand)}
+.code .copy.ok{color:var(--ok);border-color:var(--ok)}
+.dev-grid{display:grid;gap:34px}
+@media (min-width:900px){.dev-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.dev-grid>*{min-width:0}
+
+/* ---------- 架构流程 ---------- */
+.flow{padding:26px 24px}
+.flow .n{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:11px 16px;
+  font-size:13.5px;text-align:center;color:var(--secondary)}
+.flow .n.acc{border-color:var(--brand-soft);background:var(--brand-soft);color:var(--brand-ink);font-weight:600}
+.flow .to{display:grid;place-items:center;color:var(--muted);padding:5px 0}
+.flow .to svg{width:15px;height:15px}
+.flow-cols{display:grid;gap:9px}
+@media (min-width:620px){.flow-cols{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.flow-cols>*{min-width:0}
+
+/* ---------- FAQ ---------- */
+.faq{display:grid;gap:10px}
+details.q{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:0 20px;transition:border-color .15s}
+details.q[open]{border-color:var(--line-strong)}
+details.q summary{cursor:pointer;list-style:none;padding:16px 0;font-size:14.5px;font-weight:600;
+  display:flex;align-items:center;gap:12px}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary::after{content:"";margin-left:auto;width:8px;height:8px;flex:none;
+  border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);
+  transform:rotate(45deg) translateY(-2px);transition:transform .2s}
+details.q[open] summary::after{transform:rotate(225deg) translateY(-2px)}
+details.q .a{padding:0 0 18px;color:var(--secondary);font-size:13.5px;line-height:1.85;max-width:78ch;overflow-wrap:anywhere}
+details.q .a p+p{margin-top:10px}
+
+/* ---------- 许可 ---------- */
+.license h3{font-size:18px;font-weight:650;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.license h4{font-size:14px;font-weight:650;color:var(--ink);margin:26px 0 12px}
+.license p{color:var(--secondary);font-size:13.5px;line-height:1.85;margin-bottom:18px;max-width:82ch}
+.limits{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+@media (min-width:760px){.limits{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.limits li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--secondary);min-width:0}
+.limits svg{width:16px;height:16px;color:var(--warn);flex:none;margin-top:4px}
+
+.allows{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+@media (min-width:760px){.allows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.allows li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--secondary);min-width:0}
+.allows svg{width:16px;height:16px;color:var(--brand-ink);flex:none;margin-top:4px}
+
+/* ---------- 页脚 ---------- */
+footer{border-top:1px solid var(--line);margin-top:22px;padding:34px 0 66px;font-size:13px;color:var(--secondary)}
+.foot-grid{display:grid;gap:28px}
+@media (min-width:760px){.foot-grid{grid-template-columns:1.5fr 1fr 1fr}}
+footer h4{font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:13px}
+footer ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+footer a{color:var(--secondary)}
+footer a:hover{color:var(--brand-ink)}
+.foot-bottom{margin-top:32px;padding-top:20px;border-top:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between;font-size:12px;color:var(--muted)}
+.foot-slogan{margin:0 0 14px;font-size:16px;font-weight:650;letter-spacing:-.3px;color:var(--ink)}
+
+/* ---------- 滚动显现 ---------- */
+/* 滚动显现只在 JS 可用时启用（html.js 由首帧脚本添加）：
+   JS 被禁用或脚本报错时内容直接可见，不会整页空白 */
+html.js .reveal{opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease}
+html.js .reveal.in{opacity:1;transform:none}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  html.js .reveal{opacity:1;transform:none;transition:none}
+  .btn:hover{transform:none}
+}
+
+/* ---------- 移动端底部下载条 ---------- */
+.mobile-cta{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;gap:10px;
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+@media (max-width:700px){.mobile-cta{display:flex}body{padding-bottom:72px}}
+.mobile-cta .btn{flex:1}
+
+/* ===== 使用说明专用 ===== */
+.doc{padding:34px 0 20px}
+.doc p{color:var(--secondary);font-size:14px;line-height:1.9;max-width:78ch}
+.doc ul,.doc ol{color:var(--secondary);font-size:14px;line-height:1.9;max-width:78ch;padding-left:22px}
+.doc li{margin-bottom:6px}
+.doc strong{color:var(--ink);font-weight:600}
+.doc code{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:.9em;
+  background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:.1em .4em;color:var(--ink)}
+.doc h2{font-size:22px;font-weight:650;letter-spacing:-.2px;margin:52px 0 6px;scroll-margin-top:84px}
+.doc h3{font-size:15.5px;font-weight:650;margin:24px 0 8px}
+
+/* 必做两步 */
+.must{margin:30px 0 8px;border:1px solid var(--line-strong);border-radius:var(--r-panel);
+  background:var(--soft);padding:26px 26px 22px}
+.must > h2{font-size:19px;margin:0 0 18px;color:var(--ink);font-weight:680}
+.must-step{display:flex;gap:16px;padding:18px 0;border-top:1px solid var(--line)}
+.must-step:first-of-type{border-top:0;padding-top:0}
+.must-step .n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;
+  display:grid;place-items:center;font-size:14px;font-weight:700}
+.must-step h3{font-size:16px;font-weight:650;color:var(--ink);margin:4px 0 8px}
+.must-step p{font-size:14px;margin:0}
+.must-step ol{margin-top:10px;padding-left:20px}
+.must-note{margin-top:18px !important;padding:12px 16px;border-radius:10px;
+  background:var(--brand-soft);color:var(--brand-ink) !important;font-size:13.5px !important}
+@media (max-width:560px){
+  .must{padding:20px 18px}
+  .must-step{gap:12px}
+}
+
+figure.shot{margin:22px 0 6px}
+figure.shot img{display:block;width:100%;height:auto;border:1px solid var(--line);
+  border-radius:var(--r-panel);background:var(--surface);box-shadow:var(--shadow)}
+figure.shot figcaption{margin-top:10px;text-align:center;font-size:12px;color:var(--muted)}
+figure.todo{margin:22px 0 6px;border:1.5px dashed var(--line-strong);border-radius:var(--r-panel);
+  background:var(--soft);padding:26px 22px;text-align:center}
+figure.todo .t{font-size:13.5px;font-weight:600;color:var(--secondary)}
+figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
+.callout{border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:10px;
+  background:var(--soft);padding:14px 18px;margin:18px 0;font-size:13.5px;color:var(--secondary);line-height:1.8}
+.callout.warn{border-left-color:var(--warn)}
+.callout b{color:var(--ink)}
+.kv{width:100%;border-collapse:collapse;margin:18px 0;font-size:13.5px}
+.kv th,.kv td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+.kv th{color:var(--ink);font-weight:600;width:26%;white-space:nowrap}
+.kv td{color:var(--secondary)}
+.kv tr:last-child th,.kv tr:last-child td{border-bottom:0}
+@media (max-width:640px){
+  .kv th{width:auto;white-space:normal}
+  .kv th,.kv td{display:block;padding:8px 0}
+  .kv tr{border-bottom:1px solid var(--line);display:block;padding:8px 0}
+}
+.breadcrumb{font-size:13px;color:var(--muted);margin-bottom:18px}
+.breadcrumb a{color:var(--secondary)}
+.breadcrumb a:hover{color:var(--brand-ink)}
+</style>
+</head>
+<body>
+
+<header class="topbar" id="topbar">
+  <div class="wrap">
+    <a class="logo" href="index.html">
+      <span class="mark">四野<i></i></span>
+    </a>
+    <nav class="nav" aria-label="页面导航">
+      <a href="index.html#features">功能</a>
+      <a href="index.html#download">下载</a>
+      <a href="index.html#license">许可</a>
+      <a href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div class="actions">
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="切换深色 / 浅色主题" title="切换深色 / 浅色主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8-1.4 1.4m-10 10L5.6 18.4"/><circle cx="12" cy="12" r="4"/></svg>
+      </button>
+      <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip" target="_blank" rel="noopener">下载</a>
+    </div>
+  </div>
+</header>
+
+<main>
+<section class="doc">
+  <div class="wrap">
+    <p class="breadcrumb"><a href="index.html">四野首页</a> · 使用说明</p>
+
+    <h1 style="font-size:clamp(26px,4vw,36px);font-weight:680;letter-spacing:-.8px;color:var(--ink);margin-bottom:10px">使用说明</h1>
+    <p style="font-size:15px;color:var(--secondary);max-width:70ch;line-height:1.85">
+      四野装好之后<strong>不能直接开始搜</strong>。先花两分钟做完下面两件事，之后就只是输入关键词而已。
+    </p>
+
+    <!-- ========== 必做两步 ========== -->
+    <div class="must">
+      <h2>开始前，先做完这两件事</h2>
+
+      <div class="must-step">
+        <span class="n">1</span>
+        <div>
+          <h3>在你的浏览器里登录这四个平台</h3>
+          <p>
+            用 Chrome 或 Edge（Windows 一般自带 Edge）打开
+            <strong>小红书、抖音、B 站、知乎</strong>，分别登录你自己的账号。
+            四野是<strong>借用你本人的登录状态</strong>去替你搜索的 —— 没登录，就搜不出东西，或者结果非常少。
+          </p>
+        </div>
+      </div>
+
+      <div class="must-step">
+        <span class="n">2</span>
+        <div>
+          <h3>装上四野的浏览器插件，把登录状态同步过来</h3>
+          <p>插件的作用只有一个：把你刚登录的状态交给本机运行的四野。装一次就行，以后打开程序会自动同步。</p>
+          <ol>
+            <li>浏览器地址栏输入 <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>）回车；</li>
+            <li>打开右上角的<strong>「开发者模式」</strong>；</li>
+            <li>点<strong>「加载已解压的扩展程序」</strong>，选择解压目录里的 <code>MediaCrawler/browser_extension/</code>；</li>
+            <li>回到四野页面，打开<strong>「账号设置」</strong>，点各平台的「同步当前浏览器登录状态」。</li>
+          </ol>
+        </div>
+      </div>
+
+      <p class="must-note">
+        最常见的误会：以为下载完打开就能搜。没做这两步，搜索结果大概率是空的，或一直提示「需要登录」——不是软件坏了。
+      </p>
+    </div>
+
+    <figure class="shot">
+      <img src="shot-account.png" width="2550" height="1094" alt="四野账号设置页：小红书、抖音、B站、知乎四个平台均显示「已登录」，右上角账号状态 4/4">
+      <figcaption>做完两步后的样子：账号设置里四个平台都是「已登录」，右上角账号状态 4/4</figcaption>
+    </figure>
+
+    <!-- ========== 安装 ========== -->
+    <h2>下载与启动</h2>
+    <ol>
+      <li>下载 <code>MediaCrawler-Windows-x64.zip</code>，<strong>整个解压</strong>到一个文件夹（不要把 EXE 单独拷出来，旁边的 <code>_internal</code>、<code>webui</code> 都要用）。
+          建议解压到<strong>英文路径</strong>，比如 <code>D:\Siye</code> —— 中文或带空格的路径偶尔会导致启动异常。</li>
+      <li>打开解压出的 <code>MediaCrawler</code> 文件夹，双击 <code>MediaCrawler.exe</code>；</li>
+      <li>等黑色控制台出现 <strong>backend ready</strong>，浏览器会<strong>自动打开</strong> <code>127.0.0.1:8080</code>，就可以搜了。</li>
+    </ol>
+    <div class="callout">
+      不需要安装 Python、Node.js，也不用敲命令。用完关掉页面，再关掉控制台窗口即可。
+      想搜出东西，记得先做完上面那两件事（登录 + 装插件）。
+    </div>
+    <div class="callout warn">
+      <b>第一次运行被 Windows 拦下来？</b>程序没有代码签名，SmartScreen 可能弹「Windows 已保护你的电脑」——
+      点<strong>「更多信息」→「仍要运行」</strong>即可。杀毒软件误报时，把解压目录加进白名单。
+      程序只在本机 <code>127.0.0.1:8080</code> 监听，不会对外提供服务，也不上传任何数据。
+    </div>
+
+    <!-- ========== 搜索 ========== -->
+    <h2>开始搜索</h2>
+    <p>
+      在搜索框输入关键词，勾上要搜的平台，回车。四个平台会<strong>同时</strong>搜，
+      谁先回来谁先显示；某一个失败或超时，其他平台照常出结果。
+    </p>
+
+    <figure class="shot">
+      <img src="shot-search.png" width="2550" height="1116" alt="四野搜索结果页：关键词「拍摄技巧」，顶部显示小红书、抖音、B站、知乎各平台的结果数与耗时，下方是统一编号排序的结果列表（作者与互动数据已抹除）">
+      <figcaption>搜索结果：四个平台的结果合并成一份列表，顶部显示各平台结果数与耗时</figcaption>
+    </figure>
+
+    <p>
+      想换个排法就切<strong>综合 / 最新 / 互动最多</strong>；想缩小范围就用上方的筛选
+      （近 7 天 / 近 30 天、内容类型、关键词，多个关键词用空格分隔）。
+      筛选只对已经搜回来的结果生效，不会重新去搜。
+    </p>
+
+    <!-- ========== 之后 ========== -->
+    <h2>搜到之后还能做什么</h2>
+    <ul>
+      <li><strong>收藏与备注</strong>：点卡片右上角的书签图标；在搜索框下方进「本地收藏」统一看，可加备注（最多 1000 字，上限 500 条）。</li>
+      <li><strong>导出</strong>：点「导出 / 复制」，可以导出 CSV（Excel 打开中文不乱码）、Markdown，或批量复制原文链接。不勾选就导出当前全部，勾选了只导出选中的。</li>
+      <li><strong>跨平台收藏</strong>：把你在各平台已经收藏过的内容拉到一页里统一看（每次每平台 20 条，只读，不会改动你在平台上的收藏）。</li>
+    </ul>
+    <div class="callout warn">
+      <b>收藏存在浏览器里</b>：清除网站数据或换浏览器会丢。做这些操作前，先在「本地收藏」里点
+      <b>「备份全部收藏」</b>下载 JSON，之后可以导回来。
+    </div>
+
+    <!-- ========== FAQ ========== -->
+    <h2>常见问题</h2>
+    <table class="kv">
+      <tr><th>搜不出东西 / 提示需要登录</th><td>回到最上面那两件事：先在浏览器登录平台，再装插件同步。九成问题出在这里。</td></tr>
+      <tr><th>某平台结果特别少</th><td>平台风控、关键词太窄、字段变化都会导致。建议当作参考，不要当成完整数据。</td></tr>
+      <tr><th>提示限流冷却</th><td>本地会等 60 秒，反复触发延长到 120 / 240 / 300 秒。<strong>其他平台不受影响</strong>，冷却结束手动重试。</td></tr>
+      <tr><th>第一次搜索很慢</th><td>首次要启动浏览器，之后快很多；同样的关键词 90 秒内有缓存，会立刻返回。</td></tr>
+      <tr><th>双击没反应</th><td>确认是完整解压、目录可写；看控制台窗口里的报错。杀毒软件拦截的话把目录加白名单。</td></tr>
+      <tr><th>8080 端口被占用</th><td>说明已经有一个四野在跑，关掉它的控制台再启动。</td></tr>
+      <tr><th>收藏不见了</th><td>清了网站数据或换了浏览器，只能用之前备份的 JSON 导入恢复。</td></tr>
+      <tr><th>能商用吗</th><td><strong>不能。</strong>本项目为非商业学习许可，严禁任何商业用途或盈利活动，详见<a href="index.html#license">许可与免责声明</a>。</td></tr>
+    </table>
+
+    <!-- ========== 隐私与许可 ========== -->
+    <h2>隐私与许可</h2>
+    <ul>
+      <li><strong>可以下载使用</strong>：个人学习、研究、自用免费，不需要付费或授权；</li>
+      <li><strong>不能商用</strong>：严禁用于任何商业用途或盈利活动，商用须取得版权所有者书面同意；</li>
+      <li><strong>不能大规模抓取</strong>：仅限学习研究，不得批量采集或干扰平台正常运营；</li>
+      <li><strong>后果自负</strong>：因违规使用造成的一切后果由使用者自行承担；</li>
+      <li>账号 profile、缓存、收藏全部存在<strong>本机</strong>，后端只监听 <code>127.0.0.1:8080</code>，不上传任何数据。</li>
+    </ul>
+    <p>
+      完整条款见<a href="index.html#license">许可与免责声明</a>与仓库中的
+      <a href="https://github.com/KellenGO/MediaCrawler/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE 全文</a>。
+    </p>
+
+    <div class="cta-row" style="margin-top:34px">
+      <a class="btn primary large" href="https://github.com/KellenGO/MediaCrawler/releases/latest/download/MediaCrawler-Windows-x64.zip" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
+        下载 Windows 版
+      </a>
+      <a class="btn large" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        回到首页
+      </a>
+    </div>
+    <p style="margin-top:22px;font-size:13.5px">
+      还有没覆盖到的问题，到
+      <a href="https://github.com/KellenGO/MediaCrawler/issues" target="_blank" rel="noopener">GitHub Issues</a> 提。
+    </p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="logo" href="index.html" style="margin-bottom:14px"><span class="mark">四野<i></i></span></a>
+        <p class="foot-slogan">从不同的地方，找到你的答案。</p>
+      </div>
+      <div>
+        <h4>项目</h4>
+        <ul>
+          <li><a href="index.html#download">下载</a></li>
+          <li><a href="guide.html">使用说明</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">GitHub 仓库</a></li>
+          <li><a href="index.html#license">许可证</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>参与</h4>
+        <ul>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/issues" target="_blank" rel="noopener">反馈问题</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/issues/new" target="_blank" rel="noopener">提交建议</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE 全文</a></li>
+          <li><a href="#top">回到顶部</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>四野 · 从不同的地方，找到你的答案。</span>
+      <span>本地优先 · 仅供学习、研究与非商业用途</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var KEY = 'siye-landing-theme';
+  var toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    toggle.addEventListener('click', function () {
+      var next = root.classList.contains('dark') ? 'light' : 'dark';
+      root.classList.toggle('dark', next === 'dark');
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  }
+  var bar = document.getElementById('topbar');
+  function onScroll() { if (bar) bar.classList.toggle('stuck', window.scrollY > 8); }
+  onScroll();
+  window.addEventListener('scroll', onScroll, { passive: true });
+})();
+</script>
+</body>
+</html>

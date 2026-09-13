@@ -193,3 +193,5 @@ debug_tools
 
 database/*.db
 .omx/
+.workbuddy/
+/cache/_*.png
