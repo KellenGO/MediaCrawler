@@ -7,7 +7,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-smoke:
@@ -80,3 +80,20 @@ jobs:
             dist/MediaCrawler-Windows-x64.zip
             dist/MediaCrawler-Windows-x64.zip.sha256
           if-no-files-found: error
+
+      - name: Publish tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $arguments = @(
+            "release", "create", $env:GITHUB_REF_NAME,
+            "dist/MediaCrawler-Windows-x64.zip",
+            "dist/MediaCrawler-Windows-x64.zip.sha256",
+            "--verify-tag",
+            "--title", "四野 $env:GITHUB_REF_NAME",
+            "--generate-notes"
+          )
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
