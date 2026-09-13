@@ -5,7 +5,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -24,9 +23,8 @@ export function ThemeToggle() {
 
   return (
     <Select value={theme} onValueChange={(value: Theme) => setTheme(value)}>
-      <SelectTrigger className="w-[76px] h-[38px] text-xs border-cyber-border-subtle bg-cyber-bg-secondary hover:border-brand/50 transition-colors">
-        <Icon className="w-3.5 h-3.5 mr-1 text-cyber-text-secondary" />
-        <SelectValue>{currentTheme.label}</SelectValue>
+      <SelectTrigger aria-label="切换主题" className="w-[36px] h-[36px] justify-center px-0 text-xs border-0 bg-transparent text-cyber-text-muted hover:bg-brand-soft hover:text-brand-strong transition-colors">
+        <Icon className="w-4 h-4" />
       </SelectTrigger>
       <SelectContent>
         {themes.map(({ value, label, icon: ItemIcon }) => (

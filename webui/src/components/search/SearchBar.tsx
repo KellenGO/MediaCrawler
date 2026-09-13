@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, FormEvent, Dispatch, SetStateAction } from "react";
-import { Search, Loader2, X } from "lucide-react";
+import { ArrowRight, Search, Loader2, X } from "lucide-react";
 import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
@@ -10,6 +10,7 @@ import { SearchPopover } from "./SearchPopover";
 const ALL_PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
 
 interface SearchBarProps {
+  home?: boolean;
   keyword: string;
   onKeywordChange: Dispatch<SetStateAction<string>>;
   selectedPlatforms: Set<PlatformSlug>;
@@ -29,6 +30,7 @@ interface SearchBarProps {
 }
 
 export function SearchBar({
+  home = false,
   keyword,
   onKeywordChange,
   selectedPlatforms,
@@ -133,25 +135,25 @@ export function SearchBar({
     <form
       ref={searchPanelRef}
       onSubmit={handleSubmit}
-      className={`relative rounded-[22px] border border-cyber-border-subtle bg-cyber-bg-secondary p-2.5 shadow-[0_24px_70px_rgba(50,105,145,0.10)] transition-[border-radius] ${
+      className={`search-area search-panel relative rounded-[22px] border-0 bg-transparent p-0 shadow-none transition-[border-radius] ${
         popoverOpen === "open" ? "rounded-b-none" : ""
       }`}
     >
       {/* 搜索行：输入 + 按钮 */}
-      <div className="flex items-stretch gap-2.5">
+      <div className="search-box search-row flex items-stretch gap-2.5">
         <div className="relative flex-1">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-[21px] h-[21px] text-cyber-text-muted pointer-events-none" />
           <input
             type="text"
             value={keyword}
             onChange={(e) => onKeywordChange(e.target.value)}
-            placeholder="搜索一个话题、人物或产品…"
+            placeholder={home ? "搜点什么？" : "搜索话题、人物或产品"}
             maxLength={200}
             disabled={isSearching}
             // Round 14.1：只有输入框聚焦打开浮层；关闭由 document pointerdown
             // 外部点击 / Escape / 提交搜索驱动，不再依赖 blur。
             onFocus={() => dispatchPopover({ type: "focus_within" })}
-            className="w-full h-[64px] pl-14 pr-11 rounded-[15px] border-0 bg-transparent text-[17px] text-cyber-text-primary placeholder:text-cyber-text-muted focus:outline-none disabled:opacity-50"
+            className="w-full h-[58px] pl-12 pr-11 rounded-full border-0 bg-transparent text-[16px] text-cyber-text-primary placeholder:text-cyber-text-muted focus:outline-none disabled:opacity-50"
           />
           {keyword && !isSearching && (
             <button
@@ -182,7 +184,7 @@ export function SearchBar({
             type="button"
             onClick={() => (onCancel ? onCancel() : handleReset())}
             disabled={isCancelling}
-            className="h-[56px] min-w-[120px] flex items-center justify-center gap-2 rounded-[15px] border border-warn/40 bg-warn-soft text-warn font-semibold text-[14px] hover:bg-warn-soft/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="search-cancel h-[44px] min-w-[104px] self-center flex items-center justify-center gap-2 rounded-full border border-warn/40 bg-warn-soft text-warn font-semibold text-[13px] hover:bg-warn-soft/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isCancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
             取消
@@ -191,17 +193,17 @@ export function SearchBar({
           <button
             type="submit"
             disabled={!keyword.trim()}
-            className="h-[56px] min-w-[136px] flex items-center justify-center gap-2 rounded-[15px] bg-brand text-white font-bold text-[14.5px] shadow-[0_8px_22px_rgba(76,164,220,0.25)] hover:bg-brand-strong hover:-translate-y-px transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+            className="search-submit h-[44px] w-[44px] self-center flex items-center justify-center rounded-full bg-brand text-white hover:bg-brand-strong hover:-translate-y-px transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
           >
-            <Search className="w-[17px] h-[17px]" />
-            开始搜索
+            <ArrowRight className="w-[17px] h-[17px]" />
+            <span className="sr-only">开始搜索</span>
           </button>
         )}
       </div>
 
       {/* 平台选择：浅色胶囊 */}
-      <div className="mt-2 pt-2.5 border-t border-cyber-border-subtle flex items-center gap-1.5 flex-wrap px-1">
-        <span className="text-[12px] text-cyber-text-muted mr-1">搜索范围</span>
+      <div className="scope search-scope">
+        <span className="scope-label">搜索范围</span>
         {ALL_PLATFORMS.map((p) => {
           const isSelected = selectedPlatforms.has(p);
           const color = PLATFORM_COLORS[p];
@@ -211,24 +213,19 @@ export function SearchBar({
               type="button"
               disabled={isSearching}
               onClick={() => togglePlatform(p)}
-              className={`flex items-center gap-2 rounded-full px-3.5 py-2 text-[12.5px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                isSelected
-                  ? "bg-brand-soft text-brand-ink border border-brand/25"
-                  : "border border-transparent text-cyber-text-muted hover:text-cyber-text-primary"
-              }`}
+              className="platform-choice"
+              aria-pressed={isSelected}
             >
               <i
-                className="w-2 h-2 rounded-[3px] flex-shrink-0"
+                className="pd"
                 style={{ backgroundColor: color, opacity: isSelected ? 1 : 0.45 }}
               />
               {PLATFORM_LABELS[p]}
-              <span className="ml-0.5 text-[10px] leading-none px-1.5 py-1 rounded-full bg-cyber-bg-tertiary text-cyber-text-muted">
-                {limits[p]}
-              </span>
+              <span className="check" aria-hidden="true">{isSelected ? "✓" : ""}</span>
             </button>
           );
         })}
-        <span className="ml-auto hidden sm:inline text-[12px] text-cyber-text-muted pr-1.5">按平台设置 · 单个平台每轮最多 40 条</span>
+        <span className="sr-only">每个平台本轮最多 {Math.max(...Object.values(limits))} 条</span>
       </div>
     </form>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bookmark, RotateCcw, Loader2, UserCog, RefreshCw } from "lucide-react";
+import { AlertTriangle, Clock3, RotateCcw, Loader2, UserCog, RefreshCw, Search } from "lucide-react";
 import { SearchBar } from "./SearchBar";
 import { PlatformStatus } from "./PlatformStatus";
 import { ResultTabs } from "./ResultTabs";
@@ -10,10 +10,11 @@ import { PLATFORM_LABELS } from "@/types/search";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { TOOL_BUTTON } from "./ResultTools";
-import { SearchStatistics } from "./SearchStatistics";
-import { BookmarkBackup } from "./BookmarkBackup";
+import { useHomePreferencesStore } from "@/store/homePreferencesStore";
 
 interface SearchPageProps {
+  homeRequested?: boolean;
+  onSearchStarted?: () => void;
   onNavigateAccounts?: () => void;
 }
 
@@ -22,10 +23,9 @@ interface SearchPageProps {
  * 业务状态逻辑（Round 12–13）原样保留：快照 / 单平台重试合并 / 取消 /
  * 历史 / 任务恢复 —— 本组件只改布局与视觉。
  */
-export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
+export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateAccounts }: SearchPageProps) {
   const library = useBookmarks();
-  const [showBookmarks, setShowBookmarks] = useState(false);
-  const savedResults = useMemo(() => library.items.map((item) => item.result), [library.items]);
+  const homePreferences = useHomePreferencesStore();
   // Round 15: 每个平台独立搜索数量（展示用；搜索请求由 useSearchExperience 读取）。
   const { limits } = usePlatformLimits();
   const {
@@ -92,10 +92,10 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
 
   const handleFullSearchLocal = useCallback(
     (kw: string, platforms: PlatformSlug[]) => {
-      setShowBookmarks(false);
+      onSearchStarted?.();
       void handleFullSearch(kw, platforms);
     },
-    [handleFullSearch]
+    [handleFullSearch, onSearchStarted]
   );
 
   const handleResetLocal = useCallback(() => {
@@ -110,13 +110,13 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
   // hook 的 busy + taskInFlight 双 guard 保证。
   const handleHistoryClickLocal = useCallback(
     (item: SearchHistoryItem) => {
-      setShowBookmarks(false);
+      onSearchStarted?.();
       setKeyword(item.keyword);
       setSelectedPlatforms(new Set(item.platforms));
       updatePlatformPref(item.platforms); // 同步持久化偏好（刷新后保持）
       void handleFullSearch(item.keyword, item.platforms);
     },
-    [handleFullSearch, updatePlatformPref]
+    [handleFullSearch, onSearchStarted, updatePlatformPref]
   );
 
   const isCancellingState = isCancelling;
@@ -141,6 +141,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
 
   const showInitialIdle = !displayJobResponse && !busy && !hasError;
   const showInitialLoading = !displayJobResponse && busy && !hasError;
+  const isHome = homeRequested;
 
   // Round 15.1: 本次搜索中真正返回 login_required 的平台。
   // 只取 displayJobResponse.platforms 的 key 并按 status 筛选，不解析
@@ -152,9 +153,11 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
     : [];
 
   return (
-    <div className="pt-7 pb-4">
+    <div className={isHome ? `home ${homePreferences.mode === "min" ? "minimal" : ""}` : "preview-container search-shell"}>
+      {isHome && <div className="hero"><div className="wordmark" aria-label="四野"><b>四野</b><svg className="swoosh" viewBox="0 0 120 12" aria-hidden="true"><defs><linearGradient id="wordmark-gradient"><stop stopColor="#6677fb"/><stop offset="1" stopColor="#29ddcc"/></linearGradient></defs><path d="M3 9Q60 0 117 9" stroke="url(#wordmark-gradient)" strokeWidth="3.5" fill="none" strokeLinecap="round"/></svg></div></div>}
       {/* 搜索面板（含聚焦浮层：最近搜索 / 推荐搜索） */}
       <SearchBar
+        home={isHome}
         keyword={keyword}
         onKeywordChange={setKeyword}
         selectedPlatforms={selectedPlatforms}
@@ -171,24 +174,37 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
         limits={limits}
       />
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <button type="button" className={TOOL_BUTTON} aria-expanded={showBookmarks} aria-controls="saved-results"
-          onClick={() => setShowBookmarks((value) => !value)}>
-          <Bookmark className="w-3.5 h-3.5" />{showBookmarks ? "返回搜索结果" : `本地收藏（${library.items.length}）`}
-        </button>
-        {library.error && <p className="text-xs text-warn" role="alert">{library.error}</p>}
-      </div>
-      <SearchStatistics refreshKey={`${displayJobResponse?.job_id || ""}:${displayJobResponse?.overall || ""}`} />
-      {showBookmarks && (
-        <section id="saved-results" aria-label="本地收藏" className="mt-5">
-          <h2 className="text-base font-semibold text-cyber-text-primary">本地收藏</h2>
-          <p className="mt-1 text-xs text-cyber-text-muted">收藏和备注保存在当前浏览器中，重启后仍可查看。更换浏览器、访问地址或清除网站数据前，请先导出备份。</p>
-          <BookmarkBackup library={library} />
-          <ResultTabs results={savedResults} overall="completed" platforms={["xhs", "douyin", "bilibili", "zhihu"]}
-            library={library} savedView jobId="bookmarks" />
-        </section>
+      {isHome && homePreferences.mode === "full" && (homePreferences.history || homePreferences.recent) && (
+        <div className="home-panels" style={!homePreferences.history || !homePreferences.recent ? { gridTemplateColumns: "1fr" } : undefined} aria-label="首页快捷内容">
+          {homePreferences.history && <section className="panel">
+            <div className="panel-heading"><h2>最近搜索</h2>{history.length ? <button type="button" className="text-link" onClick={clearHistory}>清空</button> : <Clock3 />}</div>
+            {history.length > 0 ? (
+              <div className="words">
+                {history.slice(0, 10).map((item) => (
+                  <button key={`${item.keyword}-${item.searchedAt}`} type="button" onClick={() => handleHistoryClickLocal(item)}>
+                    {item.keyword}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="secondary text-[13px]">你的探索，从第一次搜索开始。</p>
+            )}
+            <p className="panel-footnote">{history.length ? "从上次的好奇，继续探索。" : "搜索过的关键词会出现在这里。"}</p>
+          </section>}
+          {homePreferences.recent && <section className="panel">
+            <div className="panel-heading"><h2>最近搜到</h2><Search /></div>
+            <p className="secondary text-[13px]">还没有搜到的内容。</p>
+            <p className="panel-footnote">完成搜索后，在这里继续阅读。</p>
+          </section>}
+        </div>
       )}
-      <div hidden={showBookmarks}>
+      {isHome && homePreferences.mode === "full" && <p className="home-note">小红书、抖音、B站、知乎 · 一次搜索，几种视角。</p>}
+
+      {!isHome && <div className="search-headline">
+        <h1>{displayJobResponse?.keyword || keyword || "搜索结果"}</h1>
+        <span>{busy ? "正在跨平台搜索" : "相关内容"}</span>
+      </div>}
+      {!isHome && <div>
       {/* 平台搜索状态（统一浅色状态卡） */}
       <PlatformStatus
         response={displayJobResponse ?? undefined}
@@ -243,7 +259,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
       )}
 
       {/* Initial idle */}
-      {showInitialIdle && (
+      {showInitialIdle && !isHome && (
         <div className="mt-16 text-center">
           <p className="text-sm text-cyber-text-muted">
             输入关键词，选择平台，开始跨平台搜索
@@ -303,15 +319,15 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-            <p className="text-xs text-cyber-text-muted">
-              搜索: <span className="text-cyber-text-primary">{displayJobResponse.keyword}</span>
+          <div className="result-summary-line">
+            <p>
+              <span>{displayJobResponse.results.length} 条内容</span>
               {isTerminal && displayJobResponse.completed_at && (
                 <span className="ml-3">完成于 {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
               )}
               {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
             </p>
-            {isTerminal && <div className="flex items-center gap-2">
+            {isTerminal && <div className="button-row">
               {exploration && <button type="button" onClick={handleNextBatch}
                 disabled={busy || !hasMore} className={TOOL_BUTTON}>
                 <RefreshCw className="w-3.5 h-3.5" />换一批
@@ -388,7 +404,7 @@ export function SearchPage({ onNavigateAccounts }: SearchPageProps) {
           />
         </div>
       )}
-      </div>
+      </div>}
     </div>
   );
 }

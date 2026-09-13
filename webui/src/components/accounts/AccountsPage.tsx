@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
+import { Check, Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight, Minus, Plus, Palette, SlidersHorizontal, UserRound } from "lucide-react";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { PlatformSlug } from "@/types/search";
 import { invalidateAccounts, useAccounts } from "@/hooks/useAccounts";
@@ -36,6 +36,9 @@ import {
   requestPlatformSync,
   type SyncResult,
 } from "@/lib/extensionSync";
+import type { SettingsSection } from "@/components/layout/Header";
+import { useThemeStore } from "@/store/themeStore";
+import { useHomePreferencesStore } from "@/store/homePreferencesStore";
 
 interface LoginStatus {
   job_id: string;
@@ -72,14 +75,6 @@ const BACKEND_TEXT: Record<string, string> = {
   edge: "Edge",
   playwright_chromium: "Playwright Chromium",
   custom: "自定义浏览器",
-};
-
-/** 平台字母标记（红 / 抖 / 哔 / 知）。 */
-const PLATFORM_LETTERS: Record<string, string> = {
-  xhs: "红",
-  douyin: "抖",
-  bilibili: "哔",
-  zhihu: "知",
 };
 
 const TONE_BADGE: Record<AccountTone, string> = {
@@ -166,23 +161,18 @@ function LimitRow({
   const color = PLATFORM_COLORS[platform] || "#4ca4dc";
 
   return (
-    <div className="flex items-center gap-3 rounded-[14px] border border-cyber-border-subtle bg-cyber-bg-secondary px-3.5 py-3">
-      <span
-        className="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-[13px] font-bold text-white flex-shrink-0"
-        style={{ backgroundColor: color }}
-      >
-        {PLATFORM_LETTERS[platform]}
-      </span>
-      <span className="text-[13.5px] font-semibold text-cyber-text-primary min-w-[3.5rem]">
-        {PLATFORM_LABELS[platform]}
-      </span>
-      <div className="ml-auto flex items-center gap-2">
+    <div className="setting-row">
+      <div>
+        <div className="setting-label"><i className="pd" style={{ backgroundColor: color }} />{PLATFORM_LABELS[platform]}</div>
+        <p className="setting-desc">每轮获取 {MIN_PLATFORM_LIMIT}–{MAX_PLATFORM_LIMIT} 条内容</p>
+      </div>
+      <div className="stepper">
         <button
           type="button"
           aria-label={`减少${PLATFORM_LABELS[platform]}数量`}
           onClick={() => { const next = value - 1; if (next >= MIN_PLATFORM_LIMIT) onChange(next); }}
           disabled={value <= MIN_PLATFORM_LIMIT}
-          className="w-8 h-8 grid place-items-center rounded-[9px] border border-cyber-border-subtle text-cyber-text-secondary hover:bg-cyber-bg-tertiary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="stepper-button"
         >
           <Minus className="w-4 h-4" />
         </button>
@@ -194,36 +184,37 @@ function LimitRow({
           onBlur={() => commit(draft)}
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
           aria-label={`${PLATFORM_LABELS[platform]}搜索数量`}
-          className="w-14 h-9 text-center rounded-[9px] border border-cyber-border-subtle bg-cyber-bg-primary text-[13.5px] text-cyber-text-primary focus:outline-none focus:border-brand transition-colors"
+          className="stepper-input"
         />
         <button
           type="button"
           aria-label={`增加${PLATFORM_LABELS[platform]}数量`}
           onClick={() => { const next = value + 1; if (next <= MAX_PLATFORM_LIMIT) onChange(next); }}
           disabled={value >= MAX_PLATFORM_LIMIT}
-          className="w-8 h-8 grid place-items-center rounded-[9px] border border-cyber-border-subtle text-cyber-text-secondary hover:bg-cyber-bg-tertiary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="stepper-button"
         >
           <Plus className="w-4 h-4" />
         </button>
-        <span className="text-[12.5px] text-cyber-text-muted w-4 flex-shrink-0">条</span>
-        <span className="text-[11px] text-cyber-text-muted/70 w-9 flex-shrink-0 text-right">
-          {MIN_PLATFORM_LIMIT}–{MAX_PLATFORM_LIMIT}
-        </span>
       </div>
     </div>
   );
 }
 
 interface AccountsPageProps {
+  activeSection: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
   onNavigateSearch?: () => void;
+  onNavigateHelp?: () => void;
 }
 
-export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
+export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch, onNavigateHelp }: AccountsPageProps) {
   const { accounts, apiRunning } = useAccounts();
   // Phase 5.1: 账号 sync/verify/delete 完成后立即刷新共享缓存。
   const queryClient = useQueryClient();
   // Round 15: 每个平台独立搜索数量（localStorage 持久化，修改即保存）。
   const { limits, setLimit, resetAll } = usePlatformLimits();
+  const { theme, setTheme } = useThemeStore();
+  const homePreferences = useHomePreferencesStore();
   const [extensionState, setExtensionState] = useState<
     "checking" | "connected" | "outdated" | "not-installed" | "unknown"
   >("checking");
@@ -574,21 +565,21 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
 
   // ── 渲染 ─────────────────────────────────────────────────────────────
   return (
-    <div className="pt-7 pb-4">
-      <div className="mb-6">
-        <h1 className="text-[22px] font-bold text-cyber-text-primary">设置</h1>
-        <p className="mt-1 text-[13.5px] text-cyber-text-muted">
-          统一管理搜索数量与本地账号登录状态
-        </p>
-      </div>
+    <div className="accounts-page preview-container">
+      <div className="settings-layout">
+        <aside className="settings-nav" aria-label="设置分类">
+          <button type="button" className={activeSection === "search" ? "active" : ""} onClick={() => onSectionChange("search")}><SlidersHorizontal />搜索设置</button>
+          <button type="button" className={activeSection === "accounts" ? "active" : ""} onClick={() => onSectionChange("accounts")}><UserRound />账号与登录</button>
+          <button type="button" className={activeSection === "appearance" ? "active" : ""} onClick={() => onSectionChange("appearance")}><Palette />外观与首页</button>
+          <p className="aside-note">让工具适应你的习惯。<br />设置保存在当前浏览器。</p>
+        </aside>
+
+        <div className="settings-content">
 
       {/* ── 搜索设置（Round 15） ── */}
-      <section className="mb-8">
-        <h2 className="text-[16px] font-bold text-cyber-text-primary mb-1">搜索设置</h2>
-        <p className="text-[12.5px] text-cyber-text-muted mb-3.5">
-          数量越大，搜索耗时可能越长，也更容易遇到平台请求限制。修改后从下一次搜索开始生效。
-        </p>
-        <div className="flex flex-col gap-2.5">
+      {activeSection === "search" && <section>
+        <div className="settings-title"><h2>搜索设置</h2><p>为不同平台，留出合适的搜索数量。</p></div>
+        <div>
           {PLATFORM_ORDER.map((p) => (
             <LimitRow
               key={p}
@@ -598,25 +589,21 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             />
           ))}
         </div>
-        <button
-          type="button"
-          onClick={resetAll}
-          className="mt-3 px-3.5 py-2 rounded-[10px] border border-cyber-border-subtle text-xs text-cyber-text-secondary hover:bg-cyber-bg-tertiary hover:text-cyber-text-primary transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />恢复默认
-        </button>
-      </section>
+        <div className="setting-footer"><span>修改后从下一次搜索开始生效</span><button type="button" className="text-link" onClick={resetAll}>恢复默认数量</button></div>
+        <div className="info-box"><h3>多一点内容，也需要多一点时间</h3><p>数量越大，搜索耗时可能越长，也更容易遇到平台请求限制。默认每个平台 20 条；需要更多时，可以在结果页继续搜索。</p></div>
+      </section>}
 
       {/* ── 账号与登录 ── */}
-      <section>
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <h2 className="text-[16px] font-bold text-cyber-text-primary">账号与登录</h2>
+      {activeSection === "accounts" && <section>
+        <div className="settings-title"><h2>账号与登录</h2><p>连接你的平台账号，让搜索与收藏顺畅一点。</p></div>
+        <div className="account-top">
+          <p>浏览器扩展{extensionState === "connected" ? "已连接" : "等待连接"}{extensionVersion ? ` · v${extensionVersion}` : ""}</p>
           {/* 一键同步四平台：并发 2，固定顺序 xhs → douyin → bilibili → zhihu */}
           <button
             type="button"
             onClick={handleBulkSync}
             disabled={bulkSyncing || extensionState !== "connected" || apiRunning === false}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-[12px] bg-brand text-white font-semibold text-[13.5px] shadow-[0_8px_22px_rgba(76,164,220,0.25)] hover:bg-brand-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn small primary"
           >
             {bulkSyncing ? (
               <>
@@ -628,14 +615,14 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
             ) : (
               <>
                 <RefreshCw className="w-4 h-4" />
-                一键同步四个平台
+                一键同步
               </>
             )}
           </button>
         </div>
 
       {/* 扩展状态 */}
-      <div className={`mb-5 px-4 py-2.5 rounded-xl border text-[12.5px] w-fit ${
+      <div className={`extension-status ${
         extensionState === "connected"
           ? "border-ok/40 bg-ok-soft text-[#3d7d60]"
           : extensionState === "outdated" || extensionState === "not-installed"
@@ -654,6 +641,21 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
 
       {/* 平台卡片：统一浅色账号卡 */}
       <div className="flex flex-col gap-3">
+        {(!accounts || accounts.length === 0) && PLATFORM_ORDER.map((platform) => (
+          <article key={platform} className="account-card">
+            <div className="account-card-head">
+              <h3><i className="pd" style={{ backgroundColor: PLATFORM_COLORS[platform] }} aria-hidden="true" />{PLATFORM_LABELS[platform]}</h3>
+              <span className="pill">状态暂不可用</span>
+            </div>
+            <p>本地服务尚未返回账号状态。启动服务后可同步或重新验证。</p>
+            <div className="account-actions">
+              <button type="button" className="btn small" disabled>同步登录状态</button>
+              <button type="button" className="btn ghost small" disabled>重新验证</button>
+              <button type="button" className="btn ghost small" onClick={() => openOfficial(platform)}>前往登录 <ExternalLink /></button>
+            </div>
+            <details><summary>诊断与其他方式</summary><div className="diagnostic">本地 API 未连接，暂时无法读取诊断信息。</div></details>
+          </article>
+        ))}
         {(accounts || []).map((acc) => {
           const busyLabel = busy[acc.platform];
           const name = PLATFORM_LABELS[acc.platform as keyof typeof PLATFORM_LABELS] || acc.platform;
@@ -668,25 +670,18 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
               ? "简介暂不可用"
               : "简介状态未知";
           return (
-            <div key={acc.platform} className="rounded-[16px] border border-cyber-border-subtle bg-cyber-bg-secondary p-4 sm:p-5">
+            <article key={acc.platform} className="account-card">
               {/* 头部：平台标记 + 名称 + 状态徽章 + busy */}
-              <div className="flex items-center justify-between gap-3 mb-3.5 flex-wrap">
-                <div className="flex items-center gap-3">
-                  <span
-                    className="w-[38px] h-[38px] rounded-[11px] grid place-items-center text-[15px] font-extrabold text-white flex-shrink-0"
-                    style={{ backgroundColor: color }}
-                  >
-                    {PLATFORM_LETTERS[acc.platform]}
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[14.5px] font-bold text-cyber-text-primary">{name}</span>
+              <div className="account-card-head">
+                <div>
+                    <h3>
+                      <i className="pd" style={{ backgroundColor: color }} aria-hidden="true" />
+                      <span>{name}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10.5px] border ${TONE_BADGE[tone]}`}>
                         {accountCardStatusLabel(acc)}
                         {acc.verified && <ShieldCheck className="w-3 h-3 inline ml-1" />}
                       </span>
-                    </div>
-                  </div>
+                    </h3>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   {doctorTone && (
@@ -706,12 +701,8 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
               </div>
 
               {/* 概要信息 */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12.5px] text-cyber-text-secondary mb-3">
-                <div>后台会话：{acc.profile_exists ? "已存在" : "不存在"}</div>
-                <div>浏览器后端：{acc.browser_backend ? (BACKEND_TEXT[acc.browser_backend] || acc.browser_backend) : "—"}</div>
-                <div>昵称：{acc.display_name || "—"}</div>
-                <div>上次验证：{acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString("zh-CN") : "—"}</div>
-              </div>
+              <p>{acc.verified ? `${acc.display_name || "账号已连接"} · 最近验证于 ${acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString("zh-CN") : "本次会话"}` : acc.safe_message || "先在浏览器登录平台，再同步登录状态。"}</p>
+              <div className="sr-only">后台会话：{acc.profile_exists ? "已存在" : "不存在"}；浏览器后端：{acc.browser_backend ? (BACKEND_TEXT[acc.browser_backend] || acc.browser_backend) : "未知"}</div>
 
               {diagnostic && (
                 <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-brand-soft/35 px-2.5 py-2">
@@ -794,31 +785,31 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
               )}
 
               {/* 主要操作 */}
-              <div className="flex flex-wrap gap-2">
+              <div className="account-actions">
                 <button
                   onClick={() => openOfficial(acc.platform)}
-                  className="px-3.5 py-2 rounded-[10px] border border-cyber-border-subtle text-xs text-cyber-text-primary hover:bg-cyber-bg-tertiary transition-colors"
+                  className="btn ghost small"
                 >
                   <ExternalLink className="w-3.5 h-3.5 inline mr-1.5" />打开官网
                 </button>
                 <button
                   onClick={() => syncAccount(acc.platform as PlatformSlug)}
                   disabled={!!busyLabel || extensionState !== "connected" || bulkSyncing}
-                  className="px-3.5 py-2 rounded-[10px] bg-brand-soft border border-brand/40 text-brand-strong hover:bg-brand/10 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn small"
                 >
                   同步当前浏览器登录状态
                 </button>
                 <button
                   onClick={() => verifyAccount(acc.platform)}
                   disabled={!!busyLabel || bulkSyncing}
-                  className="px-3.5 py-2 rounded-[10px] border border-cyber-border-subtle text-xs text-cyber-text-primary hover:bg-cyber-bg-tertiary transition-colors disabled:opacity-40"
+                  className="btn ghost small"
                 >
                   <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />重新验证
                 </button>
                 <button
                   onClick={() => deleteSession(acc.platform)}
                   disabled={!!busyLabel || !acc.profile_exists || bulkSyncing}
-                  className="px-3.5 py-2 rounded-[10px] border border-danger/40 text-danger hover:bg-danger-soft text-xs transition-colors disabled:opacity-40"
+                  className="text-link danger-link"
                 >
                   <Trash2 className="w-3.5 h-3.5 inline mr-1.5" />清除登录状态
                 </button>
@@ -853,36 +844,38 @@ export function AccountsPage({ onNavigateSearch }: AccountsPageProps) {
                   </div>
                 )}
               </div>
-            </div>
+            </article>
           );
         })}
       </div>
 
       {/* 安装说明 */}
-      <div className="mt-6 p-4 sm:p-5 rounded-[16px] border border-cyber-border-subtle bg-cyber-bg-secondary text-xs text-cyber-text-muted">
-        <p className="text-cyber-text-primary mb-2 font-bold text-[13.5px]">安装浏览器扩展</p>
-        <ol className="list-decimal list-inside space-y-1">
-          <li>打开 <code className="text-brand-strong">chrome://extensions</code>（Edge 为 <code className="text-brand-strong">edge://extensions</code>）；</li>
-          <li>开启右上角<b>开发者模式</b>；</li>
-          <li>点击<b>加载已解压的扩展程序</b>；</li>
-          <li>选择项目目录下的 <code className="text-brand-strong">browser_extension</code> 文件夹；</li>
-          <li>刷新本页（扩展注入后需刷新一次才能检测到）。</li>
-        </ol>
-        <p className="mt-2 text-cyber-text-muted">
-          安全说明：扩展只读取四个平台官方域名的登录 Cookie，直接发送到本机 127.0.0.1:8080 后端；
-          网页只能收到同步结果状态，拿不到任何 Cookie。本系统不保存平台用户名或密码。
-        </p>
+      <div className="info-box">
+        <h3>第一次使用？先连接浏览器扩展</h3>
+        <p>在你常用的浏览器登录平台，通过扩展同步到本机服务。网页只接收同步结果，不展示账号凭据。</p>
+        {onNavigateHelp && <button type="button" className="text-link" onClick={onNavigateHelp}>查看扩展安装说明 <ExternalLink /></button>}
       </div>
-      </section>
+      </section>}
 
-      {onNavigateSearch && (
-        <button
-          onClick={onNavigateSearch}
-          className="mt-4 text-xs text-cyber-text-muted hover:text-brand-strong underline underline-offset-2 transition-colors"
-        >
-          ← 返回聚合搜索
-        </button>
-      )}
+      {activeSection === "appearance" && <section>
+        <div className="settings-title"><h2>外观与首页</h2><p>安静一点，或多一些内容。按你的习惯来。</p></div>
+        <div className="theme-choices">
+          {(["light", "dark"] as const).map((value) => <button key={value} type="button" className="theme-card" aria-pressed={theme === value} onClick={() => setTheme(value)}>
+            <div className={`theme-preview ${value === "dark" ? "night" : ""}`} aria-hidden="true" />
+            <span>{value === "dark" ? "深色" : "浅色"}{theme === value && <Check />}</span>
+          </button>)}
+        </div>
+        <div className="setting-row"><div><div className="setting-label">首页模式</div><p className="setting-desc">极简留白，实用展示最近的探索</p></div><div className="segmented">
+          <button type="button" className="segment" aria-pressed={homePreferences.mode === "min"} onClick={() => homePreferences.setMode("min")}>极简</button>
+          <button type="button" className="segment" aria-pressed={homePreferences.mode === "full"} onClick={() => homePreferences.setMode("full")}>实用</button>
+        </div></div>
+        <div className="setting-row"><div><div className="setting-label">最近搜索</div><p className="setting-desc">回到上一次搜索过的关键词</p></div><button type="button" className="switch" role="switch" aria-checked={homePreferences.history} aria-label="首页显示最近搜索" onClick={() => homePreferences.setSection("history", !homePreferences.history)} /></div>
+        <div className="setting-row"><div><div className="setting-label">最近搜到</div><p className="setting-desc">继续阅读上次获取的内容</p></div><button type="button" className="switch" role="switch" aria-checked={homePreferences.recent} aria-label="首页显示最近搜到" onClick={() => homePreferences.setSection("recent", !homePreferences.recent)} /></div>
+        <div className="setting-footer"><span>主题与首页偏好会保存在当前浏览器</span>{onNavigateSearch && <button type="button" className="text-link" onClick={onNavigateSearch}>回首页看看 →</button>}</div>
+        <div className="info-box"><p>极简模式会暂时隐藏首页板块，不清除板块选择。开启任一板块会自动切回实用模式。</p></div>
+      </section>}
+        </div>
+      </div>
     </div>
   );
 }

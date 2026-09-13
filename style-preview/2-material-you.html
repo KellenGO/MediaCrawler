@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>效果图 2 · Material You</title>
+<style>
+/* ============================================================
+   效果图 2：Material You（Material Design 3）
+   预览稿，不是最终代码。
+   配色不是手调的：用官方 @material/material-color-utilities，
+   以你现在的品牌色 #4ca4dc 为种子（HCT hue 241.6 / chroma 46.5 /
+   tone 64.4）、走 SchemeContent 方案，算出浅色 + 深色两套真实 M3 角色色。
+   和另外两张的根本区别：这里没有玻璃、没有模糊，
+   靠"色调分层 + 大圆角 + 药丸按钮 + 极轻投影"来分层。
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  /* ── 浅色：SchemeContent(#4ca4dc) ── */
+  --primary:#006492;        --on-primary:#ffffff;
+  --primary-container:#4ca4dc; --on-primary-container:#003753;
+  --secondary:#456277;      --secondary-container:#c5e3fd; --on-secondary-container:#49667c;
+  --tertiary:#7d4992;       --tertiary-container:#c087d5;
+  --error:#ba1a1a;          --error-container:#ffdad6; --on-error-container:#93000a;
+  --surface:#f7f9fe;        --on-surface:#181c20;
+  --surface-variant:#dbe3ed;--on-surface-variant:#3f484f;
+  --sc-lowest:#ffffff; --sc-low:#f1f4f9; --sc:#ebeef3; --sc-high:#e5e8ed; --sc-highest:#e0e3e7;
+  --outline:#707880; --outline-variant:#bfc7d0;
+  --ok:#2e6b4f;
+  --e1:0 1px 2px rgba(0,0,0,.30), 0 1px 3px 1px rgba(0,0,0,.15);
+  --e2:0 1px 2px rgba(0,0,0,.30), 0 2px 6px 2px rgba(0,0,0,.15);
+  --e3:0 1px 3px rgba(0,0,0,.30), 0 4px 8px 3px rgba(0,0,0,.15);
+}
+html.dark{
+  /* ── 深色：SchemeContent(#4ca4dc) ── */
+  --primary:#8bceff;        --on-primary:#00344e;
+  --primary-container:#4ca4dc; --on-primary-container:#003753;
+  --secondary:#accae3;      --secondary-container:#2d4a5f; --on-secondary-container:#9bb9d1;
+  --tertiary:#ebb2ff;       --tertiary-container:#c087d5;
+  --error:#ffb4ab;          --error-container:#93000a; --on-error-container:#ffdad6;
+  --surface:#101417;        --on-surface:#e0e3e7;
+  --surface-variant:#3f484f;--on-surface-variant:#bfc7d0;
+  --sc-lowest:#0b0f12; --sc-low:#181c20; --sc:#1c2024; --sc-high:#262a2e; --sc-highest:#313539;
+  --outline:#89929a; --outline-variant:#3f484f;
+  --ok:#8fd6b0;
+  --e1:0 1px 2px rgba(0,0,0,.50), 0 1px 3px 1px rgba(0,0,0,.30);
+  --e2:0 1px 2px rgba(0,0,0,.50), 0 2px 6px 2px rgba(0,0,0,.30);
+  --e3:0 1px 3px rgba(0,0,0,.50), 0 4px 8px 3px rgba(0,0,0,.30);
+}
+html,body{margin:0;padding:0}
+body{
+  /* M3 用系统字体即可（Roboto 要离线自托管，这里先用系统字体看观感） */
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--on-surface);background:var(--surface);min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1160px;margin:0 auto;padding:0 20px}
+
+/* ── 顶部说明条 ── */
+.note{position:sticky;top:0;z-index:50;font-size:12.5px;
+  background:var(--primary-container);color:var(--on-primary-container);
+  border-bottom:1px solid var(--outline-variant)}
+.note-in{max-width:1160px;margin:0 auto;padding:9px 20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.note .sp{flex:1}
+.btn-mini{cursor:pointer;border:1px solid var(--outline);background:transparent;color:inherit;
+  border-radius:999px;padding:4px 14px;font:inherit;font-size:12px}
+.btn-mini:hover{background:rgba(0,0,0,.06)}
+
+/* ── 顶栏：M3 用"表面容器"而不是玻璃 ── */
+header{position:sticky;top:38px;z-index:40;background:var(--sc);
+  box-shadow:var(--e1);border-radius:0 0 16px 16px}
+.hd{display:flex;align-items:center;gap:18px;padding:12px 0}
+.brand{display:flex;align-items:baseline;gap:9px;font-weight:700;font-size:18px;letter-spacing:.2px}
+.brand span{font-weight:400;font-size:12px;color:var(--on-surface-variant)}
+nav{display:flex;gap:2px;margin-left:8px}
+nav a{font-size:13.5px;color:var(--on-surface-variant);text-decoration:none;padding:8px 14px;border-radius:999px;
+  font-weight:500}
+nav a.on{background:var(--secondary-container);color:var(--on-secondary-container);font-weight:700}
+nav a:hover{background:rgba(0,0,0,.05)}
+.hd .sp{flex:1}
+.pill{font-size:12px;color:var(--on-surface-variant);border:1px solid var(--outline-variant);
+  border-radius:999px;padding:5px 12px;display:inline-flex;align-items:center;gap:7px;background:transparent;
+  font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+
+/* ── 搜索条：M3 的搜索栏是"超圆角 + 表面容器"，没有边框 ── */
+.search{margin:22px 0 16px;background:var(--sc-high);border-radius:28px;padding:8px 8px 8px 20px;
+  display:flex;gap:10px;align-items:center;box-shadow:var(--e1)}
+.search .ico{color:var(--on-surface-variant);font-size:17px}
+input[type=text]{flex:1;font:inherit;font-size:15px;border:none;background:transparent;
+  color:var(--on-surface);padding:12px 0}
+input[type=text]::placeholder{color:var(--on-surface-variant)}
+input[type=text]:focus{outline:none}
+.btn{cursor:pointer;font:inherit;font-weight:600;font-size:14px;padding:12px 24px;border-radius:999px;
+  border:none;background:var(--primary);color:var(--on-primary);white-space:nowrap;box-shadow:var(--e1)}
+.btn:hover{box-shadow:var(--e2)}
+/* 药丸型选择片：M3 filter chip，选中用"次要容器色" */
+.chips{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center}
+.chip{font-size:12.5px;border:1px solid var(--outline-variant);border-radius:8px;padding:6px 13px;
+  color:var(--on-surface-variant);background:transparent;font-weight:500}
+.chip.on{border-color:transparent;background:var(--secondary-container);color:var(--on-secondary-container);font-weight:700}
+.hint{font-size:12px;color:var(--on-surface-variant);margin-left:auto}
+
+/* ── 平台卡：M3 靠色调分层，浅色下不用边框、不用玻璃 ── */
+.plats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 20px}
+.plat{border-radius:16px;padding:14px;display:flex;gap:12px;align-items:center;
+  background:var(--sc-low);box-shadow:var(--e1)}
+.tile{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:800;
+  font-size:14px;color:#fff;flex:0 0 auto}
+.plat strong{display:block;font-size:14px;font-weight:600}
+.plat small{color:var(--on-surface-variant);font-size:12px}
+.plat.warn{background:var(--error-container)}
+.plat.warn strong{color:var(--on-error-container)}
+.plat.warn small{color:var(--on-error-container);opacity:.85}
+
+/* ── 标签：M3 主标签有下划线指示条 ── */
+.tabs{display:flex;align-items:flex-end;gap:4px;margin:8px 0 16px;border-bottom:1px solid var(--outline-variant)}
+.tab{font-size:13.5px;padding:12px 14px;color:var(--on-surface-variant);cursor:pointer;font-weight:600;
+  border-bottom:3px solid transparent;border-radius:8px 8px 0 0}
+.tab.on{color:var(--primary);border-bottom-color:var(--primary)}
+.tab .n{font-size:11px;color:var(--on-surface-variant);margin-left:5px;font-weight:400}
+.sort{margin-left:auto;display:flex;gap:6px;padding-bottom:8px}
+.sort span{font-size:12px;color:var(--on-surface-variant);padding:6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid transparent;font-weight:500}
+.sort span.on{background:var(--secondary-container);color:var(--on-secondary-container);font-weight:700}
+
+/* ── 结果卡：M3 卡片 = 表面容器低 + 12px 圆角 + 极轻投影 ── */
+.grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+.card{border-radius:12px;padding:14px;display:flex;gap:14px;margin-bottom:12px;
+  background:var(--sc-low);box-shadow:var(--e1)}
+.cover{width:112px;height:80px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;
+  color:#fff;font-weight:800;font-size:12px;letter-spacing:.5px}
+.card h3{margin:0 0 6px;font-size:15px;line-height:1.45;font-weight:600}
+.card p{margin:0 0 8px;font-size:12.5px;color:var(--on-surface-variant);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{font-size:11.5px;color:var(--on-surface-variant);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.meta b{color:var(--on-surface);font-weight:600}
+.tag{font-size:11px;border:1px solid var(--outline-variant);border-radius:8px;padding:2px 8px;font-weight:500}
+
+/* ── 侧栏统计卡 ── */
+aside{border-radius:16px;padding:16px;position:sticky;top:108px;background:var(--sc-low);box-shadow:var(--e1)}
+aside h4{margin:0 0 12px;font-size:14px;font-weight:700}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:7px 0;
+  border-bottom:1px solid var(--outline-variant)}
+.kv:last-child{border:none}
+.kv span{color:var(--on-surface-variant)}
+.kv b{font-variant-numeric:tabular-nums;font-weight:600}
+footer{color:var(--on-surface-variant);font-size:12px;text-align:center;padding:26px 0 40px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.plats{grid-template-columns:repeat(2,1fr)}
+  aside{position:static}.note{position:static}header{top:0}}
+</style>
+</head>
+<body>
+
+<div class="note"><div class="note-in">
+  <span>效果图 2 / 3 · <b>Material You（M3）</b></span>
+  <span>配色由官方库从 #4ca4dc 真实生成 · 没有玻璃和模糊 · 分层靠表面色调 + 大圆角 + 药丸按钮 + 极轻投影</span>
+  <span class="sp"></span>
+  <button class="btn-mini" onclick="tg()">切换深色 / 浅色</button>
+</div></div>
+
+<header><div class="wrap hd">
+  <div class="brand">四野 <span>中文社交平台聚合搜索</span></div>
+  <nav>
+    <a href="#" class="on">聚合搜索</a>
+    <a href="#">跨平台收藏</a>
+    <a href="#">设置</a>
+  </nav>
+  <span class="sp"></span>
+  <span class="pill"><i class="dot"></i>本地服务正常</span>
+  <span class="pill">登录状态 3/4</span>
+  <span class="pill">🌙</span>
+</div></header>
+
+<main class="wrap">
+  <section class="search">
+    <span class="ico">🔍</span>
+    <input type="text" placeholder="搜索一个话题、人物或产品…" value="露营装备推荐">
+    <button class="btn">开始搜索</button>
+  </section>
+
+  <div class="chips">
+    <span class="chip on">小红书 · 10</span>
+    <span class="chip on">抖音 · 10</span>
+    <span class="chip on">B站 · 10</span>
+    <span class="chip on">知乎 · 10</span>
+    <span class="hint">Enter 搜索 · 最多 10 条 / 平台</span>
+  </div>
+
+  <div class="plats">
+    <div class="plat"><div class="tile" style="background:#e2503f">红</div><div><strong>小红书</strong><small>24 条结果 · 完成 2.1s</small></div></div>
+    <div class="plat"><div class="tile" style="background:#2b2b2b">抖</div><div><strong>抖音</strong><small>18 条结果 · 完成 3.4s</small></div></div>
+    <div class="plat warn"><div class="tile" style="background:#e07ba6">哔</div><div><strong>B站</strong><small>需要登录 · 前往账号设置</small></div></div>
+    <div class="plat"><div class="tile" style="background:#1772f6">知</div><div><strong>知乎</strong><small>12 条结果 · 完成 1.8s</small></div></div>
+  </div>
+
+  <div class="tabs">
+    <span class="tab on">全部<span class="n">54</span></span>
+    <span class="tab">小红书<span class="n">24</span></span>
+    <span class="tab">抖音<span class="n">18</span></span>
+    <span class="tab">B站<span class="n">0</span></span>
+    <span class="tab">知乎<span class="n">12</span></span>
+    <span class="sort"><span class="on">综合</span><span>最新</span><span>互动最多</span></span>
+  </div>
+
+  <div class="grid">
+    <div>
+      <article class="card">
+        <div class="cover" style="background:linear-gradient(135deg,#e2503f,#f08a6a)">小红书</div>
+        <div><h3>新手露营装备清单｜人均 800 元搞定全套（附避坑）</h3>
+          <p>从帐篷到睡袋一条龙，第一次露营不用买贵的，这几件性价比最高…</p>
+          <div class="meta"><b>@爱露营的小林</b><span>3 天前</span><span>赞 1.2万</span><span>评 328</span><span class="tag">攻略</span></div></div>
+      </article>
+      <article class="card">
+        <div class="cover" style="background:linear-gradient(135deg,#2b2b2b,#5a5a5a)">抖音</div>
+        <div><h3>露营装备怎么选？3 分钟讲清帐篷天幕睡垫</h3>
+          <p>预算有限先买什么？我按使用频率排了个顺序，新手照抄就行。</p>
+          <div class="meta"><b>@户外老张</b><span>昨天</span><span>赞 8642</span><span>评 512</span><span class="tag">视频</span></div></div>
+      </article>
+      <article class="card">
+        <div class="cover" style="background:linear-gradient(135deg,#1772f6,#5aa9ff)">知乎</div>
+        <div><h3>第一次露营需要准备哪些装备？有哪些容易被忽略的细节？</h3>
+          <p>建议按"睡眠系统、遮蔽系统、炊具系统"三块准备，其中最容易忽略的是地垫的 R 值…</p>
+          <div class="meta"><b>@山野笔记</b><span>5 天前</span><span>赞 3201</span><span>评 187</span><span class="tag">问答</span></div></div>
+      </article>
+      <article class="card">
+        <div class="cover" style="background:linear-gradient(135deg,#e2503f,#f08a6a)">小红书</div>
+        <div><h3>露营桌怎么挑？蛋卷桌 vs 折叠桌实测对比</h3>
+          <p>重量、稳定性、收纳体积各测一遍，结论可能和你想的不一样。</p>
+          <div class="meta"><b>@装备研究室</b><span>1 周前</span><span>赞 5210</span><span>评 96</span><span class="tag">评测</span></div></div>
+      </article>
+    </div>
+
+    <aside>
+      <h4>搜索统计 · 最近 100 次</h4>
+      <div class="kv"><span>小红书成功率</span><b>96%</b></div>
+      <div class="kv"><span>抖音成功率</span><b>91%</b></div>
+      <div class="kv"><span>B站成功率</span><b>72%</b></div>
+      <div class="kv"><span>知乎成功率</span><b>94%</b></div>
+      <div class="kv"><span>缓存命中率</span><b>38%</b></div>
+      <div class="kv"><span>P95 耗时</span><b>6.4s</b></div>
+      <div class="kv"><span>备用路径使用率</span><b>17%</b></div>
+    </aside>
+  </div>
+
+  <footer>四野 · 基于 MediaCrawler 的本地聚合检索工作台</footer>
+</main>
+
+<script>
+function tg(){document.documentElement.classList.toggle('dark')}
+</script>
+</body>
+</html>

@@ -1,343 +1,79 @@
-import { useState, useMemo, type ComponentType, type ReactNode } from "react";
-import { ArrowUpRight, ChevronDown, Eye, MessageCircle, ThumbsUp, Star, Share2 } from "lucide-react";
-import { BilibiliCoinIcon } from "@/components/icons/BilibiliCoinIcon";
-import type { UnifiedSearchResult } from "@/types/search";
-import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
+import { useState, type ReactNode } from "react";
+import { ArrowUpRight, ChevronDown } from "lucide-react";
+import type { GroupedSource, UnifiedSearchResult } from "@/types/search";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "@/types/search";
 import { highlightSegments, orderedMetrics, safeContentUrl as safeUrl } from "@/lib/resultTools";
 
 interface ResultCardProps {
   result: UnifiedSearchResult;
+  index?: number;
   highlightQuery?: string;
   renderBookmark?: (result: UnifiedSearchResult) => ReactNode;
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
   return <>{highlightSegments(text, query).map((segment, index) => segment.matched
-    ? <mark key={index} className="rounded-sm bg-amber-100 text-amber-950">{segment.text}</mark>
+    ? <mark key={index} className="result-highlight">{segment.text}</mark>
     : segment.text)}</>;
 }
 
 function formatTime(iso: string | null): string {
   if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    const minutes = Math.floor(diff / 60000);
-    if (minutes < 1) return "刚刚";
-    if (minutes < 60) return `${minutes}分钟前`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}小时前`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}天前`;
-    return d.toLocaleDateString("zh-CN");
-  } catch {
-    return "";
-  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return date.toLocaleDateString("zh-CN");
 }
 
-function formatCount(n: number): string {
-  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-  return String(n);
+function formatCount(value: number): string {
+  if (value >= 10000) return `${(value / 10000).toFixed(1)} 万`;
+  return value.toLocaleString("zh-CN");
 }
 
-/** 内容类型展示文案（原始 slug → 中文；其余原样）。 */
 const CONTENT_TYPE_LABELS: Record<string, string> = {
-  note: "图文笔记",
-  video: "视频",
-  short_video: "短视频",
-  answer: "回答",
-  article: "文章",
-  post: "帖子",
+  note: "图文笔记", video: "视频", short_video: "短视频", answer: "回答", article: "文章", post: "帖子",
 };
 
-/** 封面占位图（效果稿：平台色克制渐变 + 圆形装饰）。 */
-function CoverPlaceholder({ platform }: { platform: string }) {
-  const color = PLATFORM_COLORS[platform as keyof typeof PLATFORM_COLORS] || "#4ca4dc";
-  return (
-    <div
-      className="absolute inset-0 overflow-hidden"
-      style={{ background: `linear-gradient(135deg, ${color}e6, ${color}59)` }}
-    >
-      <span
-        className="absolute rounded-full bg-white/30"
-        style={{ width: 84, height: 84, right: -15, top: -18 }}
-      />
-      <span
-        className="absolute rounded-full bg-white/25"
-        style={{ width: 48, height: 48, left: 20, bottom: -15 }}
-      />
-    </div>
-  );
+function SourceLine({ source, query }: { source: GroupedSource; query: string }) {
+  const url = safeUrl(source.url);
+  const row = <div className="result-source-line"><i className="pd" style={{ backgroundColor: PLATFORM_COLORS[source.platform] }} /><span className="result-source-platform">{PLATFORM_LABELS[source.platform]}</span><span className="result-source-title"><Highlight text={source.title} query={query} /></span><span className="result-source-meta">{source.author}</span><ArrowUpRight className="result-source-arrow" /></div>;
+  return url ? <a href={url} target="_blank" rel="noreferrer">{row}</a> : row;
 }
 
-/**
- * 图标仅表达类别，顺序由 resultTools 的 METRIC_ORDER 统一决定。
- * 点赞=大拇指、评论=消息气泡、投币=B站官方硬币、浏览=眼睛、收藏=星星。
- */
-type MetricIcon = ComponentType<{ className?: string }>;
-
-const METRIC_ICONS: Record<string, MetricIcon> = {
-  view_count: Eye,
-  like_count: ThumbsUp,
-  coin_count: BilibiliCoinIcon,
-  comment_count: MessageCircle,
-  collect_count: Star,
-  share_count: Share2,
-};
-
-function metricSummary(metrics: Record<string, number>): string {
-  return orderedMetrics(metrics)
-    .map(({ key, label }) => `${label} ${formatCount(metrics[key] || 0)}`)
-    .join(" · ");
-}
-
-function MetricStatus({ result }: { result: UnifiedSearchResult }) {
-  if (!result.metrics_status || result.metrics_status === "complete") return null;
-  const names: Record<string, string> = {
-    view_count: result.platform === "zhihu" ? "阅读/播放" : "播放",
-    like_count: "点赞", comment_count: "评论", collect_count: "收藏", coin_count: "投币",
-  };
-  const targets = result.platform === "bilibili"
-    ? ["view_count", "like_count", "coin_count", "comment_count", "collect_count"]
-    : result.platform === "zhihu" ? ["view_count", "like_count", "comment_count", "collect_count"] : [];
-  const missing = targets.filter((key) => !(key in result.metrics)).map((key) => names[key]);
-  if (!missing.length) return null;
-  const prefix = result.metrics_status === "pending" ? "正在补充"
-    : result.metrics_status === "failed" ? "补充未完成" : "暂未获取";
-  return <p className="mt-1 text-[10.5px] text-cyber-text-muted">{prefix}：{missing.join("、")}</p>;
-}
-
-export function ResultCard({ result, highlightQuery = "", renderBookmark }: ResultCardProps) {
-  const [imgError, setImgError] = useState(false);
+export function ResultCard({ result, index = 0, highlightQuery = "", renderBookmark }: ResultCardProps) {
   const [groupExpanded, setGroupExpanded] = useState(false);
   const url = safeUrl(result.url);
-  const platformColor = PLATFORM_COLORS[result.platform] || "#4ca4dc";
-  const contentType = CONTENT_TYPE_LABELS[result.content_type] || result.content_type || "";
-  const groupedSources = result.grouped_sources && result.grouped_sources.length >= 2
-    ? result.grouped_sources
-    : null;
-  const groupedContentTypes = groupedSources
-    ? [...new Set(groupedSources.map((source) => CONTENT_TYPE_LABELS[source.content_type] || source.content_type).filter(Boolean))].join(" / ")
-    : "";
+  const groupedSources = result.grouped_sources && result.grouped_sources.length >= 2 ? result.grouped_sources : null;
+  const title = <><Highlight text={result.title} query={highlightQuery} />{url && <ArrowUpRight />}</>;
+  const metrics = orderedMetrics(result.metrics);
+  const type = CONTENT_TYPE_LABELS[result.content_type] || result.content_type || "";
 
-  const metrics = useMemo(
-    () => orderedMetrics(result.metrics).map(({ key, label }) => ({ key, label, icon: METRIC_ICONS[key] })),
-    [result.metrics],
+  return (
+    <article className="result-row">
+      <span className="result-number">{String(index + 1).padStart(2, "0")}</span>
+      <div className="result-content">
+        <h2>{url ? <a className="result-title" href={url} target="_blank" rel="noreferrer">{title}</a> : <span className="result-title">{title}</span>}</h2>
+        {result.snippet && <p className="result-description"><Highlight text={result.snippet} query={highlightQuery} /></p>}
+        <div className="result-meta">
+          <span className="source"><i className="pd" style={{ backgroundColor: PLATFORM_COLORS[result.platform] }} />{groupedSources ? "跨平台聚合" : PLATFORM_LABELS[result.platform]}</span>
+          {result.author && <span>{result.author}</span>}
+          {result.published_at && <span>{formatTime(result.published_at)}</span>}
+          {(type || metrics.length > 0) && <span className="meta-divider" />}
+          {type && <span>{type}</span>}
+          {metrics.map(({ key, label }) => <span key={key}>{label} {formatCount(result.metrics[key] || 0)}</span>)}
+        </div>
+        {groupedSources && <>
+          <div className="result-group-summary"><span>{groupedSources.length} 个平台有同内容</span><button type="button" className="text-link" onClick={() => setGroupExpanded((value) => !value)}>{groupExpanded ? "收起平台版本" : "查看各平台版本"}<ChevronDown className={groupExpanded ? "rotate-180" : ""} /></button></div>
+          {groupExpanded && <div className="result-sources">{groupedSources.map((source) => <SourceLine key={`${source.platform}-${source.content_id}`} source={source} query={highlightQuery} />)}</div>}
+        </>}
+      </div>
+      {renderBookmark && <div className="row-actions">{renderBookmark(result)}</div>}
+    </article>
   );
-
-  if (groupedSources) {
-    return (
-      <div className="relative overflow-hidden rounded-[18px] border border-brand/35 border-l-[3px] bg-[linear-gradient(180deg,rgba(228,243,252,0.58)_0%,rgba(255,255,255,0.9)_48%,rgba(255,255,255,0.96)_100%)] shadow-[0_8px_26px_rgba(50,105,145,0.08)] hover:border-brand/55 hover:shadow-[0_12px_34px_rgba(50,105,145,0.13)] transition-all">
-        <div className="flex items-center justify-between gap-3 px-3 sm:px-3.5 pt-3">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/20 bg-brand-soft px-2.5 py-1 text-[10.5px] font-extrabold tracking-[0.01em] text-brand-strong">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand shadow-[0_0_0_3px_rgba(76,164,220,0.14)]" />
-            跨平台聚合
-          </span>
-          <div className="flex items-center gap-2"><span className="text-[11px] font-medium text-cyber-text-muted">
-            {groupedSources.length} 个平台同内容
-          </span>{renderBookmark?.(result)}</div>
-        </div>
-
-        <div className="grid grid-cols-[104px_minmax(0,1fr)] sm:grid-cols-[144px_minmax(0,1fr)_auto] gap-3 sm:gap-[18px] p-3 sm:p-3.5 pt-2.5">
-          <div className="relative w-[104px] h-[96px] sm:w-[144px] sm:h-[104px] rounded-[12px] overflow-hidden bg-cyber-bg-tertiary flex-shrink-0">
-            {!imgError && result.cover_url ? (
-              <img
-                src={result.cover_url}
-                alt={result.title}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-                onError={() => setImgError(true)}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <CoverPlaceholder platform={result.platform} />
-            )}
-          </div>
-
-          <div className="min-w-0 py-1">
-            <div className="flex items-center gap-2.5 mb-1.5">
-              <span className="text-[11.5px] font-bold text-brand-strong">多平台</span>
-              {groupedContentTypes && <span className="text-[11px] text-cyber-text-muted">{groupedContentTypes}</span>}
-            </div>
-            <h3 className="text-[15px] sm:text-[16.5px] font-semibold leading-[1.55] tracking-[-0.01em] text-cyber-text-primary line-clamp-2">
-              <Highlight text={result.title} query={highlightQuery} />
-            </h3>
-            <div className="flex items-center gap-2.5 mt-2 text-[12px] text-cyber-text-secondary">
-              {result.author && (
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="w-[18px] h-[18px] rounded-full grid place-items-center text-[9.5px] font-bold text-white flex-shrink-0 bg-brand">
-                    {result.author.trim().charAt(0)}
-                  </span>
-                  <span className="truncate">{result.author}</span>
-                </span>
-              )}
-              {result.published_at && <span className="flex-shrink-0">{formatTime(result.published_at)}</span>}
-            </div>
-            {result.snippet && (
-              <p className="mt-1 text-[12.5px] leading-[1.55] text-cyber-text-secondary line-clamp-3">
-                <Highlight text={result.snippet} query={highlightQuery} />
-              </p>
-            )}
-            {metrics.length > 0 && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11.5px] text-cyber-text-muted">
-                {metrics.map(({ key, icon: Icon, label }) => (
-                  <span key={key} className="flex items-center gap-1" title={label} aria-label={label}>
-                    <Icon className="w-3 h-3" />
-                    <span>{formatCount(result.metrics[key] || 0)}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            <MetricStatus result={result} />
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-white/60 p-2">
-              <span className="mr-1 text-[10.5px] font-semibold text-cyber-text-muted">来源</span>
-              {groupedSources.map((source) => (
-                <span
-                  key={`${source.platform}-${source.content_id}`}
-                  className="px-2 py-0.5 rounded-full text-[10.5px] font-semibold border"
-                  style={{
-                    color: PLATFORM_COLORS[source.platform] || "#4ca4dc",
-                    borderColor: `${PLATFORM_COLORS[source.platform] || "#4ca4dc"}55`,
-                    backgroundColor: `${PLATFORM_COLORS[source.platform] || "#4ca4dc"}0d`,
-                  }}
-                >
-                  {PLATFORM_LABELS[source.platform] || source.platform}
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center justify-between gap-3 mt-2">
-              <span className="text-[10.5px] text-cyber-text-muted">同一内容的不同平台版本</span>
-              <button
-                type="button"
-                aria-expanded={groupExpanded}
-                onClick={() => setGroupExpanded((expanded) => !expanded)}
-                className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] font-semibold text-brand-strong hover:bg-brand-soft"
-              >
-                {groupExpanded ? "收起平台版本" : "查看各平台版本"}
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${groupExpanded ? "rotate-180" : ""}`} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {groupExpanded && (
-          <div className="border-t border-brand/15 bg-white/55 px-3 sm:px-3.5 py-2">
-            {groupedSources.map((source) => {
-              const sourceUrl = safeUrl(source.url);
-              const sourceColor = PLATFORM_COLORS[source.platform] || "#4ca4dc";
-              const sourceType = CONTENT_TYPE_LABELS[source.content_type] || source.content_type || "";
-              const sourceRow = (
-                <div className="flex items-start gap-2.5 min-w-0 py-2.5">
-                  <span className="w-1.5 h-1.5 mt-2 rounded-full flex-shrink-0" style={{ backgroundColor: sourceColor }} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[11.5px] font-bold flex-shrink-0" style={{ color: sourceColor }}>
-                        {PLATFORM_LABELS[source.platform] || source.platform}
-                      </span>
-                      {sourceType && <span className="text-[10.5px] text-cyber-text-muted flex-shrink-0">{sourceType}</span>}
-                      <span className="text-[12px] text-cyber-text-primary truncate"><Highlight text={source.title} query={highlightQuery} /></span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 text-[11px] text-cyber-text-muted truncate">
-                      {source.author && <span className="truncate">{source.author}</span>}
-                      {source.published_at && <span className="flex-shrink-0">{formatTime(source.published_at)}</span>}
-                    </div>
-                    {source.snippet && (
-                      <p className="mt-1 text-[11.5px] leading-[1.5] text-cyber-text-secondary line-clamp-2"><Highlight text={source.snippet} query={highlightQuery} /></p>
-                    )}
-                    {metricSummary(source.metrics) && (
-                      <p className="mt-1 text-[10.5px] text-cyber-text-muted">{metricSummary(source.metrics)}</p>
-                    )}
-                  </div>
-                  <ArrowUpRight className="w-3.5 h-3.5 mt-1 flex-shrink-0 text-cyber-text-muted" />
-                </div>
-              );
-              return <div key={`${source.platform}-${source.content_id}`} className="flex items-center gap-2 border-b last:border-b-0 border-cyber-border-subtle">
-                {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="block min-w-0 flex-1 hover:bg-cyber-bg-tertiary/60">{sourceRow}</a>
-                  : <div className="min-w-0 flex-1">{sourceRow}</div>}
-                {renderBookmark?.({ ...source, grouped_sources: null })}
-              </div>;
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const inner = (
-    <div className="group grid grid-cols-[104px_minmax(0,1fr)] sm:grid-cols-[144px_minmax(0,1fr)_auto] gap-3 sm:gap-[18px] p-3 sm:p-3.5 rounded-[18px] border border-cyber-border-subtle bg-cyber-bg-secondary hover:border-cyber-border-default hover:shadow-[0_10px_30px_rgba(50,105,145,0.09)] hover:-translate-y-0.5 transition-all cursor-pointer">
-      {/* 封面：尺寸统一 */}
-      <div className="relative w-[104px] h-[96px] sm:w-[144px] sm:h-[104px] rounded-[12px] overflow-hidden bg-cyber-bg-tertiary flex-shrink-0">
-        {!imgError && result.cover_url ? (
-          <img
-            src={result.cover_url}
-            alt={result.title}
-            referrerPolicy="no-referrer"
-            loading="lazy"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <CoverPlaceholder platform={result.platform} />
-        )}
-      </div>
-
-      {/* 中间信息 */}
-      <div className="min-w-0 py-1">
-        <div className="flex items-center gap-2.5 mb-1.5 pr-8">
-          <span className="text-[11.5px] font-bold" style={{ color: platformColor }}>
-            {PLATFORM_LABELS[result.platform] || result.platform}
-          </span>
-          {contentType && <span className="text-[11px] text-cyber-text-muted">{contentType}</span>}
-          {result.collection_names?.slice(0, 2).map((name) => <span key={name}
-            className="max-w-36 truncate rounded-full border border-brand/25 bg-brand-soft px-2 py-0.5 text-[10px] text-brand-strong"
-            title={name}>{name}</span>)}
-        </div>
-        <h3 className="text-[15px] sm:text-[16.5px] font-semibold leading-[1.55] tracking-[-0.01em] text-cyber-text-primary line-clamp-2">
-          <Highlight text={result.title} query={highlightQuery} />
-        </h3>
-        <div className="flex items-center gap-2.5 mt-2 text-[12px] text-cyber-text-secondary">
-          {result.author && (
-            <span className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="w-[18px] h-[18px] rounded-full grid place-items-center text-[9.5px] font-bold text-white flex-shrink-0"
-                style={{ backgroundColor: platformColor }}
-              >
-                {result.author.trim().charAt(0)}
-              </span>
-              <span className="truncate">{result.author}</span>
-            </span>
-          )}
-          {result.published_at && <span className="flex-shrink-0">{formatTime(result.published_at)}</span>}
-        </div>
-        {result.snippet && (
-          <p className="mt-1 text-[12.5px] leading-[1.55] text-cyber-text-secondary line-clamp-3">
-            <Highlight text={result.snippet} query={highlightQuery} />
-          </p>
-        )}
-        {metrics.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11.5px] text-cyber-text-muted">
-            {metrics.map(({ key, icon: Icon, label }) => (
-              <span key={key} className="flex items-center gap-1" title={label} aria-label={label}>
-                <Icon className="w-3 h-3" />
-                <span>{formatCount(result.metrics[key] || 0)}</span>
-              </span>
-            ))}
-          </div>
-        )}
-        <MetricStatus result={result} />
-      </div>
-
-      {/* 右侧跳转图标 */}
-      <span className="hidden sm:grid place-items-center self-center w-[32px] h-[32px] rounded-full border border-cyber-border-subtle text-cyber-text-secondary group-hover:text-brand-strong group-hover:border-brand group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all">
-        <ArrowUpRight className="w-4 h-4" />
-      </span>
-    </div>
-  );
-
-  return <div className="relative">
-    {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="block">{inner}</a> : inner}
-    {renderBookmark && <div className="absolute right-3 top-3">{renderBookmark(result)}</div>}
-  </div>;
 }

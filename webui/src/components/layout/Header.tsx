@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Search, UserCog, HelpCircle, Wifi, WifiOff, ChevronRight, Bookmark } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
-import { LanguageSwitch } from './LanguageSwitch'
 import { useAccounts } from '@/hooks/useAccounts'
 import type { AccountStatusInfo, LoginBadge } from '@/lib/accounts'
 import {
@@ -20,49 +19,16 @@ import {
   type AccountTone,
 } from '@/lib/accounts'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '@/types/search'
-import { environmentHealthWarning, type EnvironmentHealth } from '@/lib/environmentHealth'
 
-export type ViewMode = 'search' | 'favorites' | 'accounts'
+export type ViewMode = 'search' | 'favorites' | 'accounts' | 'help'
+export type SettingsSection = 'search' | 'accounts' | 'appearance'
 
 interface HeaderProps {
   viewMode: ViewMode
-  onNavigate: (mode: ViewMode) => void
-  onShowDisclaimer: () => void
-}
-
-/** 平台字母标记（效果稿：红 / 抖 / 哔 / 知）。 */
-const PLATFORM_LETTERS: Record<string, string> = {
-  xhs: '红',
-  douyin: '抖',
-  bilibili: '哔',
-  zhihu: '知',
+  onNavigate: (mode: ViewMode, section?: SettingsSection) => void
 }
 
 const PLATFORM_ORDER = ['xhs', 'douyin', 'bilibili', 'zhihu'] as const
-
-/** 轻量本地 API 健康探测（每 15s 一次）。 */
-function useApiHealth(): EnvironmentHealth | false | null {
-  const [health, setHealth] = useState<EnvironmentHealth | false | null>(null)
-  useEffect(() => {
-    let alive = true
-    const check = () => {
-      fetch('/api/health')
-        .then((r) => {
-          if (!r.ok) throw new Error('health request failed')
-          return r.json()
-        })
-        .then((d) => alive && setHealth(d as EnvironmentHealth))
-        .catch(() => alive && setHealth(false))
-    }
-    check()
-    const id = setInterval(check, 15000)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
-  }, [])
-  return health
-}
 
 const TONE_DOT: Record<AccountTone, string> = {
   ok: 'bg-[#4f9e79]',
@@ -121,8 +87,7 @@ function AccountPopover({
             if (!acc) {
               return (
                 <div key={p} className="flex items-center gap-2.5 py-[7px] text-[12px] text-cyber-text-muted">
-                  <span className="w-[18px] h-[18px] rounded-[5px] grid place-items-center text-[10px] font-bold text-white" style={{ backgroundColor: color }}>
-                    {PLATFORM_LETTERS[p]}
+                  <span className="w-[7px] h-[7px] rounded-full flex-shrink-0" style={{ backgroundColor: color }} aria-hidden="true">
                   </span>
                   <span>{name}</span>
                   <span className="ml-auto text-[11px]">{t('header.accountEmpty')}</span>
@@ -131,8 +96,7 @@ function AccountPopover({
             }
             return (
               <div key={p} className="flex items-center gap-2.5 py-[7px] text-[12px] text-cyber-text-secondary">
-                <span className="w-[18px] h-[18px] rounded-[5px] grid place-items-center text-[10px] font-bold text-white" style={{ backgroundColor: color }}>
-                  {PLATFORM_LETTERS[p]}
+                <span className="w-[7px] h-[7px] rounded-full flex-shrink-0" style={{ backgroundColor: color }} aria-hidden="true">
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -165,11 +129,8 @@ function AccountPopover({
   )
 }
 
-export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) {
+export function Header({ viewMode, onNavigate }: HeaderProps) {
   const { t } = useTranslation()
-  const apiHealth = useApiHealth()
-  const apiOk = apiHealth === false ? false : apiHealth === null ? null : apiHealth.status === 'ok'
-  const healthWarning = environmentHealthWarning(apiHealth)
   const { accounts, loading, initialLoaded, error } = useAccounts()
   const [accountOpen, setAccountOpen] = useState(false)
   const accountRef = useRef<HTMLDivElement>(null)
@@ -236,63 +197,51 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
     return () => document.removeEventListener('mousedown', onClick)
   }, [accountOpen])
 
-  const navItems: { key: ViewMode; label: string; icon: typeof Search }[] = [
-    { key: 'search', label: t('nav.search'), icon: Search },
-    { key: 'favorites', label: t('nav.favorites'), icon: Bookmark },
-    { key: 'accounts', label: t('nav.accounts'), icon: UserCog },
+  const navItems: { key: ViewMode; label: string; section?: SettingsSection }[] = [
+    { key: 'search', label: '首页' },
+    { key: 'favorites', label: '收藏' },
+    { key: 'accounts', label: '设置', section: 'search' },
   ]
 
   return (
-    <header className="sticky top-0 z-20 border-b border-cyber-border-subtle bg-cyber-bg-primary/85 backdrop-blur-md">
-      <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 h-[64px] flex items-center gap-6 flex-wrap">
-        {/* 品牌 */}
-        <div className="flex items-center gap-2.5 min-w-max select-none">
-          <span className="w-[34px] h-[34px] rounded-[11px] rounded-bl-[4px] bg-brand text-white grid place-items-center text-[16px] font-bold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]">
-            四
-          </span>
-          <strong className="text-[19px] font-bold tracking-[0.08em] text-cyber-text-primary">{t('brand.name')}</strong>
-        </div>
+    <header className="app-header site-header bg-cyber-bg-primary">
+      <div className="header-inner">
+        {/* 字标：保持纯文字，品牌色只出现在交互状态 */}
+        <button type="button" className="brand-link" onClick={() => onNavigate('search')} aria-label="四野主页">
+          <strong className="brand-name">{t('brand.name')}</strong>
+          <span className="brand-caption">聚合搜索</span>
+        </button>
 
         {/* 导航 */}
-        <nav className="flex items-center gap-1">
-          {navItems.map(({ key, label, icon: Icon }) => (
+        <nav className="nav" aria-label="主导航">
+          {navItems.map(({ key, label, section }) => (
             <button
               key={key}
               type="button"
-              onClick={() => onNavigate(key)}
-              className={`flex items-center gap-1.5 rounded-[9px] px-3.5 py-2 text-[13.5px] transition-colors ${
+              onClick={() => onNavigate(key, section)}
+              className={`${
                 viewMode === key
-                  ? 'bg-brand-soft text-brand-strong font-semibold'
-                  : 'text-cyber-text-secondary hover:text-cyber-text-primary'
+                  ? 'active'
+                  : ''
               }`}
             >
-              <Icon className="w-[15px] h-[15px]" />
               {label}
             </button>
           ))}
         </nav>
 
         {/* 右侧：本地服务 / 登录状态 / 主题 / 语言 / 帮助 */}
-        <div className="ml-auto flex items-center gap-2.5">
-          <span className={`hidden lg:flex items-center gap-2 text-[12.5px] ${apiOk === false ? 'text-warn' : 'text-cyber-text-secondary'}`}>
-            {apiOk === false ? (
-              <WifiOff className="w-3.5 h-3.5" />
-            ) : (
-              <Wifi className="w-3.5 h-3.5" />
-            )}
-            {apiOk === false ? t('header.localDown') : t('header.localOk')}
-            <i className={`w-2 h-2 rounded-full ${apiOk === false ? 'bg-warn' : 'bg-[#50a67e]'}`} />
-          </span>
-
-          <div className="relative" ref={accountRef}>
+        <div className="nav header-actions">
+          <span className="nav-separator" aria-hidden="true" />
+          <div className="relative account-link" ref={accountRef}>
             <button
               type="button"
               onClick={() => setAccountOpen((v) => !v)}
               title={badge.kind === 'summary' && badge.stale ? t('header.staleHint') : undefined}
-              className={`h-[38px] flex items-center gap-2 rounded-[11px] border px-3 text-[12.5px] transition-colors ${
+              className={`account-status-link ${
                 accountOpen
-                  ? 'border-brand bg-brand-soft text-brand-strong'
-                  : 'border-cyber-border-subtle bg-cyber-bg-secondary text-cyber-text-secondary hover:border-brand/50'
+                  ? 'text-brand-strong bg-brand-soft'
+                  : 'text-cyber-text-muted hover:text-brand-strong'
               } ${badge.kind === 'summary' && badge.stale ? 'opacity-70' : ''}`}
             >
               <i className={`w-2 h-2 rounded-full ${badgeDot}`} />
@@ -302,28 +251,21 @@ export function Header({ viewMode, onNavigate, onShowDisclaimer }: HeaderProps) 
             {accountOpen && (
               <AccountPopover
                 accounts={accounts}
-                onGoAccounts={() => { setAccountOpen(false); onNavigate('accounts'); }}
+                onGoAccounts={() => { setAccountOpen(false); onNavigate('accounts', 'accounts'); }}
               />
             )}
           </div>
 
-          <ThemeToggle />
-          <LanguageSwitch />
-
-          <button
+          {viewMode === 'search' && <button
             type="button"
-            onClick={onShowDisclaimer}
-            title={t('header.helpTitle')}
-            className="w-[38px] h-[38px] grid place-items-center rounded-[11px] border border-cyber-border-subtle bg-cyber-bg-secondary text-cyber-text-secondary hover:border-brand/50 hover:text-brand-strong transition-colors"
+            onClick={() => onNavigate('accounts', 'appearance')}
+            className="customize-link"
           >
-            <HelpCircle className="w-[17px] h-[17px]" />
-          </button>
+            自定义
+          </button>}
+
+          <ThemeToggle />
         </div>
-        {healthWarning && (
-          <div role="status" className="order-last basis-full rounded-[10px] border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-            {healthWarning}
-          </div>
-        )}
       </div>
     </header>
   )

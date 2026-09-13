@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>效果图 5 · 新布局 × Material You</title>
+<style>
+/* ============================================================
+   效果图 5：同布局 × Material You（M3）
+   配色仍是官方库从 #4ca4dc 真实生成的那两套（浅色/深色）。
+   这个布局在 M3 里的对应关系：
+     大搜索框 → M3 搜索栏（全圆角 + 表面容器色，没有边框）
+     搜索按钮 → 实心药丸按钮（primary）
+     30 个小标签 → M3 筛选芯片（描边 + 8px 圆角）
+     两列卡片 → 表面容器（surfaceContainerLow）+ 极轻投影
+     右下浮动 → M3 大号浮动按钮（primaryContainer）
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --primary:#006492; --on-primary:#fff; --primary-container:#4ca4dc; --on-primary-container:#003753;
+  --secondary-container:#c5e3fd; --on-secondary-container:#49667c;
+  --error:#ba1a1a; --error-container:#ffdad6; --on-error-container:#93000a;
+  --surface:#f7f9fe; --on-surface:#181c20;
+  --on-surface-variant:#3f484f;
+  --sc-low:#f1f4f9; --sc:#ebeef3; --sc-high:#e5e8ed;
+  --outline:#707880; --outline-variant:#bfc7d0;
+  --ok:#2e6b4f; --warn:#8a5a1e;
+  --e1:0 1px 2px rgba(0,0,0,.30), 0 1px 3px 1px rgba(0,0,0,.15);
+  --e2:0 1px 2px rgba(0,0,0,.30), 0 2px 6px 2px rgba(0,0,0,.15);
+  --e3:0 1px 3px rgba(0,0,0,.30), 0 4px 8px 3px rgba(0,0,0,.15);
+}
+html.dark{
+  --primary:#8bceff; --on-primary:#00344e; --primary-container:#4ca4dc; --on-primary-container:#003753;
+  --secondary-container:#2d4a5f; --on-secondary-container:#9bb9d1;
+  --error:#ffb4ab; --error-container:#93000a; --on-error-container:#ffdad6;
+  --surface:#101417; --on-surface:#e0e3e7;
+  --on-surface-variant:#bfc7d0;
+  --sc-low:#181c20; --sc:#1c2024; --sc-high:#262a2e;
+  --outline:#89929a; --outline-variant:#3f484f;
+  --ok:#8fd6b0; --warn:#f0bd7a;
+  --e1:0 1px 2px rgba(0,0,0,.50), 0 1px 3px 1px rgba(0,0,0,.30);
+  --e2:0 1px 2px rgba(0,0,0,.50), 0 2px 6px 2px rgba(0,0,0,.30);
+  --e3:0 1px 3px rgba(0,0,0,.50), 0 4px 8px 3px rgba(0,0,0,.30);
+}
+html,body{margin:0;padding:0}
+body{font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--on-surface);background:var(--surface);min-height:100vh;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+
+/* ── 顶栏：M3 表面容器，不用玻璃 ── */
+header{position:sticky;top:0;z-index:40;background:var(--sc);box-shadow:var(--e1)}
+.hd{display:flex;align-items:center;gap:12px;height:56px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px}
+.logo i{width:28px;height:28px;border-radius:9px;background:var(--primary-container);
+  color:var(--on-primary-container);display:grid;place-items:center;font-style:normal;font-weight:800}
+.hd .sp{flex:1}
+.tbtn{font-size:12.5px;padding:7px 14px;border-radius:999px;border:1px solid var(--outline-variant);
+  background:transparent;color:var(--on-surface-variant);cursor:pointer;font-family:inherit;font-weight:500}
+.tbtn:hover{background:rgba(0,0,0,.05)}
+.tbtn.on{background:var(--secondary-container);color:var(--on-secondary-container);
+  border-color:transparent;font-weight:700}
+.seg{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--on-surface-variant)}
+.user{font-size:12.5px;padding:6px 14px;border-radius:999px;background:var(--secondary-container);
+  color:var(--on-secondary-container);font-weight:700}
+
+/* ── 大标题 ── */
+.hero{text-align:center;padding:44px 0 6px}
+.hero .mark{width:78px;height:78px;border-radius:24px;margin:0 auto 16px;display:grid;place-items:center;
+  font-size:36px;font-weight:800;background:var(--primary-container);color:var(--on-primary-container);
+  box-shadow:var(--e2)}
+.hero h1{margin:0;font-size:38px;letter-spacing:.5px;color:var(--primary);font-weight:700}
+html.dark .hero h1{color:var(--primary)}
+.hero p{margin:8px 0 0;color:var(--on-surface-variant);font-size:13.5px}
+
+/* ── 平台行：M3 芯片 ── */
+.plats{display:flex;justify-content:center;gap:10px;margin:20px 0 18px;flex-wrap:wrap}
+.pf{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--on-surface-variant);
+  border:1px solid var(--outline-variant);border-radius:8px;padding:6px 13px;font-weight:500;cursor:pointer}
+.pf:hover{border-color:var(--primary);color:var(--primary)}
+.pf i{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;color:#fff;
+  font-style:normal;font-size:10px;font-weight:700}
+
+/* ── M3 搜索栏：全圆角、表面容器色、无边框 ── */
+.searchbox{max-width:680px;margin:0 auto;display:flex;gap:8px;align-items:center;
+  padding:8px 8px 8px 20px;border-radius:28px;background:var(--sc-high);box-shadow:var(--e1)}
+.searchbox input{flex:1;border:none;background:transparent;font:inherit;font-size:14.5px;
+  padding:10px 0;color:var(--on-surface)}
+.searchbox input::placeholder{color:var(--on-surface-variant)}
+.searchbox input:focus{outline:none}
+.gobtn{cursor:pointer;font:inherit;font-weight:700;font-size:14px;padding:12px 30px;border-radius:999px;
+  border:none;background:var(--primary);color:var(--on-primary);box-shadow:var(--e1)}
+.gobtn:hover{box-shadow:var(--e2)}
+.hint{max-width:680px;margin:10px auto 0;font-size:11.5px;color:var(--on-surface-variant);text-align:center}
+
+/* ── 卡片：表面容器低 + 16px 圆角 ── */
+.grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;margin-top:22px}
+.card{border-radius:16px;padding:18px 20px;background:var(--sc-low);box-shadow:var(--e1)}
+.card h2{margin:0 0 14px;font-size:14.5px;font-weight:700;display:flex;align-items:center;gap:8px}
+.card h2 .ic{width:20px;height:20px;border-radius:7px;display:grid;place-items:center;font-size:11px;
+  background:var(--secondary-container);color:var(--on-secondary-container)}
+
+/* ── 标签：M3 筛选芯片 ── */
+.tags{display:flex;flex-wrap:wrap;gap:8px}
+.tag{font-size:12.5px;padding:6px 12px;border-radius:8px;cursor:pointer;font-weight:500;
+  border:1px solid var(--outline-variant);color:var(--on-surface-variant);background:transparent}
+.tag:hover{background:rgba(0,0,0,.05);border-color:var(--primary);color:var(--primary)}
+.tag.hot{background:var(--error-container);border-color:transparent;color:var(--on-error-container);font-weight:700}
+
+/* ── 列表行 ── */
+.list{margin:0;padding:0;list-style:none}
+.list li{display:flex;align-items:center;gap:12px;padding:11px 2px;
+  border-bottom:1px solid var(--outline-variant)}
+.list li:last-child{border-bottom:none}
+.num{width:20px;flex:0 0 auto;text-align:center;font-size:12px;color:var(--on-surface-variant);
+  font-variant-numeric:tabular-nums}
+.list li:nth-child(-n+3) .num{color:var(--primary);font-weight:800}
+.title{flex:1;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.title em{font-style:normal;font-size:11px;padding:2px 8px;border-radius:8px;margin-left:7px;font-weight:600;
+  background:var(--secondary-container);color:var(--on-secondary-container)}
+.title em.q{background:#ffe0da;color:#8a2b1c}
+.title em.d{background:#e3e3e3;color:#333}
+.title em.b{background:#fbdceb;color:#8a3f61}
+.title em.z{background:#dbe7ff;color:#14448f}
+html.dark .title em.q{background:#5a2318;color:#ffd9d1}
+html.dark .title em.d{background:#3a3a3a;color:#e8e8e8}
+html.dark .title em.b{background:#4d2438;color:#ffd3e6}
+html.dark .title em.z{background:#1b2f52;color:#cfe0ff}
+.cnt,.size{flex:0 0 auto;font-size:11.5px;color:var(--on-surface-variant);font-variant-numeric:tabular-nums}
+
+/* ── M3 大号浮动按钮 ── */
+.fab{position:fixed;right:26px;bottom:26px;z-index:30;display:flex;align-items:center;gap:10px;
+  padding:16px 24px;border-radius:16px;font-size:13.5px;font-weight:700;cursor:pointer;
+  background:var(--primary-container);color:var(--on-primary-container);box-shadow:var(--e3)}
+footer{text-align:center;color:var(--on-surface-variant);font-size:11.5px;padding:30px 0 40px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+
+<header><div class="wrap hd">
+  <span class="logo"><i>四</i>四野</span>
+  <span class="sp"></span>
+  <button class="tbtn">提交反馈</button>
+  <span class="seg">亮色 <button class="tbtn" id="th" onclick="tg()">暗色</button></span>
+  <span class="user">登录状态 3/4</span>
+</div></header>
+
+<main class="wrap">
+  <div class="hero">
+    <div class="mark">四</div>
+    <h1>四野</h1>
+    <p>聚合小红书 · 抖音 · B站 · 知乎，一搜即达</p>
+  </div>
+
+  <div class="plats">
+    <span class="pf"><i style="background:#e2503f">红</i>小红书</span>
+    <span class="pf"><i style="background:#2b2b2b">抖</i>抖音</span>
+    <span class="pf"><i style="background:#e07ba6">哔</i>B站</span>
+    <span class="pf"><i style="background:#1772f6">知</i>知乎</span>
+  </div>
+
+  <div class="searchbox">
+    <input type="text" placeholder="输入关键词，同时搜索四个平台的内容…" value="露营装备推荐">
+    <button class="gobtn">搜索</button>
+  </div>
+  <div class="hint">Enter 搜索 · 每个平台最多 10 条 · 结果自动去重合并</div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2><span class="ic">🔥</span>热门搜索</h2>
+      <div class="tags">
+        <span class="tag hot">露营装备</span><span class="tag">考研</span><span class="tag">减脂餐</span>
+        <span class="tag">国考</span><span class="tag">英语四级</span><span class="tag">装修</span>
+        <span class="tag">简历模板</span><span class="tag hot">Python</span><span class="tag">剪辑教程</span>
+        <span class="tag">手机摄影</span><span class="tag">副业</span><span class="tag">理财入门</span>
+        <span class="tag">健身计划</span><span class="tag">小说推荐</span><span class="tag">美妆</span>
+        <span class="tag">育儿</span><span class="tag">考研数学</span><span class="tag">雅思</span>
+        <span class="tag">面试技巧</span><span class="tag">旅行攻略</span><span class="tag">手冲咖啡</span>
+        <span class="tag">数码测评</span><span class="tag">二手车</span><span class="tag">职场沟通</span>
+        <span class="tag">PPT 模板</span><span class="tag">Excel</span><span class="tag hot">英语口语</span>
+        <span class="tag">吉他入门</span><span class="tag">养猫</span><span class="tag">空气炸锅</span>
+        <span class="tag">考研英语</span><span class="tag">申论</span><span class="tag">消防工程师</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="ic">🕐</span>历史搜索</h2>
+      <div class="tags">
+        <span class="tag">露营装备推荐</span><span class="tag">减脂餐食谱</span>
+        <span class="tag">无职转生</span><span class="tag">灵笼</span>
+        <span class="tag">我独自升级</span><span class="tag">空气炸锅 食谱</span>
+        <span class="tag">露营 天幕</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2><span class="ic">🔥</span>热门资源</h2>
+      <ul class="list">
+        <li><span class="num">1</span><span class="title">新手露营装备清单｜人均 800 元搞定全套<em class="q">小红书</em></span><span class="cnt">👁 2.3万</span></li>
+        <li><span class="num">2</span><span class="title">露营装备怎么选？3 分钟讲清帐篷天幕睡垫<em class="d">抖音</em></span><span class="cnt">👁 1.9万</span></li>
+        <li><span class="num">3</span><span class="title">第一次露营需要准备哪些装备？<em class="z">知乎</em></span><span class="cnt">👁 1.6万</span></li>
+        <li><span class="num">4</span><span class="title">露营桌怎么挑？蛋卷桌 vs 折叠桌实测<em class="q">小红书</em></span><span class="cnt">👁 9620</span></li>
+        <li><span class="num">5</span><span class="title">露营第一次就翻车？这 8 个坑我替你踩了<em class="b">B站</em></span><span class="cnt">👁 5216</span></li>
+        <li><span class="num">6</span><span class="title">2026 露营装备避坑指南（附价格区间）<em class="z">知乎</em></span><span class="cnt">👁 4188</span></li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="ic">🕐</span>最新结果</h2>
+      <ul class="list">
+        <li><span class="num">1</span><span class="title">露营天幕怎么搭才不塌<em class="q">小红书</em></span><span class="size">3 分钟前</span></li>
+        <li><span class="num">2</span><span class="title">轻量化露营装备清单 2026<em class="d">抖音</em></span><span class="size">12 分钟前</span></li>
+        <li><span class="num">3</span><span class="title">露营睡垫 R 值到底怎么看<em class="z">知乎</em></span><span class="size">28 分钟前</span></li>
+        <li><span class="num">4</span><span class="title">一个人露营要带什么｜独行版<em class="b">B站</em></span><span class="size">1 小时前</span></li>
+        <li><span class="num">5</span><span class="title">露营灯怎么选？亮度与续航实测<em class="q">小红书</em></span><span class="size">2 小时前</span></li>
+        <li><span class="num">6</span><span class="title">露营炊具入门：一套够用的配置<em class="d">抖音</em></span><span class="size">3 小时前</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>预览稿 · 仅用于对比三种外观 · 不是最终代码</footer>
+</main>
+
+<div class="fab">↑ 回到顶部</div>
+
+<script>
+function tg(){
+  const d = document.documentElement.classList.toggle('dark');
+  document.getElementById('th').textContent = d ? '亮色' : '暗色';
+}
+</script>
+</body>
+</html>

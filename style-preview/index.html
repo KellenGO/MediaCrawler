@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三种 UI 风格 · 效果图对比</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;min-height:100vh;font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:#172b3d;background:#fbfdff;
+  background-image:radial-gradient(60vw 50vh at 10% -10%, rgba(76,164,220,.18), transparent 60%),
+                   radial-gradient(50vw 40vh at 95% 5%, rgba(106,132,179,.14), transparent 60%);}
+.wrap{max-width:900px;margin:0 auto;padding:56px 22px 70px}
+h1{font-size:26px;margin:0 0 8px}
+.sub{color:#6c8193;font-size:13.5px;margin:0 0 32px}
+.grid{display:grid;gap:16px}
+a.card{display:block;text-decoration:none;color:inherit;background:rgba(255,255,255,.72);
+  border:1px solid #dce8f1;border-radius:16px;padding:20px 22px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 10px 30px rgba(50,105,145,.08);
+  backdrop-filter:blur(14px) saturate(150%);transition:transform .15s ease, box-shadow .15s ease}
+a.card:hover{transform:translateY(-2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 18px 44px rgba(50,105,145,.14)}
+a.card h2{margin:0 0 6px;font-size:18px}
+a.card p{margin:0;color:#6c8193;font-size:13px}
+.badge{display:inline-block;font-size:11.5px;border-radius:999px;padding:2px 10px;margin-left:8px;
+  background:rgba(76,164,220,.15);color:#297eba;vertical-align:2px}
+.tip{margin-top:28px;font-size:12.5px;color:#6c8193;background:rgba(255,255,255,.66);
+  border:1px dashed #c5d7e5;border-radius:12px;padding:14px 16px}
+.tip b{color:#172b3d}
+code{background:rgba(76,164,220,.13);padding:1px 6px;border-radius:6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>三种 UI 风格 · 效果图</h1>
+  <p class="sub">点开任意一张即可。都是单文件、离线可用，右上角能切深色/浅色。</p>
+
+  <h2 style="font-size:18px;margin:36px 0 6px">先看这张（照着 Startpage 学的极简版）</h2>
+  <p class="sub" style="margin-bottom:18px">两种模式，右上角「自定义」随时切：<b>极简</b>只剩字标 + 搜索框；<b>实用</b>下方加卡片区，排列学 UP云搜（左宽右窄两列），外观是 Startpage 那套洁白细线。四个板块可逐个勾选，选择记在浏览器里。参考站实测：品牌色 #6573FF、正文 #202945、搜索框 1px 描边 25px 全圆角无阴影、字体 Inter。</p>
+  <div class="grid">
+    <a class="card" href="8-startpage.html">
+      <h2>8 · 学 Startpage（推荐先看）<span class="badge">极简 / 实用 可切换</span></h2>
+      <p>默认实用模式（四张卡片）；右上角「自定义」可切极简、也可逐个关掉板块。深浅色都有。</p>
+    </a>
+    <a class="card" href="7-polished.html">
+      <h2>7 · 紫色精致版（上一轮重做）</h2>
+      <p>同样的克制思路，但保留卡片与缩略图，紫色系。</p>
+    </a>
+  </div>
+
+  <div class="grid">
+    <a class="card" href="1-frosted-glass.html">
+      <h2>1 · 毛玻璃强化 <span class="badge">改动最小</span></h2>
+      <p>在你现在的浅蓝体系上改：玻璃更透、加颜色饱和度、加顶部高光、背景加淡蓝光斑。约 20 行 CSS。</p>
+    </a>
+    <a class="card" href="2-material-you.html">
+      <h2>2 · Material You（安卓 M3 风格）<span class="badge">配色是算出来的</span></h2>
+      <p>配色用谷歌官方库从你的品牌色 #4ca4dc 真实生成。没有玻璃和模糊，靠大圆角、药丸按钮、色调分层来区分层级。</p>
+    </a>
+    <a class="card" href="3-liquid-glass.html">
+      <h2>3 · 液态玻璃（会折射的玻璃）<span class="badge">请用 Edge / Chrome 打开</span></h2>
+      <p>做了真折射：玻璃边缘会把背后的颜色"折"弯。只用在小的圆按钮和药丸上。Firefox 下会自动降级成普通毛玻璃。</p>
+    </a>
+  </div>
+
+  <h2 style="font-size:18px;margin:40px 0 6px">第二组 · 换成「UP云搜」那种首页布局</h2>
+  <p class="sub" style="margin-bottom:18px">布局完全一样：顶部工具条 / 居中大标题 / 平台行 / 大搜索框 / 热门搜索+历史搜索 / 热门资源+最新入库 / 右下浮动按钮。内容换成了你自己的产品。三种外观各一份。</p>
+  <div class="grid">
+    <a class="card" href="4-frosted-glass-home.html">
+      <h2>4 · 新布局 × 毛玻璃强化</h2>
+      <p>同样的机器蓝 + 玻璃，套在新布局上。</p>
+    </a>
+    <a class="card" href="5-material-you-home.html">
+      <h2>5 · 新布局 × Material You</h2>
+      <p>大搜索框变成 M3 全圆角搜索栏，30 个小标签变成 M3 芯片，右下按钮变成大号浮动按钮。</p>
+    </a>
+    <a class="card" href="6-liquid-glass-home.html">
+      <h2>6 · 新布局 × 液态玻璃 <span class="badge">请用 Edge / Chrome 打开</span></h2>
+      <p>折射只放在小元素上：4 个平台芯片、搜索按钮、右下浮动按钮。其余是普通毛玻璃。</p>
+    </a>
+  </div>
+
+  <div class="tip">
+    <b>看的时候注意三件事：</b><br>
+    ① 三张图的<b>内容完全一样</b>，只有外观不同，方便直接对比。<br>
+    ② 只有第 3 张需要 Edge/Chrome；用 Firefox 打开会看到一句提示并自动降级（这是故意的，因为 Firefox 支持不了那个效果）。<br>
+    ③ 结果卡片在三张图里都<b>没有用真模糊</b>——几十上百张卡一起模糊会卡，这是刻意的取舍。<br><br>
+    看完直接告诉我喜欢哪个（或者说"都不喜欢"也行），我再拿大白话问你几个问题。
+  </div>
+</div>
+</body>
+</html>

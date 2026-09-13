@@ -3,6 +3,7 @@ import { Github, ShieldCheck } from 'lucide-react'
 
 interface AuthorFooterProps {
   onShowDisclaimer?: () => void
+  onNavigateHelp?: () => void
 }
 
 /** 原项目 GitHub（NanmiCoder/MediaCrawler）。 */
@@ -16,7 +17,7 @@ const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/MediaCrawler'
  * （KellenGong 维护/改造），"KellenGong" 与"当前项目 GitHub"都链接到
  * 当前项目仓库。原项目作者署名保留，不模糊、不误写成官方版本。
  */
-export function AuthorFooter({ onShowDisclaimer }: AuthorFooterProps) {
+export function AuthorFooter({ onShowDisclaimer, onNavigateHelp }: AuthorFooterProps) {
   const { t } = useTranslation()
 
   return (
@@ -34,6 +35,7 @@ export function AuthorFooter({ onShowDisclaimer }: AuthorFooterProps) {
           </a>
         </span>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <button type="button" onClick={onNavigateHelp} className="hover:text-brand-strong transition-colors">使用帮助</button>
           <span className="hidden sm:inline">{t('footer.localFirst')}</span>
           <a
             href={ORIGINAL_PROJECT_URL}

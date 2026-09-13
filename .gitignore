@@ -136,8 +136,10 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# mkdocs documentation（上游文档站已移除）
+# 注意：site/ 现在是推广落地页（手写静态文件 + 截图资源），必须被 git 跟踪，
+# 否则 GitHub Pages 工作流拿不到内容，所以这里不再忽略整个目录。
+# 如果以后重新引入 mkdocs，请改用 mkdocs.yml 的 site_dir 指向别的目录。
 
 # mypy
 .mypy_cache/

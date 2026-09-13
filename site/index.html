@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四野 · 一次搜索，看遍小红书 / 抖音 / B站 / 知乎</title>
+<meta name="description" content="四野把小红书、抖音、B站、知乎的搜索结果合并到一个页面：四平台并行搜索、统一排序、跨平台去重，支持筛选、收藏与导出。本机运行，数据不出电脑。Windows 免安装下载。">
+<meta name="keywords" content="四野,聚合搜索,跨平台搜索,小红书搜索,抖音搜索,B站搜索,知乎搜索,中文内容搜索,MediaCrawler">
+<meta name="author" content="KellenGO">
+<meta name="theme-color" content="#6573ff">
+<link rel="canonical" href="https://kellengo.github.io/MediaCrawler/">
+
+<!-- 社交分享卡片。有真实截图后替换 site/og.png 即可（见 site/README.md）。 -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="四野">
+<meta property="og:title" content="四野 · 一次搜索，看遍小红书 / 抖音 / B站 / 知乎">
+<meta property="og:description" content="从不同的地方，找到你的答案。四平台并行搜索，一个结果页统一排序、去重、筛选、收藏与导出。本机运行，数据不出电脑。">
+<meta property="og:url" content="https://kellengo.github.io/MediaCrawler/">
+<meta property="og:image" content="https://kellengo.github.io/MediaCrawler/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="四野：一次搜索，看遍小红书、抖音、B站、知乎">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="四野 · 一次搜索，看遍四个平台">
+<meta name="twitter:description" content="从不同的地方，找到你的答案。四平台并行搜索，一个结果页统一排序、去重、筛选、收藏与导出。">
+<meta name="twitter:image" content="https://kellengo.github.io/MediaCrawler/og.png">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop stop-color='%236677fb'/%3E%3Cstop offset='1' stop-color='%2329ddcc'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='%23eef0ff'/%3E%3Crect x='13' y='28' width='38' height='9' rx='4.5' fill='url(%23g)'/%3E%3C/svg%3E">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "四野",
+  "alternateName": "MediaCrawler 聚合搜索",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "Windows 10/11 (x64)",
+  "description": "跨平台中文社交内容聚合搜索：一次搜索小红书、抖音、B站、知乎，统一排序、跨平台去重、筛选、收藏与导出，全部在本机运行。",
+  "url": "https://kellengo.github.io/MediaCrawler/",
+  "downloadUrl": "https://github.com/KellenGO/MediaCrawler/releases/latest",
+  "codeRepository": "https://github.com/KellenGO/MediaCrawler",
+  "license": "https://github.com/KellenGO/MediaCrawler/blob/master/LICENSE",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+}
+</script>
+
+<!-- 主题在首帧之前定好，避免深色模式用户看到一闪的白屏 -->
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem('siye-landing-theme');
+    var dark = saved === 'dark' || (saved !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (dark) document.documentElement.classList.add('dark');
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) {}
+})();
+</script>
+
+<style>
+/* ============================================================
+   四野 · 推广落地页
+   视觉对齐当前 App（webui/src/index.css 的新版设计系统 +
+   style-preview/9-full-preview.html）：
+   纯白底 / 发丝细线 / 单一靛蓝强调色 / 无毛玻璃 / 无光晕。
+   品牌色 #6573ff，字标「四野」下方一条 #6677fb → #29ddcc 渐变条。
+   单文件、零外部请求、可离线打开。
+   ============================================================ */
+
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  color-scheme:light;
+
+  --bg:#ffffff;
+  --surface:#ffffff;
+  --soft:#f8f9fc;
+
+  --ink:#202945;
+  --secondary:#5b6478;
+  --muted:#7f869e;
+
+  --line:#e8eaf1;         /* 发丝线（border-subtle） */
+  --line-strong:#d9dce8;  /* 常规描边（border-default） */
+
+  --brand:#6573ff;
+  --brand-2:#4f5bd2;
+  --brand-soft:#eef0ff;
+  --brand-ink:#4f5bd2;
+
+  --ok:#12a67a;   --ok-soft:#e7f9f3;
+  --warn:#9d6728; --warn-soft:#fcf4e5;
+  --danger:#bf4958; --danger-soft:#fdf0f0;
+
+  --xhs:#ed5374;
+  --douyin:#505872;
+  --bili:#e85c8c;
+  --zhihu:#2687d9;
+
+  --grad:linear-gradient(90deg,#6677fb,#29ddcc);
+  --shadow:0 16px 50px #20294514;
+
+  --r-panel:16px;
+  --r-btn:9px;
+  --r-pill:99px;
+
+  --ff:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"Cascadia Code",Consolas,"Courier New",monospace;
+
+  --max:1080px;
+}
+
+html.dark{
+  color-scheme:dark;
+
+  --bg:#101219;
+  --surface:#161922;
+  --soft:#181a22;
+
+  --ink:#e9ecf5;
+  --secondary:#a7adc0;
+  --muted:#7b8195;
+
+  --line:#23252f;
+  --line-strong:#31343f;
+
+  --brand:#8b95ff;
+  --brand-2:#a8b0ff;
+  --brand-soft:#1d203e;
+  --brand-ink:#a8b0ff;
+
+  --ok:#38c79c;   --ok-soft:#19352d;
+  --warn:#e0b477; --warn-soft:#392d1f;
+  --danger:#ef8b97; --danger-soft:#41232a;
+
+  --douyin:#aab4d0;
+  --zhihu:#69b3f1;
+
+  --shadow:0 16px 50px #00000055;
+}
+
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+
+body{
+  margin:0;
+  font-family:var(--ff);
+  font-size:15px;
+  line-height:1.65;
+  letter-spacing:-.005em;
+  color:var(--ink);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+img{max-width:100%;display:block}
+a{color:var(--brand-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:4px}
+h1,h2,h3,h4,p{margin:0}
+:focus-visible{outline:2px solid var(--brand);outline-offset:4px;border-radius:6px}
+::selection{background:var(--brand-soft);color:var(--brand-ink)}
+html.dark ::selection{background:var(--brand-soft);color:var(--brand-ink)}
+
+.wrap{width:min(var(--max),calc(100% - 64px));margin:0 auto;max-width:var(--max)}
+@media (max-width:700px){.wrap{width:calc(100% - 40px)}}
+.skip{position:absolute;left:-9999px;top:0;background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);padding:10px 16px;border-radius:0 0 var(--r-btn) 0;z-index:99}
+.skip:focus{left:0}
+
+/* ---------- 通用零件 ---------- */
+.pill{
+  font-size:11.5px;border:1px solid var(--line);padding:3px 10px;border-radius:var(--r-pill);
+  color:var(--secondary);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.pill.brand{color:var(--brand-ink);border-color:var(--brand-soft);background:var(--brand-soft)}
+
+.eyebrow{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;margin-bottom:12px}
+h2.title{font-size:clamp(24px,3.4vw,31px);font-weight:650;letter-spacing:-.8px;line-height:1.35;margin-bottom:14px}
+.description{color:var(--secondary);font-size:14px;line-height:1.85;max-width:64ch}
+
+.btn{
+  display:inline-flex;justify-content:center;align-items:center;gap:8px;
+  min-height:39px;padding:9px 16px;border:1px solid var(--line-strong);border-radius:var(--r-btn);
+  background:var(--surface);color:var(--ink);font-size:13.5px;font-weight:500;
+  white-space:nowrap;cursor:pointer;transition:border-color .15s,color .15s,background-color .15s;
+  font-family:inherit;
+}
+.btn:hover{border-color:var(--brand);color:var(--brand-ink);text-decoration:none}
+.btn svg{width:16px;height:16px;flex:none}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:hover{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
+html.dark .btn.primary{color:#101525}
+html.dark .btn.primary:hover{color:#101525}
+.btn.ghost{border-color:transparent;background:none}
+.btn.ghost:hover{border-color:var(--line-strong)}
+.btn.large{min-height:46px;padding:12px 22px;font-size:14.5px}
+.btn.block{width:100%}
+
+.card{
+  border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
+  padding:22px 24px;transition:border-color .15s;
+}
+.card:hover{border-color:var(--line-strong)}
+
+section{padding:78px 0}
+@media (max-width:700px){section{padding:54px 0}}
+.section-head{margin-bottom:36px}
+.center{text-align:center}
+.center .description{margin-inline:auto}
+
+.sr{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+
+.pd{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+.pd.xhs{background:var(--xhs)}
+.pd.douyin{background:var(--douyin)}
+.pd.bilibili{background:var(--bili)}
+.pd.zhihu{background:var(--zhihu)}
+
+/* ---------- 顶部导航 ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:var(--bg);
+  border-bottom:1px solid transparent;
+  transition:border-color .2s;
+}
+.topbar.stuck{border-bottom-color:var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:20px;min-height:70px}
+
+.logo{display:flex;align-items:center;gap:12px;color:var(--ink)}
+.logo:hover{text-decoration:none}
+.logo .mark{display:inline-flex;flex-direction:column;align-items:center;font-size:21px;font-weight:700;letter-spacing:-1px;line-height:1.1}
+.logo .mark i{display:block;width:32px;height:4px;border-radius:var(--r-pill);background:var(--grad);margin-top:3px}
+.logo .caption{font-size:11px;color:var(--muted);border-left:1px solid var(--line);padding-left:12px;letter-spacing:1px}
+@media (max-width:560px){.logo .caption{display:none}}
+
+.nav{display:none;gap:2px;margin-left:auto}
+@media (min-width:940px){.nav{display:flex}}
+.nav a{font-size:13px;color:var(--secondary);padding:8px 11px;border-radius:7px}
+.nav a:hover{color:var(--brand-ink);text-decoration:none;background:var(--soft)}
+
+.actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+@media (min-width:940px){.actions{margin-left:0}}
+.icon-btn{
+  width:36px;height:36px;flex:none;display:grid;place-items:center;
+  border:1px solid transparent;border-radius:8px;background:none;color:var(--muted);cursor:pointer;
+  transition:color .15s,background-color .15s;
+}
+.icon-btn:hover{color:var(--brand-ink);background:var(--soft)}
+.icon-btn svg{width:18px;height:18px}
+html:not(.dark) .i-sun{display:none}
+html.dark .i-moon{display:none}
+@media (max-width:560px){.actions .github-text{display:none}}
+
+/* ---------- Hero（学 App 首页：居中字标 + 渐变条） ---------- */
+.hero{padding:66px 0 64px;text-align:center}
+@media (max-width:700px){.hero{padding:44px 0 46px}}
+
+/* 徽章要独占一行：.wordmark 是 inline-flex，若徽章也是 inline 级会并排挤在一起 */
+.hero .pill{display:flex;width:fit-content;margin:0 auto 24px}
+
+.wordmark{display:inline-flex;flex-direction:column;align-items:center;color:var(--ink);
+  font-size:56px;font-weight:700;letter-spacing:-2px;line-height:1.1}
+.wordmark i{display:block;width:118px;height:8px;border-radius:var(--r-pill);background:var(--grad);margin-top:9px}
+@media (max-width:700px){.wordmark{font-size:46px}.wordmark i{width:94px;height:7px}}
+
+.hero h1{
+  font-size:clamp(26px,3.8vw,36px);font-weight:650;letter-spacing:-1.1px;line-height:1.35;
+  margin:30px auto 16px;max-width:20ch;
+}
+.hero .description{font-size:15.5px;max-width:56ch;margin:0 auto 28px}
+.hero .description strong{color:var(--ink);font-weight:600}
+
+.cta-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:24px}
+
+.checks{display:flex;flex-wrap:wrap;gap:8px 22px;justify-content:center;font-size:13px;color:var(--secondary);
+  margin:0 0 26px;padding:0;list-style:none}
+.checks li{display:flex;align-items:center;gap:7px}
+.checks svg{width:15px;height:15px;color:var(--brand);flex:none}
+
+.scope{display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.scope .scope-label{margin-right:8px}
+.platform-choice{display:flex;align-items:center;gap:7px;padding:5px 10px;color:var(--ink);border-radius:7px;font-size:12.5px}
+.platform-choice .check{width:12px;color:var(--brand-ink);font-size:11px}
+
+.home-note{margin-top:26px;font-size:12px;color:var(--muted)}
+
+/* ---------- 界面示意（纯 HTML/CSS 复刻新版结果页） ---------- */
+.mock-wrap{margin-top:56px}
+.mock{
+  border:1px solid var(--line);border-radius:var(--r-panel);background:var(--surface);
+  box-shadow:var(--shadow);padding:22px 26px 26px;text-align:left;
+  font-size:clamp(10px,1.05vw,12.5px);
+}
+@media (max-width:700px){.mock{padding:18px 16px 20px}}
+
+.mock-search{display:flex;align-items:center;gap:.9em;max-width:34em;margin:0 auto 1.6em;
+  border:1px solid var(--brand);border-radius:var(--r-pill);height:3.3em;padding:.4em .5em .4em 1.4em}
+.mock-search svg{width:1.5em;height:1.5em;color:var(--muted);flex:none}
+.mock-search .kw{flex:1;min-width:0;font-size:1.25em;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mock-search .kw::after{content:"";display:inline-block;width:1px;height:1em;background:var(--brand);margin-left:.15em;vertical-align:-.12em;animation:blink 1.1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.mock-search .go{width:2.6em;height:2.6em;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;flex:none}
+
+.mock-headline{display:flex;align-items:baseline;gap:.9em;margin-bottom:1.1em;flex-wrap:wrap}
+.mock-headline b{font-size:1.7em;font-weight:650;letter-spacing:-.5px;color:var(--ink)}
+.mock-headline span{font-size:.95em;color:var(--muted)}
+
+.mock-progress{display:flex;align-items:center;flex-wrap:wrap;gap:.7em 1.7em;
+  padding:.9em 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:1.3em;
+  font-size:.95em;color:var(--secondary)}
+.mock-progress .item{display:flex;align-items:center;gap:.5em}
+.mock-progress small{font-size:.88em;color:var(--muted)}
+.mock-progress .link{margin-left:auto;color:var(--secondary)}
+
+.mock-status{display:flex;align-items:center;justify-content:space-between;gap:1em;
+  border:1px solid var(--line);border-radius:10px;padding:.8em 1.1em;color:var(--secondary);
+  font-size:.95em;margin-bottom:1.3em}
+.mock-status .msg{display:flex;align-items:center;gap:.7em;min-width:0}
+.mock-status svg{width:1.2em;height:1.2em;color:var(--warn);flex:none}
+.mock-status .retry{color:var(--warn)}
+
+.mock-tabs{display:flex;align-items:center;gap:1.8em;border-bottom:1px solid var(--line);margin-bottom:1.5em;
+  overflow-x:auto;scrollbar-width:none}
+.mock-tabs::-webkit-scrollbar{display:none}
+.mock-tabs span{padding-bottom:.9em;color:var(--secondary);font-size:1em;border-bottom:2px solid transparent;
+  margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:.4em}
+.mock-tabs .on{border-color:var(--brand);color:var(--ink);font-weight:600}
+.mock-tabs em{font-style:normal;font-size:.86em;color:var(--muted)}
+
+.mock-toolbar{display:flex;align-items:center;justify-content:space-between;gap:1em;margin-bottom:1.4em;flex-wrap:wrap}
+.mock-toolbar .fields{display:flex;gap:.7em;flex-wrap:wrap}
+.mock-field{border:1px solid var(--line-strong);border-radius:8px;padding:.45em .8em;color:var(--secondary);font-size:.95em;white-space:nowrap}
+.mock-toolbar .link{color:var(--secondary);font-size:.95em;display:flex;align-items:center;gap:.4em}
+
+.mock-row{display:flex;gap:1.1em;padding:1.15em 0;border-bottom:1px solid var(--line)}
+.mock-row:last-child{border-bottom:0;padding-bottom:.3em}
+.mock-num{color:var(--muted);font-size:.95em;font-variant-numeric:tabular-nums;padding-top:.25em;flex:none}
+.mock-body{flex:1;min-width:0}
+.mock-body h4{font-size:1.25em;font-weight:600;color:var(--ink);line-height:1.5;letter-spacing:-.1px;margin-bottom:.4em}
+.mock-body h4 svg{width:.85em;height:.85em;color:var(--muted);margin-left:.35em;vertical-align:0}
+.mock-body p{color:var(--secondary);font-size:1em;line-height:1.75;margin-bottom:.6em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mock-meta{display:flex;align-items:center;gap:.8em;flex-wrap:wrap;color:var(--muted);font-size:.9em}
+.mock-meta .src{display:flex;align-items:center;gap:.5em;color:var(--secondary)}
+.mock-meta .divider{width:1px;height:.9em;background:var(--line-strong)}
+.mock-actions{display:flex;align-items:flex-start;gap:.3em;flex:none}
+.mock-actions span{width:2.2em;height:2.2em;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.mock-actions svg{width:1.3em;height:1.3em}
+.mock-actions .on{color:var(--brand-ink)}
+.mock-actions .on svg{fill:var(--brand-soft)}
+
+.mock-cap{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
+
+/* ---------- 痛点对比 ---------- */
+.compare{display:grid;gap:18px}
+@media (min-width:840px){.compare{grid-template-columns:1fr auto 1fr;align-items:stretch}}
+.compare-card{padding:24px 26px}
+.compare-card .k{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:1.4px;
+  text-transform:uppercase;margin-bottom:14px}
+.compare-card.before .k{color:var(--danger)}
+.compare-card.after .k{color:var(--ok)}
+.compare-card h3{font-size:18px;font-weight:650;letter-spacing:-.4px;margin-bottom:14px}
+.steps{margin:0;padding:0;list-style:none;display:grid;gap:9px;grid-template-columns:minmax(0,1fr);
+  font-size:13.5px;color:var(--secondary)}
+.steps li{position:relative;padding-left:16px}
+.steps li::before{content:"";position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--line-strong)}
+.compare-card.after .steps li::before{background:rgba(18,166,122,.5)}
+.steps code{font-family:var(--mono);font-size:.9em;background:var(--brand-soft);color:var(--brand-ink);padding:1px 5px;border-radius:5px}
+.arrow-mid{display:grid;place-items:center;padding:6px 0}
+.arrow-mid span{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--brand-ink);
+  border:1px solid var(--brand-soft);background:var(--brand-soft);border-radius:var(--r-pill);padding:7px 15px;white-space:nowrap}
+.arrow-mid svg{width:15px;height:15px}
+@media (max-width:839px){.arrow-mid svg{transform:rotate(90deg)}}
+
+/* ---------- 功能卡片 ---------- */
+.cards{display:grid;gap:16px}
+@media (min-width:640px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:980px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.cards>*{min-width:0}
+.card h3{font-size:15.5px;font-weight:650;letter-spacing:-.2px;margin-bottom:8px}
+.card p{color:var(--secondary);font-size:13.5px;line-height:1.8}
+.card .note{margin-top:12px;padding-top:11px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+.card .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;margin-bottom:14px;
+  background:var(--brand-soft);color:var(--brand-ink)}
+.card .ic svg{width:16px;height:16px}
+
+/* ---------- 平台表 ---------- */
+.plat-table{width:100%;border-collapse:collapse;font-size:14px}
+.plat-table th,.plat-table td{padding:15px 18px;text-align:left;border-bottom:1px solid var(--line)}
+.plat-table thead th{font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);
+  background:var(--soft)}
+.plat-table tbody th{font-size:14px;font-weight:500;text-transform:none;letter-spacing:0}
+.plat-table tr:last-child th,.plat-table tr:last-child td{border-bottom:0}
+.plat-table .yes{color:var(--ok);font-weight:600;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.plat-table .yes svg{width:15px;height:15px}
+.plat-table .nm{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.table-wrap{border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden}
+@media (max-width:640px){
+  .plat-table thead{position:absolute;left:-9999px}
+  .plat-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px 12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .plat-table tr:last-child{border-bottom:0}
+  .plat-table th,.plat-table td{padding:0;border:0}
+  .plat-table tbody th{grid-column:1;grid-row:1}
+  .plat-table td:nth-child(2){grid-column:2;grid-row:1;text-align:right}
+  .plat-table td:nth-child(3){grid-column:1/-1;grid-row:2;font-size:12.5px;color:var(--muted)}
+}
+.small-note{font-size:12.5px;color:var(--muted);line-height:1.8;margin-top:14px}
+.small-note code,.description code,.card code,.req code{
+  font-family:var(--mono);font-size:.92em;background:var(--brand-soft);color:var(--brand-ink);
+  padding:1px 5px;border-radius:5px;
+}
+
+/* ---------- 步骤 / 下载 ---------- */
+.steps-grid{display:grid;gap:16px}
+@media (min-width:760px){.steps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.steps-grid>*{min-width:0}
+.step .num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;margin-bottom:14px;
+  background:var(--brand-soft);color:var(--brand-ink);font-weight:650;font-size:12.5px}
+.step h3{font-size:15.5px;font-weight:650;margin-bottom:8px}
+.step p{color:var(--secondary);font-size:13.5px;line-height:1.8}
+
+.panel{border:1px solid var(--line);border-radius:var(--r-panel);padding:26px 28px}
+.dl-panel{margin-top:18px}
+@media (min-width:900px){.dl-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:40px;align-items:start}}
+.dl-panel>*{min-width:0}
+.dl-panel h3{font-size:19px;font-weight:650;letter-spacing:-.4px;margin-bottom:10px}
+.dl-panel>div>p{color:var(--secondary);font-size:13.5px;line-height:1.8;margin-bottom:20px}
+.req{list-style:none;margin:0;padding:0;display:grid;gap:11px;font-size:13.5px;color:var(--secondary)}
+.req li{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.req li>span{min-width:0;overflow-wrap:anywhere}
+.req svg{width:16px;height:16px;color:var(--brand);flex:none;margin-top:3px}
+.req b{color:var(--ink);font-weight:600}
+
+/* ---------- 代码块 ---------- */
+.code-label{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;font-weight:600;margin:20px 0 0}
+.code-label .tag{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:var(--r-pill);padding:2px 9px}
+.code{position:relative;margin-top:10px;border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
+.code pre{margin:0;padding:15px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.8;
+  color:var(--ink);max-width:100%}
+.code .copy{position:absolute;top:8px;right:8px;font-family:inherit;font-size:11.5px;padding:5px 10px;
+  border:1px solid var(--line-strong);border-radius:7px;background:var(--surface);color:var(--secondary);cursor:pointer;
+  transition:color .15s,border-color .15s}
+.code .copy:hover{color:var(--brand-ink);border-color:var(--brand)}
+.code .copy.ok{color:var(--ok);border-color:var(--ok)}
+.dev-grid{display:grid;gap:34px}
+@media (min-width:900px){.dev-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.dev-grid>*{min-width:0}
+
+/* ---------- 架构流程 ---------- */
+.flow{padding:26px 24px}
+.flow .n{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:11px 16px;
+  font-size:13.5px;text-align:center;color:var(--secondary)}
+.flow .n.acc{border-color:var(--brand-soft);background:var(--brand-soft);color:var(--brand-ink);font-weight:600}
+.flow .to{display:grid;place-items:center;color:var(--muted);padding:5px 0}
+.flow .to svg{width:15px;height:15px}
+.flow-cols{display:grid;gap:9px}
+@media (min-width:620px){.flow-cols{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.flow-cols>*{min-width:0}
+
+/* ---------- FAQ ---------- */
+.faq{display:grid;gap:10px}
+details.q{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:0 20px;transition:border-color .15s}
+details.q[open]{border-color:var(--line-strong)}
+details.q summary{cursor:pointer;list-style:none;padding:16px 0;font-size:14.5px;font-weight:600;
+  display:flex;align-items:center;gap:12px}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary::after{content:"";margin-left:auto;width:8px;height:8px;flex:none;
+  border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);
+  transform:rotate(45deg) translateY(-2px);transition:transform .2s}
+details.q[open] summary::after{transform:rotate(225deg) translateY(-2px)}
+details.q .a{padding:0 0 18px;color:var(--secondary);font-size:13.5px;line-height:1.85;max-width:78ch;overflow-wrap:anywhere}
+details.q .a p+p{margin-top:10px}
+
+/* ---------- 许可 ---------- */
+.license h3{font-size:18px;font-weight:650;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.license p{color:var(--secondary);font-size:13.5px;line-height:1.85;margin-bottom:18px;max-width:82ch}
+.limits{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+@media (min-width:760px){.limits{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.limits li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--secondary);min-width:0}
+.limits svg{width:16px;height:16px;color:var(--warn);flex:none;margin-top:4px}
+
+/* ---------- 页脚 ---------- */
+footer{border-top:1px solid var(--line);margin-top:22px;padding:34px 0 66px;font-size:13px;color:var(--secondary)}
+.foot-grid{display:grid;gap:28px}
+@media (min-width:760px){.foot-grid{grid-template-columns:1.5fr 1fr 1fr}}
+footer h4{font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:13px}
+footer ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+footer a{color:var(--secondary)}
+footer a:hover{color:var(--brand-ink)}
+.foot-bottom{margin-top:32px;padding-top:20px;border-top:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between;font-size:12px;color:var(--muted)}
+.foot-slogan{margin:0 0 14px;font-size:16px;font-weight:650;letter-spacing:-.3px;color:var(--ink)}
+
+/* ---------- 滚动显现 ---------- */
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease}
+.reveal.in{opacity:1;transform:none}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  .mock-search .kw::after{animation:none}
+  .btn:hover{transform:none}
+}
+
+/* ---------- 移动端底部下载条 ---------- */
+.mobile-cta{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;gap:10px;
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+@media (max-width:700px){.mobile-cta{display:flex}body{padding-bottom:72px}}
+.mobile-cta .btn{flex:1}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要内容</a>
+
+<!-- ============ 顶部导航 ============ -->
+<header class="topbar" id="topbar">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="四野 首页">
+      <span class="mark">四野<i></i></span>
+      <span class="caption">聚合搜索</span>
+    </a>
+
+    <nav class="nav" aria-label="页面导航">
+      <a href="#why">为什么</a>
+      <a href="#features">功能</a>
+      <a href="#platforms">支持平台</a>
+      <a href="#download">下载</a>
+      <a href="#source">源码运行</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+
+    <div class="actions">
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="切换深色 / 浅色主题" title="切换深色 / 浅色">
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.3 14.3A8.4 8.4 0 0 1 9.7 3.7a8.5 8.5 0 1 0 10.6 10.6Z"/></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M19 5l-1.5 1.5m-11 11L5 19"/></svg>
+      </button>
+      <a class="btn" href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.4 9.4 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        <span class="github-text">GitHub</span>
+      </a>
+      <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">下载</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ Hero ============ -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <span class="pill brand"><span class="dot"></span> 开源 · 本机运行 · 数据不出电脑</span>
+
+    <div class="wordmark" aria-hidden="true" style="margin-top:22px">四野<i></i></div>
+
+    <h1>一次搜索，看遍四个平台</h1>
+
+    <p class="description">
+      从不同的地方，找到你的答案。把小红书、抖音、B站、知乎的搜索结果收进<strong>同一个结果页</strong>：
+      并行搜索、统一排序、跨平台去重，接着筛选、收藏、导出。全部在你自己的电脑上跑。
+    </p>
+
+    <div class="cta-row">
+      <a class="btn primary large" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
+        下载 Windows 版
+      </a>
+      <a class="btn large" href="#source">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>
+        从源码运行
+      </a>
+    </div>
+
+    <ul class="checks">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>Windows 10 / 11 x64 · 免安装</li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>内置运行时，无需装 Python / Node.js</li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>只监听 127.0.0.1:8080</li>
+    </ul>
+
+    <div class="scope" aria-label="搜索范围">
+      <span class="scope-label">搜索范围</span>
+      <span class="platform-choice"><i class="pd xhs"></i>小红书<span class="check">✓</span></span>
+      <span class="platform-choice"><i class="pd douyin"></i>抖音<span class="check">✓</span></span>
+      <span class="platform-choice"><i class="pd bilibili"></i>B站<span class="check">✓</span></span>
+      <span class="platform-choice"><i class="pd zhihu"></i>知乎<span class="check">✓</span></span>
+    </div>
+
+    <p class="home-note">小红书、抖音、B站、知乎 · 一次搜索，几种视角。</p>
+
+    <!-- 界面示意：纯 HTML/CSS 复刻新版结果页，无外部图片。
+         想换成真实截图：把下面的 .mock 整块替换成 <img src="shot-search.png" alt="四野 搜索结果页"> 即可。 -->
+    <div class="mock-wrap">
+      <div class="mock" aria-hidden="true">
+        <div class="mock-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="7.1"/><path d="m16 16 4.5 4.5"/></svg>
+          <span class="kw">露营装备</span>
+          <span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:1.2em;height:1.2em"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span>
+        </div>
+
+        <div class="mock-headline">
+          <b>露营装备</b>
+          <span>相关内容 · 示例结果</span>
+        </div>
+
+        <div class="mock-progress">
+          <span class="item"><i class="pd xhs"></i>小红书 <small>3 条</small></span>
+          <span class="item"><i class="pd douyin"></i>抖音 <small>3 条</small></span>
+          <span class="item"><i class="pd bilibili"></i>B站 <small>3 条</small></span>
+          <span class="item"><i class="pd zhihu"></i>知乎 <small>未完成</small></span>
+          <span class="link">重新搜索</span>
+        </div>
+
+        <div class="mock-status">
+          <span class="msg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>
+            知乎暂时未响应，其他平台的结果已保留。
+          </span>
+          <span class="retry">重试</span>
+        </div>
+
+        <div class="mock-tabs">
+          <span class="on">全部 <em>9</em></span>
+          <span>小红书 <em>3</em></span>
+          <span>抖音 <em>3</em></span>
+          <span>B站 <em>3</em></span>
+          <span>知乎 <em>0</em></span>
+        </div>
+
+        <div class="mock-toolbar">
+          <span class="fields">
+            <span class="mock-field">综合排序 ▾</span>
+            <span class="mock-field">在结果中查找…</span>
+          </span>
+          <span class="link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:1.15em;height:1.15em"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
+            导出 / 复制
+          </span>
+        </div>
+
+        <div class="mock-row">
+          <span class="mock-num">01</span>
+          <div class="mock-body">
+            <h4>第一次露营，真正需要带的只有这些<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
+            <p>从帐篷、睡垫到照明，把三次露营后的经验整理成一张清单。哪些可以先租，哪些值得买好一点，以及新手最容易多带的五样东西。</p>
+            <div class="mock-meta">
+              <span class="src"><i class="pd xhs"></i>小红书</span>
+              <span>山野之间</span><span>2 天前</span>
+              <span class="divider"></span><span>图文笔记</span><span>点赞 2.4 万</span>
+            </div>
+          </div>
+          <div class="mock-actions"><span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
+        </div>
+
+        <div class="mock-row">
+          <span class="mock-num">02</span>
+          <div class="mock-body">
+            <h4>花了三年才明白，露营装备应该这样选<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
+            <p>六顶帐篷、四种睡垫的实际使用体验。聊聊防水、通风与收纳体积，也聊聊为什么我开始减少装备。附适合周末出行的入门搭配。</p>
+            <div class="mock-meta">
+              <span class="src"><i class="pd bilibili"></i>B站</span>
+              <span>阿森的户外日记</span><span>昨天</span>
+              <span class="divider"></span><span>视频 · 18:42</span><span>点赞 1.9 万</span>
+            </div>
+          </div>
+          <div class="mock-actions"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
+        </div>
+
+        <div class="mock-row">
+          <span class="mock-num">03</span>
+          <div class="mock-body">
+            <h4>第一次和朋友去露营，需要提前准备什么？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></h4>
+            <p>先看营地条件，再决定装备清单。能否开车抵达、有没有饮用水和卫生间，比买哪款帐篷更重要。这里按过夜与不过夜分别列出准备事项。</p>
+            <div class="mock-meta">
+              <span class="src"><i class="pd douyin"></i>抖音</span>
+              <span>小岛出走计划</span><span>5 小时前</span>
+              <span class="divider"></span><span>短视频 · 03:26</span><span>点赞 1.5 万</span>
+            </div>
+          </div>
+          <div class="mock-actions"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span></div>
+        </div>
+      </div>
+
+      <p class="mock-cap">界面示意：四个平台的搜索结果合并在一页，统一排序、可筛选、可收藏、可导出。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 为什么 ============ -->
+<section id="why">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Why</p>
+      <h2 class="title">四个平台 × 四次搜索，本来就是一件事</h2>
+      <p class="description">找一个答案的过程被平台切成了四份：每个站的检索、排序、互动口径都不一样，你只能靠记忆和来回切换把它们拼起来。四野只改一件事——把这一步合成一次。</p>
+    </div>
+
+    <div class="compare">
+      <div class="card compare-card before reveal">
+        <span class="k">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          现在（没有它）
+        </span>
+        <h3>四个平台 × 四次搜索</h3>
+        <ul class="steps">
+          <li>依次打开小红书、抖音、B站、知乎</li>
+          <li>同一个关键词，手动输入四遍</li>
+          <li>四套排序规则，靠记忆横向对比</li>
+          <li>同一条内容在多个平台重复出现，得自己认出来</li>
+          <li>找到有用的结果，还得手动复制链接记下来</li>
+        </ul>
+      </div>
+
+      <div class="arrow-mid reveal" aria-hidden="true">
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+          一次搜索
+        </span>
+      </div>
+
+      <div class="card compare-card after reveal">
+        <span class="k">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+          用四野
+        </span>
+        <h3>一次搜索 → 一个结果页</h3>
+        <ul class="steps">
+          <li>四个平台并行搜索，结果落在同一页</li>
+          <li>统一成同一种结果条目，字段口径一致</li>
+          <li>「综合 / 最新 / 互动最多」三种排序随时切</li>
+          <li>跨平台去重与分组，同一内容合并展示</li>
+          <li>筛选、收藏、备注、导出 CSV / Markdown 一条龙</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 功能 ============ -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Features</p>
+      <h2 class="title">搜索只是入口，能用起来的部分在后面</h2>
+      <p class="description">不是把四个网页塞进一个 iframe。后端把各平台结果归一化成同一套结构，再统一做排序、去重、补全和缓存。</p>
+    </div>
+
+    <div class="cards">
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="7.1"/><path d="m16 16 4.5 4.5"/></svg></span>
+        <h3>四平台并行搜索</h3>
+        <p>四个平台同时发起，支持部分结果返回。单个平台失败、超时或被取消时，其他平台的结果照常展示，并可对失败平台单独重试。</p>
+        <p class="note">受控的 Provider fallback：轻量接口走不通时按已有路径回退。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span>
+        <h3>统一结果模型</h3>
+        <p>标题、摘要、作者、发布时间、封面与互动数据统一成同一种结构，跨平台也能按同一套字段阅读和对比。</p>
+        <p class="note">互动数据按「播放 / 点赞 / 投币 / 评论 / 收藏 / 分享」固定顺序陈列，有值才显示。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/><path d="M3 21h18"/></svg></span>
+        <h3>三种排序</h3>
+        <p>「综合」把关键词相关性、平台原始 rank、新鲜度、平台内互动表现和平台多样性放在一起算；「最新」按时间；「互动最多」让评论、收藏、投币、分享等深度互动权重大于播放量。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8Z"/></svg></span>
+        <h3>结果内筛选与高亮</h3>
+        <p>近 7 天 / 近 30 天、内容类型、关键词组合筛选；多个关键词分别匹配标题、作者和摘要，标题与摘要里的关键词会高亮。</p>
+        <p class="note">筛选只处理已经返回的内容，不会额外搜索平台。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="8" y="14" width="8" height="7" rx="2"/></svg></span>
+        <h3>跨平台去重与分组</h3>
+        <p>同一条内容出现在多个平台时合并展示，同时保留每个平台的入口，可以逐个收藏或取消。</p>
+        <p class="note">规则判断：标题相同或近似还需作者或有效摘要佐证，不靠同名硬合并。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4V4Z"/></svg></span>
+        <h3>本地收藏与备注</h3>
+        <p>收藏保留当时的内容快照和原文链接，可写备注，刷新页面或重启程序后仍在。最多 500 个来源，每条备注 1000 字。</p>
+        <p class="note">存在当前浏览器的本地存储里；支持导出 / 导入 JSON 备份（≤ 10 MB），全程本地完成。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6a2 2 0 0 1 2-2h9l5 5v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 4v5h5"/></svg></span>
+        <h3>跨平台收藏</h3>
+        <p>只读拉取已登录账号在小红书、抖音、B站、知乎的收藏，在一个页面统一筛选、导出，或保存到本地收藏。</p>
+        <p class="note">只发读取请求，不会在平台侧新增、删除或移动收藏。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg></span>
+        <h3>导出与批量复制</h3>
+        <p>未勾选时导出当前筛选下的全部结果，勾选后只导出选中的条目；CSV 带 UTF-8 BOM，Excel 打开中文不乱码，Markdown 适合整理笔记，也可以批量复制原文链接。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        <h3>摘要补全与缓存</h3>
+        <p>先用 snippet 摘要，缺少有效摘要的前排结果由后台补全，不阻塞首屏。90 秒短期内存结果缓存，可强制重新搜索。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <h3>搜索前登录预检</h3>
+        <p>启动浏览器前先做一次完全本地的登录预检（实测约 1 毫秒）：确定搜不了的平台立刻提示「需要登录」并指向账号设置，不再白等十几秒。</p>
+        <p class="note">cookie 库读不出来时一律放行，绝不因为读不出文件就把搜索拦掉。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16"/><rect x="5" y="11" width="3.4" height="6" rx="1"/><rect x="10.3" y="7" width="3.4" height="10" rx="1"/><rect x="15.6" y="13" width="3.4" height="4" rx="1"/></svg></span>
+        <h3>搜索统计与限流冷却</h3>
+        <p>最近 100 次搜索的耗时、平台成功率、缓存命中率、备用路径使用率和失败原因一目了然，也可直接读接口做对比。</p>
+        <p class="note">平台明确限流后进入 60 秒冷却，重复触发依次延长为 120 / 240 / 300 秒封顶；其他平台继续搜。</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span>
+        <h3>账号状态与平台诊断</h3>
+        <p>打开程序即自动检测账号状态，为未确认登录的平台自动同步；平台诊断会分别展示账号状态、当前搜索路径和 fallback 能力。</p>
+        <p class="note">账号状态不等同于搜索能力，没登录也可能完成公开搜索。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 平台 ============ -->
+<section id="platforms">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Platforms</p>
+      <h2 class="title">四个平台，现在正式支持</h2>
+      <p class="description">表格之外的平台不属于当前聚合搜索的正式支持范围。</p>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table class="plat-table">
+        <caption class="sr">聚合搜索支持平台</caption>
+        <thead>
+          <tr><th scope="col">平台</th><th scope="col">聚合搜索</th><th scope="col">说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" class="nm"><i class="pd xhs"></i>小红书</th>
+            <td><span class="yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>支持</span></td>
+            <td>登录态下更稳定</td>
+          </tr>
+          <tr>
+            <th scope="row" class="nm"><i class="pd douyin"></i>抖音</th>
+            <td><span class="yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>支持</span></td>
+            <td>公开搜索接口，不参与登录预检</td>
+          </tr>
+          <tr>
+            <th scope="row" class="nm"><i class="pd bilibili"></i>B站</th>
+            <td><span class="yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>支持</span></td>
+            <td>收藏夹名称会保留</td>
+          </tr>
+          <tr>
+            <th scope="row" class="nm"><i class="pd zhihu"></i>知乎</th>
+            <td><span class="yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>支持</span></td>
+            <td>收藏夹名称会保留</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small-note">各平台搜索接口提供的字段并不相同，缺失的互动数据不会为了凑数额外抓详情；平台访问策略和登录要求也可能随时变化。</p>
+  </div>
+</section>
+
+<!-- ============ 下载 ============ -->
+<section id="download">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Download</p>
+      <h2 class="title">三步就能搜起来</h2>
+      <p class="description">Windows 可执行包已经包含 Python runtime、FastAPI 后端和生产版 Web UI。普通使用不需要安装 Python、uv、Node.js、npm。</p>
+    </div>
+
+    <div class="steps-grid">
+      <article class="card step reveal">
+        <span class="num">1</span>
+        <h3>下载并解压</h3>
+        <p>下载 <code>MediaCrawler-Windows-x64.zip</code>，解压到一个有写入权限的目录。不要只复制其中的 EXE。</p>
+      </article>
+      <article class="card step reveal">
+        <span class="num">2</span>
+        <h3>双击启动</h3>
+        <p>打开解压出的 <code>MediaCrawler</code> 文件夹，双击 <code>MediaCrawler.exe</code>，等控制台出现 backend ready。</p>
+      </article>
+      <article class="card step reveal">
+        <span class="num">3</span>
+        <h3>开始搜索</h3>
+        <p>程序会自动打开系统默认浏览器（<code>127.0.0.1:8080</code>），输入关键词、选平台，回车。</p>
+      </article>
+    </div>
+
+    <div class="panel dl-panel reveal">
+      <div>
+        <h3>下载 Windows x64 安装包</h3>
+        <p>发布包由 GitHub Actions 在 Windows 上真实构建，并在 clean-room 中解压验证后才上传；同时提供 <code>.sha256</code> 校验文件。</p>
+        <div class="cta-row" style="justify-content:flex-start;margin-bottom:0">
+          <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>
+            前往 Releases 下载
+          </a>
+          <a class="btn" href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.4 9.4 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+            查看源码
+          </a>
+        </div>
+        <p class="small-note">
+          如果 Releases 里暂时还没有可下载的包：在仓库的 Actions 页面手动运行 <code>Windows Executable Release</code> 工作流即可生成安装包，或直接按下面的「从源码运行」在本机跑起来。
+        </p>
+      </div>
+
+      <div>
+        <ul class="req">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>
+            <span><b>系统：</b>Windows 10 / 11 x64</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/></svg>
+            <span><b>浏览器：</b>系统 Chrome 或 Edge（Windows 通常自带 Edge）</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M9 7V5h6v2"/></svg>
+            <span><b>其他依赖：</b>无。Python、Node.js 都打包在包里</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="3"/></svg>
+            <span><b>端口：</b>默认 <code>127.0.0.1:8080</code>，只监听本机</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+            <span><b>隐私：</b>账号 profile、缓存和运行数据都存在本机目录，不上传</span>
+          </li>
+        </ul>
+        <p class="small-note">运行期间不要删除 EXE 旁边的 <code>_internal</code>、<code>webui</code> 等运行文件。如果 <code>/api/health</code> 显示浏览器不可用，先装好或修复 Chrome / Edge 再重启。</p>
+      </div>
+    </div>
+
+    <div class="panel dl-panel reveal" id="account">
+      <div>
+        <h3>可选：同步账号登录状态</h3>
+        <p>公开搜索不一定要求四个平台都登录。只有需要登录态、详情接口或更稳定的平台访问时，才需要同步账号。</p>
+        <ol class="steps" style="list-style:none">
+          <li>在 Chrome / Edge 打开 <code>chrome://extensions</code> 或 <code>edge://extensions</code></li>
+          <li>打开「开发者模式」，选择「加载已解压的扩展程序」</li>
+          <li>选择解压目录里的 <code>MediaCrawler/browser_extension/</code></li>
+          <li>在浏览器里登录平台，回到「账号与登录」点同步登录状态</li>
+        </ol>
+        <p class="small-note">扩展只把必要的会话信息同步给本机后端，请只同步和使用你有权使用的账号。</p>
+      </div>
+      <div>
+        <p class="description" style="font-size:14px">
+          程序打开时会自动检测账号状态，并为尚未确认登录的平台自动同步一次；平台诊断会分别展示账号状态、当前搜索路径与 fallback 能力。
+        </p>
+        <p class="small-note">
+          账号状态和搜索能力是两件事：账号还没通过 API 验证时，平台仍可能通过浏览器备用路径完成公开搜索。
+          搜索与账号同步互斥，切换时不会互相打断。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 源码运行 ============ -->
+<section id="source">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">For Developers</p>
+      <h2 class="title">从源码运行</h2>
+      <p class="description">需要 Python 3.11+、uv、Chrome/Edge 或 Playwright Chromium；Node.js 20 只在开发和构建前端时需要。</p>
+    </div>
+
+    <div class="dev-grid">
+      <div class="reveal">
+        <p class="code-label">1. 拉取并安装后端依赖 <span class="tag">Web UI 与 EXE 用同一个地址</span></p>
+        <div class="code">
+          <button class="copy" type="button" data-copy>复制</button>
+          <pre>git clone https://github.com/KellenGO/MediaCrawler.git
+cd MediaCrawler
+uv sync
+
+# 用项目管理的 Chromium 时，首次执行一次
+uv run playwright install chromium</pre>
+        </div>
+
+        <p class="code-label">2. 构建前端 <span class="tag">生成 webui/dist</span></p>
+        <div class="code">
+          <button class="copy" type="button" data-copy>复制</button>
+          <pre>cd webui
+npm ci
+npm run build</pre>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <p class="code-label">3. 启动后端</p>
+        <div class="code">
+          <button class="copy" type="button" data-copy>复制</button>
+          <pre>uv run uvicorn api.main:app \
+  --host 127.0.0.1 --port 8080 --reload</pre>
+        </div>
+
+        <p class="code-label">一键启动（Windows）</p>
+        <div class="code">
+          <button class="copy" type="button" data-copy>复制</button>
+          <pre># 仓库根目录双击，或命令行执行
+MediaCrawler.bat</pre>
+        </div>
+
+        <p class="code-label">前端开发模式</p>
+        <div class="code">
+          <button class="copy" type="button" data-copy>复制</button>
+          <pre>cd webui
+npm run dev   # http://localhost:5173，/api 代理到 8080</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-head reveal" style="margin:56px 0 24px">
+      <h2 class="title" style="font-size:22px">它是怎么跑起来的</h2>
+      <p class="description">搜索结果不会经过任何中间服务器，链路在你自己这台机器上闭合。</p>
+    </div>
+
+    <div class="card flow reveal">
+      <div class="n acc">Web UI / Browser Extension</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n">FastAPI API</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n">Search Job Manager</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n">Worker Supervisor / 隔离 worker 进程</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n">Provider Chain</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="flow-cols">
+        <div class="n">小红书</div>
+        <div class="n">抖音</div>
+        <div class="n">B站</div>
+        <div class="n">知乎</div>
+      </div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n acc">Adapter → 统一结果模型</div>
+      <div class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg></div>
+      <div class="n">摘要补全 / 分组 / 去重 / 排序 / 缓存</div>
+    </div>
+
+    <p class="small-note reveal">
+      技术栈：Python 3.11 · FastAPI + Uvicorn · React + Vite + TypeScript · Playwright · 平台 worker 进程 · 适配层 · 搜索任务管理器与内存结果缓存。
+      CI 会在 push / PR 到 master 时运行不依赖真实账号与真实平台网络的后端测试、前端搜索测试和构建。
+    </p>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">FAQ</p>
+      <h2 class="title">你大概会问的几个问题</h2>
+    </div>
+
+    <div class="faq">
+      <details class="q reveal">
+        <summary>用之前必须先登录四个平台吗？</summary>
+        <div class="a">
+          <p>不一定。公开搜索不要求四个平台都登录。只有需要登录态、详情接口或更稳定的平台访问时才需要同步账号。</p>
+          <p>没登录时，搜索前的本地预检会在毫秒级告诉你是哪个平台搜不了、为什么，并把你引到账号设置，而不是让你白等浏览器启动。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>我的账号和数据会被上传到服务器吗？</summary>
+        <div class="a">
+          <p>不会。后端只监听 <code>127.0.0.1:8080</code>，搜索请求由本机发出；账号 profile、缓存和运行数据都在本机目录里。</p>
+          <p>本地收藏和备注存在当前浏览器的本地存储中，导出 / 导入 JSON 备份也完全在浏览器本地完成，不上传任何内容。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>搜索结果里显示「缓存」是什么意思？</summary>
+        <div class="a">
+          <p>后端对搜索结果做 90 秒的短期内存缓存，同一关键词在 90 秒内重复查看会直接回放缓存，平台状态里会显示原采集时间。</p>
+          <p>点「重新搜索」可以强制拿到最新结果；重复查看和后台摘要补全不会延长缓存有效期。缓存成功才更新，失败时会保留尚未过期的旧缓存。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>某个平台搜不出结果 / 结果不完整怎么办？</summary>
+        <div class="a">
+          <p>先看平台状态：需要登录就按提示去账号设置同步；明确被限流会显示冷却倒计时，冷却期间重复搜索不会向该平台发新请求，也不会延长倒计时。</p>
+          <p>单个平台失败不会影响其他平台返回结果，可以对失败平台单独重试。冷却结束后的重试需要手动点。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>为什么有些结果的互动数据不完整？</summary>
+        <div class="a">
+          <p>各平台搜索接口提供的字段本来就不一样：小红书和抖音的搜索接口不返回播放量，B站的投币数只在视频详情里，知乎搜索结果不返回收藏数。</p>
+          <p>缺失的指标不会占位，也不会为了凑数字额外逐条抓详情。这是已知限制，不是显示错误。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>能在 Mac 或 Linux 上用吗？</summary>
+        <div class="a">
+          <p>目前只提供 Windows x64 可执行包。其他系统可以从源码运行：项目的后端和前端都是跨平台的，按「从源码运行」的步骤准备 Python 3.11+、uv 和 Chrome/Edge 即可。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>启动时提示 8080 端口被占用 / 缺少 webui/dist？</summary>
+        <div class="a">
+          <p>端口被占用时，先关掉占用该端口的本项目实例；程序不会强制终止其他应用，也不会自动改端口。</p>
+          <p>从源码启动提示缺少 <code>webui/dist</code> 时，先进入 <code>webui</code> 执行 <code>npm ci</code> 和 <code>npm run build</code> 生成生产前端。</p>
+        </div>
+      </details>
+
+      <details class="q reveal">
+        <summary>可以商用吗？会不会大规模抓取平台数据？</summary>
+        <div class="a">
+          <p>不可以商用。本项目保留上游的 NON-COMMERCIAL LEARNING LICENSE 1.1，仅供学习、研究和非商业用途；商业使用必须遵循原许可证要求并取得版权所有者的书面授权。</p>
+          <p>项目定位是个人检索工具，不是批量采集工具，请遵守目标平台的服务条款，不要用于大规模抓取或干扰平台正常运营。</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 许可 ============ -->
+<section id="license">
+  <div class="wrap">
+    <div class="card license reveal">
+      <h3>
+        许可与免责声明
+        <span class="pill">NON-COMMERCIAL LEARNING LICENSE 1.1</span>
+      </h3>
+      <p>
+        本项目基于 / fork 自 <a href="https://github.com/NanmiCoder/MediaCrawler" target="_blank" rel="noopener">NanmiCoder/MediaCrawler</a>，
+        感谢原作者提供的底层多平台采集能力与项目基础。当前仓库在其之上开发并维护跨平台聚合搜索产品，
+        包括统一结果模型、Provider Chain、排序、摘要、补全、跨平台去重与分组、缓存、账号状态和搜索 UI 等能力。
+        使用前请阅读仓库中的许可证全文。
+      </p>
+      <ul class="limits">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>仅供学习、研究和非商业用途</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>不得用于大规模抓取，或干扰目标平台正常运营</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>不得侵犯他人隐私、知识产权或其他合法权益</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.1"/></svg>不得用于任何违法或未经授权的用途</li>
+      </ul>
+      <p class="small-note">
+        软件按「现状」提供，不提供明示或暗示的担保。使用者应自行遵守适用法律法规、目标平台服务条款及其他适用规则，
+        并自行承担使用本项目产生的责任。
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ 页脚 ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="logo" href="#top" style="margin-bottom:14px">
+          <span class="mark">四野<i></i></span>
+        </a>
+        <p class="foot-slogan">从不同的地方，找到你的答案。</p>
+        <p style="max-width:36ch;font-size:13px">
+          一个在本机使用的中文社交平台聚合搜索工具。连接分散的内容，让搜索与整理更轻松。
+        </p>
+      </div>
+
+      <div>
+        <h4>项目</h4>
+        <ul>
+          <li><a href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">GitHub 仓库</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/releases" target="_blank" rel="noopener">下载 Releases</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/blob/master/README.md" target="_blank" rel="noopener">完整文档 README</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/blob/master/LICENSE" target="_blank" rel="noopener">许可证</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h4>参与</h4>
+        <ul>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/issues" target="_blank" rel="noopener">反馈问题</a></li>
+          <li><a href="https://github.com/KellenGO/MediaCrawler/issues/new" target="_blank" rel="noopener">提交建议</a></li>
+          <li><a href="https://github.com/NanmiCoder/MediaCrawler" target="_blank" rel="noopener">上游项目</a></li>
+          <li><a href="#top">回到顶部</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="foot-bottom">
+      <span>四野 · 从不同的地方，找到你的答案。</span>
+      <span>本地优先 · 仅供学习、研究与非商业用途</span>
+    </div>
+  </div>
+</footer>
+
+<!-- ============ 移动端固定下载条 ============ -->
+<div class="mobile-cta">
+  <a class="btn" href="https://github.com/KellenGO/MediaCrawler" target="_blank" rel="noopener">GitHub</a>
+  <a class="btn primary" href="https://github.com/KellenGO/MediaCrawler/releases/latest" target="_blank" rel="noopener">下载 Windows 版</a>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+
+  /* ---------- 主题：首帧已在 <head> 里定好，这里只处理手动切换 ---------- */
+  var KEY = 'siye-landing-theme';
+  function apply(theme) {
+    root.classList.toggle('dark', theme === 'dark');
+    root.setAttribute('data-theme', theme);
+  }
+
+  var toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    toggle.addEventListener('click', function () {
+      var next = root.classList.contains('dark') ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  }
+
+  /* ---------- 顶栏滚动态 ---------- */
+  var bar = document.getElementById('topbar');
+  function onScroll() {
+    if (!bar) return;
+    bar.classList.toggle('stuck', window.scrollY > 8);
+  }
+  onScroll();
+  window.addEventListener('scroll', onScroll, { passive: true });
+
+  /* ---------- 滚动显现 ---------- */
+  var items = [].slice.call(document.querySelectorAll('.reveal'));
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) {
+    items.forEach(function (el) { el.classList.add('in'); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    items.forEach(function (el) { io.observe(el); });
+  }
+
+  /* ---------- 代码块复制 ---------- */
+  function fallback(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  [].slice.call(document.querySelectorAll('[data-copy]')).forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = btn.parentNode.querySelector('pre');
+      if (!pre) return;
+      var text = pre.innerText;
+      var done = function () {
+        btn.textContent = '已复制';
+        btn.classList.add('ok');
+        setTimeout(function () { btn.textContent = '复制'; btn.classList.remove('ok'); }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+      } else {
+        fallback(text, done);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>效果图 3 · 液态玻璃</title>
+<style>
+/* ============================================================
+   效果图 3：液态玻璃（Liquid Glass）
+   预览稿，不是最终代码。
+
+   这一张做了「真折射」：用 canvas 实时画出一张"位移贴图"（圆角矩形的
+   距离场，X/Y 位移编码进 R/G 通道），喂给 SVG 的 feImage + feDisplacementMap，
+   再用 backdrop-filter: url(#...) 让背景真的在玻璃边缘弯折。
+
+   三条必须知道的事：
+   1. 真折射目前只有 Chrome / Edge 支持。Firefox 会"假装认识但什么都不画"，
+      面板会变成完全透明的洞 —— 所以这里加了开关和自动降级。
+   2. 宽条（比如整条搜索框）上放透镜会鼓成椭圆，很怪。
+      所以透镜只用在「小尺寸」元素上：小药丸按钮、图标按钮。
+   3. 大面板统一用普通毛玻璃（不折射），列表卡片用"假玻璃"（不模糊）。
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --brand:76 164 220; --brand-strong:41 126 186;
+  --ink:23 43 61; --ink-2:108 129 147; --ink-3:152 170 186;
+  --ok:79 158 121; --warn:183 99 37;
+  --page:246 250 254;
+  --frost:255 255 255 / .55;
+  --edge:255 255 255 / .70;
+  --fake:255 255 255 / .95;
+  --line:214 230 242;
+  --shadow:0 18px 44px rgb(41 126 186 / .16);
+}
+html.dark{
+  --brand:120 200 243; --brand-strong:155 217 248;
+  --ink:238 243 239; --ink-2:160 172 165; --ink-3:116 128 120;
+  --page:12 17 20;
+  --frost:24 32 38 / .55;
+  --edge:255 255 255 / .18;
+  --fake:26 34 40 / .96;
+  --line:48 62 72;
+  --shadow:0 18px 44px rgb(0 0 0 / .42);
+}
+html,body{margin:0;padding:0}
+body{
+  font:15px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:rgb(var(--ink));background:rgb(var(--page));min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+/* 背景：柔和的彩色光斑。折射要有东西可"折"才看得见。
+   注意别用硬直线/网格 —— 直线穿过透镜圆角会折出拐点，看起来像 bug。 */
+body::before{
+  content:"";position:fixed;inset:0;z-index:-2;
+  background:
+    radial-gradient(48vw 40vh at 16% 4%,  rgb(var(--brand) / .40), transparent 64%),
+    radial-gradient(40vw 34vh at 84% 10%, rgb(167 139 250 / .30), transparent 62%),
+    radial-gradient(44vw 36vh at 62% 74%, rgb(244 114 182 / .24), transparent 62%),
+    radial-gradient(38vw 32vh at 8% 78%,  rgb(45 212 191 / .22), transparent 62%),
+    rgb(var(--page));
+}
+.wrap{max-width:1160px;margin:0 auto;padding:0 20px}
+
+/* ── 顶部说明条 ── */
+.note{position:sticky;top:0;z-index:60;font-size:12.5px;
+  background:rgb(var(--brand) / .14);border-bottom:1px solid rgb(var(--line))}
+.note-in{max-width:1160px;margin:0 auto;padding:9px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.note .sp{flex:1}
+.btn-mini{cursor:pointer;border:1px solid rgb(var(--line));background:rgb(var(--fake));
+  color:rgb(var(--ink));border-radius:999px;padding:4px 12px;font:inherit;font-size:12px}
+.btn-mini:hover{border-color:rgb(var(--brand))}
+.warnbar{display:none;background:#7a4a12;color:#ffe9cf;font-size:12px;padding:7px 20px;text-align:center}
+.warnbar.on{display:block}
+
+/* ── 毛玻璃（大面板，不折射） ── */
+.frost{
+  background:rgb(var(--frost));
+  backdrop-filter:blur(20px) saturate(165%) brightness(1.04);
+  -webkit-backdrop-filter:blur(20px) saturate(165%) brightness(1.04);
+  border:1px solid rgb(var(--edge) / .5);
+  box-shadow:inset 0 1px 0 rgb(var(--edge)), var(--shadow);
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .frost{background:rgb(var(--fake))}
+}
+/* 假玻璃：列表卡片 */
+.fake{
+  background:rgb(var(--fake));
+  border:1px solid rgb(var(--line));
+  box-shadow:inset 0 1px 0 rgb(var(--edge)), 0 4px 16px rgb(41 126 186 / .08);
+}
+
+/* ── 透镜元素的"玻璃边"外观（高光 + 内阴影 + 微色散） ── */
+.lens{
+  position:relative;overflow:hidden;isolation:isolate;
+  border:1px solid rgb(255 255 255 / .55);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .85),
+    inset 0 -1px 1px rgb(255 255 255 / .35),
+    inset 0 0 14px rgb(255 255 255 / .22),
+    0 6px 18px rgb(41 126 186 / .26);
+}
+html.dark .lens{
+  border-color:rgb(255 255 255 / .22);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .30),
+    inset 0 -1px 1px rgb(255 255 255 / .12),
+    0 6px 18px rgb(0 0 0 / .45);
+}
+/* 不支持折射时：退化成普通毛玻璃，绝不出现透明洞 */
+.lens.no-refract{
+  backdrop-filter:blur(14px) saturate(160%);
+  -webkit-backdrop-filter:blur(14px) saturate(160%);
+  background:rgb(var(--frost));
+}
+
+/* ── 顶栏：毛玻璃，不放透镜 ── */
+header.frost{position:sticky;top:38px;z-index:40;border-radius:0 0 16px 16px;
+  border-top:none;border-left:none;border-right:none}
+.hd{display:flex;align-items:center;gap:16px;padding:12px 0}
+.brand{display:flex;align-items:baseline;gap:9px;font-weight:800;font-size:17px}
+.brand span{font-weight:500;font-size:12px;color:rgb(var(--ink-2))}
+nav{display:flex;gap:4px;margin-left:6px}
+nav a{font-size:13.5px;color:rgb(var(--ink-2));text-decoration:none;padding:6px 11px;border-radius:9px}
+nav a.on{background:rgb(var(--brand) / .18);color:rgb(var(--brand-strong));font-weight:600}
+.hd .sp{flex:1}
+.pill{font-size:12px;color:rgb(var(--ink-2));border:1px solid rgb(var(--line));
+  border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;background:rgb(var(--fake))}
+.dot{width:8px;height:8px;border-radius:50%;background:rgb(var(--ok))}
+
+/* ── 搜索区（毛玻璃）+ 开始搜索按钮（透镜） ── */
+.search{margin:22px 0 14px;border-radius:20px;padding:16px}
+.srow{display:flex;gap:10px}
+input[type=text]{flex:1;font:inherit;font-size:15px;padding:13px 15px;border-radius:12px;
+  border:1px solid rgb(var(--line));background:rgb(var(--fake));color:rgb(var(--ink))}
+input[type=text]:focus{outline:none;box-shadow:0 0 0 3px rgb(var(--brand) / .2);border-color:rgb(var(--brand))}
+.btn-search{
+  cursor:pointer;font:inherit;font-weight:700;font-size:14px;padding:13px 24px;border-radius:999px;
+  color:#fff;white-space:nowrap;
+  /* 它底下是纯白卡片，没有可折的颜色 —— 所以给它自己的品牌色玻璃底，
+     折射只负责把边缘"折"一下，按钮仍然读得出是按钮。 */
+  background:linear-gradient(180deg, rgb(var(--brand) / .86), rgb(var(--brand-strong) / .86));
+}
+.chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.chip{font-size:12.5px;border:1px solid rgb(var(--line));border-radius:999px;padding:4px 11px;
+  color:rgb(var(--ink-2));background:rgb(var(--fake))}
+.chip.on{border-color:rgb(var(--brand));color:rgb(var(--brand-strong));background:rgb(var(--brand) / .14);font-weight:600}
+.hint{font-size:12px;color:rgb(var(--ink-3));margin-left:auto}
+
+/* ── 透镜展示区：小元素放在彩色光斑上，才看得出折射 ── */
+.showcase{margin:18px 0;border-radius:20px;padding:20px;position:relative;overflow:hidden}
+.showcase::before{ /* 给透镜一块高饱和、有明暗变化的背景，折射才看得出来 */
+  content:"";position:absolute;inset:0;z-index:-1;
+  background:
+    radial-gradient(14% 60% at 14% 62%, rgb(255 255 255 / .95), transparent 70%),
+    radial-gradient(12% 55% at 30% 34%, rgb(20 30 60 / .55), transparent 70%),
+    radial-gradient(30% 120% at 20% 40%, rgb(76 164 220 / .95), transparent 70%),
+    radial-gradient(30% 120% at 46% 60%, rgb(167 139 250 / .85), transparent 70%),
+    radial-gradient(30% 120% at 72% 35%, rgb(244 114 182 / .80), transparent 70%),
+    radial-gradient(30% 120% at 92% 65%, rgb(45 212 191 / .80), transparent 70%),
+    rgb(var(--page));
+}
+.showcase .label{font-size:12px;color:rgb(var(--ink-2));margin-bottom:12px;font-weight:600}
+.row{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.mini{
+  width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:22px;
+  color:#fff;background:rgb(255 255 255 / .14);
+}
+.mini-pill{
+  padding:13px 22px;border-radius:999px;font-size:13px;font-weight:700;color:#fff;
+  background:rgb(255 255 255 / .16);
+}
+.caption{font-size:11.5px;color:rgb(var(--ink-3));margin-top:10px}
+
+/* ── 平台状态卡 ── */
+.plats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 18px}
+.plat{border-radius:14px;padding:12px 14px;display:flex;gap:11px;align-items:center}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:800;
+  font-size:14px;color:#fff;flex:0 0 auto}
+.plat strong{display:block;font-size:13px}
+.plat small{color:rgb(var(--ink-2));font-size:11.5px}
+.plat.warn small{color:rgb(var(--warn))}
+
+/* ── 标签 + 排序 ── */
+.tabs{display:flex;align-items:center;gap:6px;margin:6px 0 14px;flex-wrap:wrap}
+.tab{font-size:13px;padding:7px 13px;border-radius:10px;color:rgb(var(--ink-2));cursor:pointer;border:1px solid transparent}
+.tab.on{background:rgb(var(--brand) / .16);color:rgb(var(--brand-strong));font-weight:600;border-color:rgb(var(--brand) / .38)}
+.tab .n{font-size:11px;color:rgb(var(--ink-3));margin-left:5px}
+.sort{margin-left:auto;display:flex;gap:4px}
+.sort span{font-size:12px;color:rgb(var(--ink-2));padding:5px 10px;border-radius:8px;cursor:pointer}
+.sort span.on{background:rgb(var(--fake));border:1px solid rgb(var(--line));color:rgb(var(--ink));font-weight:600}
+
+/* ── 结果列表（假玻璃） ── */
+.grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+.card{border-radius:14px;padding:14px;display:flex;gap:13px;margin-bottom:12px}
+.cover{width:112px;height:80px;border-radius:10px;flex:0 0 auto;display:grid;place-items:center;
+  color:#fff;font-weight:800;font-size:12px;letter-spacing:.5px}
+.card h3{margin:0 0 5px;font-size:14.5px;line-height:1.45}
+.card p{margin:0 0 7px;font-size:12.5px;color:rgb(var(--ink-2));
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{font-size:11.5px;color:rgb(var(--ink-3));display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.meta b{color:rgb(var(--ink-2));font-weight:500}
+.tag{font-size:11px;border:1px solid rgb(var(--line));border-radius:6px;padding:1px 6px;color:rgb(var(--ink-2))}
+
+/* ── 侧栏统计（毛玻璃） ── */
+aside{border-radius:14px;padding:14px;position:sticky;top:104px}
+aside h4{margin:0 0 10px;font-size:13.5px}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px dashed rgb(var(--line))}
+.kv:last-child{border:none}
+.kv span{color:rgb(var(--ink-2))}
+.kv b{font-variant-numeric:tabular-nums}
+footer{color:rgb(var(--ink-3));font-size:12px;text-align:center;padding:26px 0 40px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.plats{grid-template-columns:repeat(2,1fr)}
+  aside{position:static}.note{position:static}header.frost{top:0}}
+</style>
+</head>
+<body>
+
+<div class="note"><div class="note-in">
+  <span>效果图 3 / 3 · <b>液态玻璃（真折射）</b></span>
+  <span>透镜只用在<b>小尺寸</b>元素上（宽条会鼓成椭圆）· 大面板用普通毛玻璃 · 列表卡片用"假玻璃"</span>
+  <span class="sp"></span>
+  <button class="btn-mini" id="lensToggle" onclick="toggleLens()">关闭真折射（对比普通毛玻璃）</button>
+  <button class="btn-mini" onclick="tg()">切换深色 / 浅色</button>
+</div></div>
+<div class="warnbar" id="warnbar"></div>
+
+<header class="frost"><div class="wrap hd">
+  <div class="brand">四野 <span>中文社交平台聚合搜索</span></div>
+  <nav>
+    <a href="#" class="on">聚合搜索</a>
+    <a href="#">跨平台收藏</a>
+    <a href="#">设置</a>
+  </nav>
+  <span class="sp"></span>
+  <span class="pill"><i class="dot"></i>本地服务正常</span>
+  <span class="pill">登录状态 3/4</span>
+  <!-- 小图标按钮：透镜的天然用武之地 -->
+  <span class="mini lens" data-lens="1" style="width:34px;height:34px;font-size:15px;border-radius:50%">🌙</span>
+</div></header>
+
+<main class="wrap">
+  <section class="search frost">
+    <div class="srow">
+      <input type="text" placeholder="搜索一个话题、人物或产品…" value="露营装备推荐">
+      <!-- 搜索按钮也是小尺寸 → 透镜 -->
+      <button class="btn-search lens" data-lens="1">开始搜索</button>
+    </div>
+    <div class="chips">
+      <span class="chip on">小红书 · 10</span>
+      <span class="chip on">抖音 · 10</span>
+      <span class="chip on">B站 · 10</span>
+      <span class="chip on">知乎 · 10</span>
+      <span class="hint">Enter 搜索 · 最多 10 条 / 平台</span>
+    </div>
+  </section>
+
+  <!-- 透镜展示区 -->
+  <section class="showcase frost">
+    <div class="label">↓ 真折射长这样：透镜下方的高饱和色块会在边缘被"折"弯</div>
+    <div class="row">
+      <span class="mini lens" data-lens="1">☀</span>
+      <span class="mini lens" data-lens="1">🔍</span>
+      <span class="mini lens" data-lens="1">★</span>
+      <span class="mini-pill lens" data-lens="1">药丸按钮</span>
+      <span class="mini-pill lens" data-lens="1">导出 / 复制</span>
+      <span class="mini-pill lens" data-lens="1">收藏 12</span>
+    </div>
+    <div class="caption">这些圆和小药丸就是"液态玻璃"唯一该出现的地方。搜索框、顶栏、结果卡片都不放透镜。</div>
+  </section>
+
+  <div class="plats">
+    <div class="plat frost"><div class="tile" style="background:#e2503f">红</div><div><strong>小红书</strong><small>24 条结果 · 完成 2.1s</small></div></div>
+    <div class="plat frost"><div class="tile" style="background:#2b2b2b">抖</div><div><strong>抖音</strong><small>18 条结果 · 完成 3.4s</small></div></div>
+    <div class="plat frost warn"><div class="tile" style="background:#e07ba6">哔</div><div><strong>B站</strong><small>需要登录 · 前往账号设置</small></div></div>
+    <div class="plat frost"><div class="tile" style="background:#1772f6">知</div><div><strong>知乎</strong><small>12 条结果 · 完成 1.8s</small></div></div>
+  </div>
+
+  <div class="tabs">
+    <span class="tab on">全部<span class="n">54</span></span>
+    <span class="tab">小红书<span class="n">24</span></span>
+    <span class="tab">抖音<span class="n">18</span></span>
+    <span class="tab">B站<span class="n">0</span></span>
+    <span class="tab">知乎<span class="n">12</span></span>
+    <span class="sort"><span class="on">综合</span><span>最新</span><span>互动最多</span></span>
+  </div>
+
+  <div class="grid">
+    <div>
+      <article class="card fake">
+        <div class="cover" style="background:linear-gradient(135deg,#e2503f,#f08a6a)">小红书</div>
+        <div><h3>新手露营装备清单｜人均 800 元搞定全套（附避坑）</h3>
+          <p>从帐篷到睡袋一条龙，第一次露营不用买贵的，这几件性价比最高…</p>
+          <div class="meta"><b>@爱露营的小林</b><span>3 天前</span><span>赞 1.2万</span><span>评 328</span><span class="tag">攻略</span></div></div>
+      </article>
+      <article class="card fake">
+        <div class="cover" style="background:linear-gradient(135deg,#2b2b2b,#5a5a5a)">抖音</div>
+        <div><h3>露营装备怎么选？3 分钟讲清帐篷天幕睡垫</h3>
+          <p>预算有限先买什么？我按使用频率排了个顺序，新手照抄就行。</p>
+          <div class="meta"><b>@户外老张</b><span>昨天</span><span>赞 8642</span><span>评 512</span><span class="tag">视频</span></div></div>
+      </article>
+      <article class="card fake">
+        <div class="cover" style="background:linear-gradient(135deg,#1772f6,#5aa9ff)">知乎</div>
+        <div><h3>第一次露营需要准备哪些装备？有哪些容易被忽略的细节？</h3>
+          <p>建议按"睡眠系统、遮蔽系统、炊具系统"三块准备，其中最容易忽略的是地垫的 R 值…</p>
+          <div class="meta"><b>@山野笔记</b><span>5 天前</span><span>赞 3201</span><span>评 187</span><span class="tag">问答</span></div></div>
+      </article>
+    </div>
+
+    <aside class="frost">
+      <h4>搜索统计 · 最近 100 次</h4>
+      <div class="kv"><span>小红书成功率</span><b>96%</b></div>
+      <div class="kv"><span>抖音成功率</span><b>91%</b></div>
+      <div class="kv"><span>B站成功率</span><b>72%</b></div>
+      <div class="kv"><span>知乎成功率</span><b>94%</b></div>
+      <div class="kv"><span>缓存命中率</span><b>38%</b></div>
+      <div class="kv"><span>P95 耗时</span><b>6.4s</b></div>
+    </aside>
+  </div>
+
+  <footer>四野 · 基于 MediaCrawler 的本地聚合检索工作台</footer>
+</main>
+
+<script>
+/* ── 深色 / 浅色 ── */
+function tg(){
+  document.documentElement.classList.toggle('dark');
+  setTimeout(() => refreshLenses(), 60);
+}
+
+/* ── 浏览器能力判定：真折射目前只有 Chromium 支持 ── */
+const ua = navigator.userAgent;
+const isFirefox = /Firefox/.test(ua);
+const isSafari  = /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua);
+const refracSupported = !isFirefox && !isSafari;
+let lensOn = refracSupported;
+
+/* ── 生成位移贴图：圆角矩形的距离场，把 X/Y 位移编码进 R/G ── */
+function makeDisplacementMap(w, h, radius, band, strength) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const hw = w / 2, hh = h / 2;
+  const r = Math.min(radius, Math.min(hw, hh));
+  // 圆角矩形有向距离场：内部为负
+  function sdf(px, py) {
+    const qx = Math.abs(px) - (hw - r);
+    const qy = Math.abs(py) - (hh - r);
+    const ax = Math.max(qx, 0), ay = Math.max(qy, 0);
+    return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - r;
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const px = x + 0.5 - hw, py = y + 0.5 - hh;
+      const d = sdf(px, py);
+      // 边缘处接近 1，向内 band 像素衰减到 0
+      let f = 1 - Math.min(1, Math.max(0, -d) / band);
+      f = f * f * (3 - 2 * f);           // smoothstep，避免硬边
+      // 用中心差分求外向法线
+      const e = 1;
+      const gx = (sdf(px + e, py) - sdf(px - e, py)) / (2 * e);
+      const gy = (sdf(px, py + e) - sdf(px, py - e)) / (2 * e);
+      const len = Math.hypot(gx, gy) || 1;
+      const nx = gx / len, ny = gy / len;
+      // 向外拉 → 边缘产生"凸透镜"弯折
+      const dx = -nx * f * strength, dy = -ny * f * strength;
+      const i = (y * w + x) * 4;
+      img.data[i]     = Math.round(128 + Math.max(-127, Math.min(127, dx * 127)));
+      img.data[i + 1] = Math.round(128 + Math.max(-127, Math.min(127, dy * 127)));
+      img.data[i + 2] = 128;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL();
+}
+
+/* ── 给一个元素装上 SVG 折射滤镜 ── */
+const NS = 'http://www.w3.org/2000/svg';
+const XLINK = 'http://www.w3.org/1999/xlink';
+let svgRoot = null, uid = 0;
+
+function ensureSvg() {
+  if (svgRoot) return svgRoot;
+  svgRoot = document.createElementNS(NS, 'svg');
+  svgRoot.setAttribute('width', '0');
+  svgRoot.setAttribute('height', '0');
+  svgRoot.setAttribute('aria-hidden', 'true');
+  svgRoot.style.position = 'absolute';
+  svgRoot.style.pointerEvents = 'none';
+  document.body.appendChild(svgRoot);
+  return svgRoot;
+}
+
+function applyLens(el) {
+  const rect = el.getBoundingClientRect();
+  const w = Math.max(8, Math.round(rect.width));
+  const h = Math.max(8, Math.round(rect.height));
+  const cs = getComputedStyle(el);
+  let radius = parseFloat(cs.borderTopLeftRadius) || Math.min(h / 2, 26);
+  if (!isFinite(radius)) radius = Math.min(h / 2, 26);
+  const band = Math.max(6, Math.min(h * 0.6, 22));
+  const map = makeDisplacementMap(w, h, radius, band, 0.9);
+
+  const id = 'lens-' + (++uid);
+  const filter = document.createElementNS(NS, 'filter');
+  filter.setAttribute('id', id);
+  filter.setAttribute('filterUnits', 'userSpaceOnUse');
+  filter.setAttribute('x', '0');
+  filter.setAttribute('y', '0');
+  filter.setAttribute('width', String(w));
+  filter.setAttribute('height', String(h));
+  filter.setAttribute('color-interpolation-filters', 'sRGB');   // 必须：否则中性值漂移
+
+  const feImage = document.createElementNS(NS, 'feImage');
+  feImage.setAttribute('x', '0');
+  feImage.setAttribute('y', '0');
+  feImage.setAttribute('width', String(w));
+  feImage.setAttribute('height', String(h));
+  feImage.setAttribute('preserveAspectRatio', 'none');
+  feImage.setAttribute('result', 'map');
+  feImage.setAttributeNS(XLINK, 'xlink:href', map);
+  feImage.setAttribute('href', map);
+
+  const disp = document.createElementNS(NS, 'feDisplacementMap');
+  disp.setAttribute('in', 'SourceGraphic');
+  disp.setAttribute('in2', 'map');
+  disp.setAttribute('scale', String(Math.round(Math.min(h, w) * 0.52)));
+  disp.setAttribute('xChannelSelector', 'R');
+  disp.setAttribute('yChannelSelector', 'G');
+
+  filter.appendChild(feImage);
+  filter.appendChild(disp);
+  ensureSvg().appendChild(filter);
+
+  el.dataset.filterId = id;
+  const value = `url(#${id}) blur(1.5px) saturate(170%) brightness(1.06)`;
+  el.style.backdropFilter = value;
+  el.style.webkitBackdropFilter = value;
+  el.classList.remove('no-refract');
+}
+
+function clearLens(el) {
+  const id = el.dataset.filterId;
+  if (id) {
+    const f = document.getElementById(id);
+    if (f) f.remove();
+    delete el.dataset.filterId;
+  }
+  el.style.backdropFilter = '';
+  el.style.webkitBackdropFilter = '';
+}
+
+function refreshLenses() {
+  const els = document.querySelectorAll('[data-lens]');
+  els.forEach(el => {
+    clearLens(el);
+    if (lensOn && refracSupported) {
+      applyLens(el);
+    } else {
+      el.classList.add('no-refract');   // 降级为普通毛玻璃，绝不透明
+    }
+  });
+}
+
+function toggleLens() {
+  if (!refracSupported) return;
+  lensOn = !lensOn;
+  document.getElementById('lensToggle').textContent =
+    lensOn ? '关闭真折射（对比普通毛玻璃）' : '打开真折射';
+  refreshLenses();
+}
+
+/* ── 降级提示 ── */
+(function init() {
+  const bar = document.getElementById('warnbar');
+  if (!refracSupported) {
+    lensOn = false;
+    const name = isFirefox ? 'Firefox' : 'Safari';
+    bar.textContent = `当前是 ${name}：它不支持"真折射"，所以这张图里的玻璃会自动降级成普通毛玻璃（不会出现透明空洞）。想看真折射请用 Edge 或 Chrome 打开。`;
+    bar.classList.add('on');
+    document.getElementById('lensToggle').style.display = 'none';
+  }
+  refreshLenses();
+  window.addEventListener('load', () => setTimeout(refreshLenses, 120));
+  let t = null;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(refreshLenses, 200); });
+})();
+</script>
+</body>
+</html>

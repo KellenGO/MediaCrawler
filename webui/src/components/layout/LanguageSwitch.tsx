@@ -20,8 +20,8 @@ export function LanguageSwitch() {
 
   return (
     <Select value={i18n.language} onValueChange={(lang) => i18n.changeLanguage(lang)}>
-      <SelectTrigger className="w-[76px] h-[38px] text-xs border-cyber-border-subtle bg-cyber-bg-secondary hover:border-brand/50 transition-colors">
-        <Globe className="w-3.5 h-3.5 mr-1 text-cyber-text-secondary" />
+      <SelectTrigger aria-label="切换语言" className="hidden sm:flex w-[52px] h-[36px] justify-center px-0 text-[11px] border-0 bg-transparent text-cyber-text-muted hover:bg-brand-soft hover:text-brand-strong transition-colors">
+        <Globe className="w-3.5 h-3.5 mr-1" />
         <SelectValue>{currentLang.label}</SelectValue>
       </SelectTrigger>
       <SelectContent>

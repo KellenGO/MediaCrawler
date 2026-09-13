@@ -6,9 +6,9 @@ import {
   sortResults,
 } from "@/lib/searchExperience";
 import { ResultCard } from "./ResultCard";
-import { BookmarkControl, BookmarkNote, ExportActions, TOOL_BUTTON } from "./ResultTools";
+import { BookmarkControl, BookmarkNote, ExportActions } from "./ResultTools";
 import type { BookmarkLibrary } from "@/hooks/useBookmarks";
-import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, resultKey, type ContentFilter, type ResultFilters } from "@/lib/resultTools";
+import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, resultKey, type ResultFilters } from "@/lib/resultTools";
 
 interface ResultTabsProps {
   results: UnifiedSearchResult[];
@@ -130,35 +130,11 @@ export function ResultTabs({
       savedAt: saved?.savedAt ?? null, note: saved?.note ?? "" };
   });
   const allSelected = filteredResults.length > 0 && selectedResults.length === filteredResults.length;
-  const selectClass = "rounded-lg border border-cyber-border-subtle bg-cyber-bg-secondary px-2.5 py-2 text-xs text-cyber-text-primary focus:outline-none focus:ring-2 focus:ring-brand/40";
+  const selectClass = "field select";
 
   return (
-    <div className="mt-6">
-      <div className="mb-4 rounded-xl border border-cyber-border-subtle bg-cyber-bg-secondary p-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-cyber-text-muted">发布时间
-            <select aria-label="发布时间筛选" className={selectClass} value={filters.days}
-              onChange={(event) => setFilters({ ...filters, days: Number(event.target.value) as 0 | 7 | 30 })}>
-              <option value={0}>全部时间</option><option value={7}>近 7 天</option><option value={30}>近 30 天</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-xs text-cyber-text-muted">内容类型
-            <select aria-label="内容类型筛选" className={selectClass} value={filters.contentType}
-              onChange={(event) => setFilters({ ...filters, contentType: event.target.value as ContentFilter })}>
-              <option value="all">全部类型</option><option value="video">视频</option><option value="note">图文 / 帖子</option><option value="article">文章 / 回答</option>
-            </select>
-          </label>
-          <input aria-label="结果内关键词" className={`${selectClass} min-w-0 flex-1 basis-48`} maxLength={200}
-            placeholder="在标题、作者、摘要中查找" value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} />
-          <button type="button" className={TOOL_BUTTON} onClick={() => setFilters({ ...DEFAULT_FILTERS })}>清除筛选</button>
-        </div>
-        <p className="mt-2 text-xs text-cyber-text-muted" role="status">
-          {savedView ? "本地收藏" : "当前已返回结果"}中符合条件 {filteredResults.length} 条。仅筛选已有内容，不额外请求平台。{filters.days > 0 && " 日期未知的内容不在此时间范围内。"}
-        </p>
-      </div>
-      {/* 标签栏 + 排序：标签固定五项，宽度不足时自然换行，绝不出现内部滚动条 */}
-      <div className="flex items-end justify-between gap-4 flex-wrap border-b border-cyber-border-subtle pb-[13px] mb-4">
-        <div className="flex gap-5 flex-wrap overflow-visible" role="tablist" aria-label="结果平台">
+    <div className="results-block">
+      <div className="tabs" role="tablist" aria-label="结果平台">
           {visibleTabs.map((tab) => {
             const count = counts[tab.key] || 0;
             const active = effectiveTab === tab.key;
@@ -168,47 +144,22 @@ export function ResultTabs({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setActiveTab(tab.key)}
-                className={`relative py-1.5 text-[13.5px] whitespace-nowrap transition-colors ${
-                  active
-                    ? "text-cyber-text-primary font-bold"
-                    : "text-cyber-text-muted hover:text-cyber-text-primary"
-                }`}
+                className={`tab ${active ? "active" : ""}`}
               >
                 {tab.label}
-                <span className={`ml-1.5 text-[10.5px] ${active ? "text-cyber-text-muted" : "text-cyber-text-muted/70"}`}>
-                  {count}
-                </span>
-                {active && (
-                  <span className="absolute left-0 right-0 -bottom-[15px] h-[2px] rounded-full bg-brand" />
-                )}
+                <span>{count}</span>
               </button>
             );
           })}
-        </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-        {onSortModeChange && (
-          <div className="flex gap-0.5 rounded-[10px] border border-cyber-border-subtle bg-cyber-bg-secondary p-1" role="group" aria-label="排序方式">
-            {SORT_MODES.map((m) => (
-              <button
-                key={m.key}
-                type="button"
-                onClick={() => onSortModeChange(m.key)}
-                className={`px-2.5 py-1 rounded-[7px] text-[11.5px] transition-colors ${
-                  sortMode === m.key
-                    ? "bg-brand-soft text-brand-strong font-semibold"
-                    : "text-cyber-text-muted hover:text-cyber-text-primary"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <button type="button" className={TOOL_BUTTON} aria-expanded={exportOpen} onClick={() => {
-          setExportOpen(!exportOpen); setSelected(new Set());
-        }}>{exportOpen ? "收起导出" : "导出 / 复制"}</button>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          {onSortModeChange && <label><span className="sr-only">结果排序</span><select className={selectClass} aria-label="排序方式" value={sortMode} onChange={(event) => onSortModeChange(event.target.value as SearchSortMode)}>{SORT_MODES.map((mode) => <option key={mode.key} value={mode.key}>{mode.label === "综合" ? "综合排序" : mode.label}</option>)}</select></label>}
+          <input aria-label="结果内关键词" className="field filter-input" maxLength={200} placeholder={`在${savedView ? "收藏" : "结果"}中查找…`} value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} />
+          {filters.query && <button type="button" className="text-link" onClick={() => setFilters({ ...filters, query: "" })}>清除筛选</button>}
         </div>
+        <button type="button" className="text-link" aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); setSelected(new Set()); }}>{exportOpen ? "收起导出" : "导出 / 复制"}</button>
       </div>
 
       {/* 结果卡片 */}
@@ -220,8 +171,8 @@ export function ResultTabs({
         </div>
         <ExportActions rows={rows} keyword={savedView ? "本地收藏" : keyword} />
       </div>}
-      <div className="flex flex-col gap-3">
-        {filteredResults.map((result) => {
+      <div className="result-list flex flex-col">
+        {filteredResults.map((result, index) => {
           const key = groupKey(result);
           const bookmark = bookmarks.get(resultKey(result));
           return (
@@ -233,7 +184,7 @@ export function ResultTabs({
                   })} />选择
                 </label>
               </div>}
-              <ResultCard result={result} highlightQuery={filters.query || keyword}
+              <ResultCard result={result} index={index} highlightQuery={filters.query || keyword}
                 renderBookmark={library ? (source) => <BookmarkControl result={source} library={library} fetchedAt={fetchedAt} /> : undefined} />
               {savedView && bookmark && library && <BookmarkNote bookmark={bookmark} onSave={library.saveNote} />}
             </div>

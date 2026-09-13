@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>效果图 6 · 新布局 × 液态玻璃</title>
+<style>
+/* ============================================================
+   效果图 6：同布局 × 液态玻璃（真折射）
+   格局和 4、5 完全一样，只换外观。
+   透镜（会折射的玻璃）只放在**小元素**上：
+     顶部 4 个平台芯片 / 搜索框里的"搜索"按钮 / 右下浮动按钮
+   大搜索框、卡片、顶栏用普通毛玻璃；30 个小标签用"假玻璃"。
+   真折射只有 Chrome / Edge 支持，Firefox 会自动降级（有提示条）。
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --brand:76 164 220; --brand-strong:41 126 186;
+  --ink:23 43 61; --ink-2:108 129 147; --ink-3:152 170 186;
+  --ok:79 158 121; --warn:183 99 37;
+  --page:244 249 254;
+  --frost:255 255 255 / .52;
+  --edge:255 255 255 / .70;
+  --fake:255 255 255 / .95;
+  --line:214 230 242;
+  --shadow:0 18px 44px rgb(41 126 186 / .18);
+}
+html.dark{
+  --brand:120 200 243; --brand-strong:155 217 248;
+  --ink:238 243 239; --ink-2:160 172 165; --ink-3:116 128 120;
+  --page:11 16 20;
+  --frost:24 32 38 / .55;
+  --edge:255 255 255 / .18;
+  --fake:26 34 40 / .96;
+  --line:48 62 72;
+  --shadow:0 18px 44px rgb(0 0 0 / .44);
+}
+html,body{margin:0;padding:0}
+body{font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:rgb(var(--ink));background:rgb(var(--page));min-height:100vh;-webkit-font-smoothing:antialiased}
+body::before{ /* 柔和彩色光斑：折射要有东西可折（别用硬直线，会折出拐角）
+   注意：光斑必须落在透镜正后方 —— 背后是纯色的地方，折射等于看不见。 */
+  content:"";position:fixed;inset:0;z-index:-2;
+  background:
+    radial-gradient(52vw 42vh at 22% 2%,  rgb(var(--brand) / .42), transparent 64%),
+    radial-gradient(44vw 38vh at 88% 8%,  rgb(167 139 250 / .34), transparent 62%),
+    /* ↓ 这两块专门放在「平台芯片」正后方，让折射看得出来 */
+    radial-gradient(30vw 15vh at 40% 30%, rgb(76 164 220 / .60), transparent 72%),
+    radial-gradient(26vw 14vh at 63% 32%, rgb(244 114 182 / .50), transparent 72%),
+    /* ↓ 这块放在右下浮动按钮正后方 */
+    radial-gradient(30vw 22vh at 90% 86%, rgb(45 212 191 / .48), transparent 72%),
+    radial-gradient(46vw 36vh at 60% 66%, rgb(244 114 182 / .22), transparent 62%),
+    radial-gradient(40vw 34vh at 4% 62%,  rgb(45 212 191 / .24), transparent 62%),
+    rgb(var(--page));
+}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+
+/* ── 毛玻璃（大面板） ── */
+.frost{background:rgb(var(--frost));
+  backdrop-filter:blur(20px) saturate(165%) brightness(1.04);
+  -webkit-backdrop-filter:blur(20px) saturate(165%) brightness(1.04);
+  border:1px solid rgb(var(--edge) / .45);
+  box-shadow:inset 0 1px 0 rgb(var(--edge)), var(--shadow)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .frost{background:rgb(var(--fake))}
+}
+/* 假玻璃（数量多的元素） */
+.fake{background:rgb(var(--fake));border:1px solid rgb(var(--line));
+  box-shadow:inset 0 1px 0 rgb(var(--edge)), 0 4px 16px rgb(41 126 186 / .08)}
+
+/* ── 透镜外观：高光边 + 内阴影 + 微色散 ── */
+.lens{position:relative;overflow:hidden;isolation:isolate;
+  border:1px solid rgb(255 255 255 / .55);
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .85), inset 0 -1px 1px rgb(255 255 255 / .35),
+    inset 0 0 14px rgb(255 255 255 / .22), 0 8px 22px rgb(41 126 186 / .28)}
+html.dark .lens{border-color:rgb(255 255 255 / .22);
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .30), inset 0 -1px 1px rgb(255 255 255 / .12),
+    0 8px 22px rgb(0 0 0 / .48)}
+.lens.no-refract{backdrop-filter:blur(14px) saturate(160%);
+  -webkit-backdrop-filter:blur(14px) saturate(160%);background:rgb(var(--frost))}
+
+/* ── 顶栏 ── */
+header{position:sticky;top:0;z-index:40;border-bottom:1px solid rgb(var(--edge) / .4);
+  background:rgb(var(--frost));
+  backdrop-filter:blur(22px) saturate(170%) brightness(1.04);
+  -webkit-backdrop-filter:blur(22px) saturate(170%) brightness(1.04);
+  box-shadow:inset 0 1px 0 rgb(var(--edge))}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  header{background:rgb(var(--fake))}
+}
+.hd{display:flex;align-items:center;gap:12px;height:54px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:16px}
+.logo i{width:26px;height:26px;border-radius:9px;display:grid;place-items:center;color:#fff;
+  font-style:normal;font-size:14px;
+  background:linear-gradient(140deg,rgb(var(--brand)/.95),rgb(var(--brand-strong)/.95));
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .6)}
+.hd .sp{flex:1}
+.tbtn{font-size:12.5px;padding:6px 13px;border-radius:999px;border:1px solid rgb(var(--line));
+  background:rgb(var(--fake));color:rgb(var(--ink-2));cursor:pointer;font-family:inherit}
+.tbtn:hover{border-color:rgb(var(--brand));color:rgb(var(--brand-strong))}
+.seg{display:flex;gap:5px;align-items:center;font-size:12.5px;color:rgb(var(--ink-3))}
+.user{font-size:12.5px;padding:5px 13px;border-radius:999px;font-weight:700;
+  color:rgb(var(--brand-strong));background:rgb(var(--brand) / .16);border:1px solid rgb(var(--brand) / .4)}
+
+.warnbar{display:none;background:#7a4a12;color:#ffe9cf;font-size:12px;padding:7px 20px;text-align:center}
+.warnbar.on{display:block}
+
+/* ── 大标题 ── */
+.hero{text-align:center;padding:44px 0 6px;position:relative}
+.hero .mark{width:76px;height:76px;border-radius:24px;margin:0 auto 14px;display:grid;place-items:center;
+  font-size:34px;font-weight:800;color:#fff;
+  background:linear-gradient(140deg,rgb(var(--brand)),rgb(var(--brand-strong)));
+  box-shadow:0 16px 38px rgb(var(--brand) / .42), inset 0 1px 0 rgb(255 255 255 / .6)}
+.hero h1{margin:0;font-size:38px;letter-spacing:1px;
+  background:linear-gradient(180deg,rgb(var(--brand-strong)),rgb(var(--brand)));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{margin:8px 0 0;color:rgb(var(--ink-2));font-size:13.5px}
+
+/* ── 平台行：4 个小芯片 → 用透镜 ── */
+.plats{display:flex;justify-content:center;gap:14px;margin:20px 0 18px;flex-wrap:wrap}
+.pf{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#fff;font-weight:600;
+  border-radius:999px;padding:7px 15px;cursor:pointer;background:rgb(255 255 255 / .16)}
+.pf i{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;color:#fff;
+  font-style:normal;font-size:10px;font-weight:700}
+
+/* ── 大搜索框（毛玻璃）+ 搜索按钮（透镜） ── */
+.searchbox{max-width:680px;margin:0 auto;display:flex;gap:8px;padding:8px;border-radius:14px}
+.searchbox input{flex:1;border:1px solid rgb(var(--line));border-radius:10px;
+  background:rgb(var(--fake));font:inherit;font-size:14.5px;padding:11px 13px;color:rgb(var(--ink))}
+.searchbox input:focus{outline:none;box-shadow:0 0 0 3px rgb(var(--brand) / .22);border-color:rgb(var(--brand))}
+.gobtn{cursor:pointer;font:inherit;font-weight:700;font-size:14px;padding:11px 30px;border-radius:999px;
+  color:#fff;
+  /* 它底下是毛玻璃条，颜色不多 —— 所以给它自己的品牌色玻璃底 */
+  background:linear-gradient(180deg,rgb(var(--brand) / .88),rgb(var(--brand-strong) / .88))}
+.hint{max-width:680px;margin:10px auto 0;font-size:11.5px;color:rgb(var(--ink-3));text-align:center}
+
+/* ── 卡片 ── */
+.grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;margin-top:22px}
+.card{border-radius:16px;padding:16px 18px}
+.card h2{margin:0 0 12px;font-size:14.5px;display:flex;align-items:center;gap:7px}
+.card h2 .ic{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;font-size:11px;
+  background:rgb(var(--brand) / .20);color:rgb(var(--brand-strong))}
+
+/* ── 标签（假玻璃，30+ 个不能开模糊） ── */
+.tags{display:flex;flex-wrap:wrap;gap:8px}
+.tag{font-size:12.5px;padding:5px 11px;border-radius:7px;cursor:pointer;
+  background:rgb(var(--fake));border:1px solid rgb(var(--line));color:rgb(var(--ink-2))}
+.tag:hover{border-color:rgb(var(--brand));color:rgb(var(--brand-strong))}
+.tag.hot{color:rgb(var(--warn));border-color:rgb(var(--warn) / .4);background:rgb(var(--warn) / .10)}
+
+/* ── 列表 ── */
+.list{margin:0;padding:0;list-style:none}
+.list li{display:flex;align-items:center;gap:11px;padding:10px 2px;
+  border-bottom:1px dashed rgb(var(--line) / .9)}
+.list li:last-child{border-bottom:none}
+.num{width:20px;flex:0 0 auto;text-align:center;font-size:12px;color:rgb(var(--ink-3));
+  font-variant-numeric:tabular-nums}
+.list li:nth-child(-n+3) .num{color:rgb(var(--brand-strong));font-weight:800}
+.title{flex:1;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.title em{font-style:normal;font-size:11px;padding:1px 6px;border-radius:5px;margin-left:6px;
+  background:rgb(var(--brand) / .16);color:rgb(var(--brand-strong))}
+.title em.q{background:rgb(226 80 63 / .14);color:#c0442f}
+.title em.d{background:rgb(43 43 43 / .10);color:#4b4b4b}
+.title em.b{background:rgb(224 123 166 / .18);color:#b5557f}
+.title em.z{background:rgb(23 114 246 / .14);color:#1560c9}
+html.dark .title em.d{background:rgb(255 255 255 / .14);color:#dcdcdc}
+.cnt,.size{flex:0 0 auto;font-size:11.5px;color:rgb(var(--ink-3));font-variant-numeric:tabular-nums}
+
+/* ── 右下浮动按钮（透镜：它正下方就是彩色光斑，折射最明显） ── */
+.fab{position:fixed;right:26px;bottom:26px;z-index:30;display:flex;align-items:center;gap:8px;
+  padding:13px 22px;border-radius:999px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;
+  background:linear-gradient(140deg,rgb(var(--brand) / .55),rgb(var(--brand-strong) / .55))}
+footer{text-align:center;color:rgb(var(--ink-3));font-size:11.5px;padding:30px 0 40px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+
+<div class="warnbar" id="warnbar"></div>
+
+<header><div class="wrap hd">
+  <span class="logo"><i>四</i>四野</span>
+  <span class="sp"></span>
+  <button class="tbtn">提交反馈</button>
+  <button class="tbtn" id="lensToggle" onclick="toggleLens()">关掉折射</button>
+  <span class="seg">亮色 <button class="tbtn" id="th" onclick="tg()">暗色</button></span>
+  <span class="user">登录状态 3/4</span>
+</div></header>
+
+<main class="wrap">
+  <div class="hero">
+    <div class="mark">四</div>
+    <h1>四野</h1>
+    <p>聚合小红书 · 抖音 · B站 · 知乎，一搜即达</p>
+  </div>
+
+  <!-- 4 个平台芯片：小尺寸 → 透镜 -->
+  <div class="plats">
+    <span class="pf lens" data-lens="1"><i style="background:#e2503f">红</i>小红书</span>
+    <span class="pf lens" data-lens="1"><i style="background:#2b2b2b">抖</i>抖音</span>
+    <span class="pf lens" data-lens="1"><i style="background:#e07ba6">哔</i>B站</span>
+    <span class="pf lens" data-lens="1"><i style="background:#1772f6">知</i>知乎</span>
+  </div>
+
+  <div class="searchbox frost">
+    <input type="text" placeholder="输入关键词，同时搜索四个平台的内容…" value="露营装备推荐">
+    <button class="gobtn lens" data-lens="1">搜索</button>
+  </div>
+  <div class="hint">Enter 搜索 · 每个平台最多 10 条 · 结果自动去重合并</div>
+
+  <div class="grid2">
+    <section class="card frost">
+      <h2><span class="ic">🔥</span>热门搜索</h2>
+      <div class="tags">
+        <span class="tag hot">露营装备</span><span class="tag">考研</span><span class="tag">减脂餐</span>
+        <span class="tag">国考</span><span class="tag">英语四级</span><span class="tag">装修</span>
+        <span class="tag">简历模板</span><span class="tag hot">Python</span><span class="tag">剪辑教程</span>
+        <span class="tag">手机摄影</span><span class="tag">副业</span><span class="tag">理财入门</span>
+        <span class="tag">健身计划</span><span class="tag">小说推荐</span><span class="tag">美妆</span>
+        <span class="tag">育儿</span><span class="tag">考研数学</span><span class="tag">雅思</span>
+        <span class="tag">面试技巧</span><span class="tag">旅行攻略</span><span class="tag">手冲咖啡</span>
+        <span class="tag">数码测评</span><span class="tag">二手车</span><span class="tag">职场沟通</span>
+        <span class="tag">PPT 模板</span><span class="tag">Excel</span><span class="tag hot">英语口语</span>
+        <span class="tag">吉他入门</span><span class="tag">养猫</span><span class="tag">空气炸锅</span>
+        <span class="tag">考研英语</span><span class="tag">申论</span><span class="tag">消防工程师</span>
+      </div>
+    </section>
+
+    <section class="card frost">
+      <h2><span class="ic">🕐</span>历史搜索</h2>
+      <div class="tags">
+        <span class="tag">露营装备推荐</span><span class="tag">减脂餐食谱</span>
+        <span class="tag">无职转生</span><span class="tag">灵笼</span>
+        <span class="tag">我独自升级</span><span class="tag">空气炸锅 食谱</span>
+        <span class="tag">露营 天幕</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="card frost">
+      <h2><span class="ic">🔥</span>热门资源</h2>
+      <ul class="list">
+        <li><span class="num">1</span><span class="title">新手露营装备清单｜人均 800 元搞定全套<em class="q">小红书</em></span><span class="cnt">👁 2.3万</span></li>
+        <li><span class="num">2</span><span class="title">露营装备怎么选？3 分钟讲清帐篷天幕睡垫<em class="d">抖音</em></span><span class="cnt">👁 1.9万</span></li>
+        <li><span class="num">3</span><span class="title">第一次露营需要准备哪些装备？<em class="z">知乎</em></span><span class="cnt">👁 1.6万</span></li>
+        <li><span class="num">4</span><span class="title">露营桌怎么挑？蛋卷桌 vs 折叠桌实测<em class="q">小红书</em></span><span class="cnt">👁 9620</span></li>
+        <li><span class="num">5</span><span class="title">露营第一次就翻车？这 8 个坑我替你踩了<em class="b">B站</em></span><span class="cnt">👁 5216</span></li>
+        <li><span class="num">6</span><span class="title">2026 露营装备避坑指南（附价格区间）<em class="z">知乎</em></span><span class="cnt">👁 4188</span></li>
+      </ul>
+    </section>
+
+    <section class="card frost">
+      <h2><span class="ic">🕐</span>最新结果</h2>
+      <ul class="list">
+        <li><span class="num">1</span><span class="title">露营天幕怎么搭才不塌<em class="q">小红书</em></span><span class="size">3 分钟前</span></li>
+        <li><span class="num">2</span><span class="title">轻量化露营装备清单 2026<em class="d">抖音</em></span><span class="size">12 分钟前</span></li>
+        <li><span class="num">3</span><span class="title">露营睡垫 R 值到底怎么看<em class="z">知乎</em></span><span class="size">28 分钟前</span></li>
+        <li><span class="num">4</span><span class="title">一个人露营要带什么｜独行版<em class="b">B站</em></span><span class="size">1 小时前</span></li>
+        <li><span class="num">5</span><span class="title">露营灯怎么选？亮度与续航实测<em class="q">小红书</em></span><span class="size">2 小时前</span></li>
+        <li><span class="num">6</span><span class="title">露营炊具入门：一套够用的配置<em class="d">抖音</em></span><span class="size">3 小时前</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>预览稿 · 仅用于对比三种外观 · 不是最终代码</footer>
+</main>
+
+<!-- 右下浮动按钮：透镜（正下方就是彩色光斑，折射最明显） -->
+<div class="fab lens" data-lens="1">↑ 回到顶部</div>
+
+<script>
+/* ── 深色 / 浅色 ── */
+function tg(){
+  const d = document.documentElement.classList.toggle('dark');
+  document.getElementById('th').textContent = d ? '亮色' : '暗色';
+  setTimeout(refreshLenses, 80);
+}
+
+/* ── 能力判定：真折射目前只有 Chromium 支持 ── */
+const ua = navigator.userAgent;
+const isFirefox = /Firefox/.test(ua);
+const isSafari  = /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua);
+const refracSupported = !isFirefox && !isSafari;
+let lensOn = refracSupported;
+
+/* ── 位移贴图：圆角矩形距离场，X/Y 位移编码进 R/G ── */
+function makeDisplacementMap(w, h, radius, band, strength) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const hw = w / 2, hh = h / 2;
+  const r = Math.min(radius, Math.min(hw, hh));
+  function sdf(px, py) {
+    const qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r);
+    const ax = Math.max(qx, 0), ay = Math.max(qy, 0);
+    return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - r;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const px = x + 0.5 - hw, py = y + 0.5 - hh;
+    let f = 1 - Math.min(1, Math.max(0, -sdf(px, py)) / band);
+    f = f * f * (3 - 2 * f);
+    const e = 1;
+    const gx = (sdf(px + e, py) - sdf(px - e, py)) / (2 * e);
+    const gy = (sdf(px, py + e) - sdf(px, py - e)) / (2 * e);
+    const len = Math.hypot(gx, gy) || 1;
+    const dx = -(gx / len) * f * strength, dy = -(gy / len) * f * strength;
+    const i = (y * w + x) * 4;
+    img.data[i]     = Math.round(128 + Math.max(-127, Math.min(127, dx * 127)));
+    img.data[i + 1] = Math.round(128 + Math.max(-127, Math.min(127, dy * 127)));
+    img.data[i + 2] = 128; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL();
+}
+
+const NS = 'http://www.w3.org/2000/svg';
+const XLINK = 'http://www.w3.org/1999/xlink';
+let svgRoot = null, uid = 0;
+
+function ensureSvg() {
+  if (svgRoot) return svgRoot;
+  svgRoot = document.createElementNS(NS, 'svg');
+  svgRoot.setAttribute('width', '0'); svgRoot.setAttribute('height', '0');
+  svgRoot.setAttribute('aria-hidden', 'true');
+  svgRoot.style.position = 'absolute'; svgRoot.style.pointerEvents = 'none';
+  document.body.appendChild(svgRoot);
+  return svgRoot;
+}
+
+function applyLens(el) {
+  const rect = el.getBoundingClientRect();
+  const w = Math.max(8, Math.round(rect.width)), h = Math.max(8, Math.round(rect.height));
+  let radius = parseFloat(getComputedStyle(el).borderTopLeftRadius);
+  if (!isFinite(radius) || radius <= 0) radius = Math.min(h / 2, 20);
+  const map = makeDisplacementMap(w, h, radius, Math.max(5, Math.min(h * 0.55, 18)), 0.9);
+  const id = 'lens-' + (++uid);
+  const f = document.createElementNS(NS, 'filter');
+  f.setAttribute('id', id);
+  f.setAttribute('filterUnits', 'userSpaceOnUse');
+  f.setAttribute('x', '0'); f.setAttribute('y', '0');
+  f.setAttribute('width', String(w)); f.setAttribute('height', String(h));
+  f.setAttribute('color-interpolation-filters', 'sRGB');
+  const im = document.createElementNS(NS, 'feImage');
+  im.setAttribute('x', '0'); im.setAttribute('y', '0');
+  im.setAttribute('width', String(w)); im.setAttribute('height', String(h));
+  im.setAttribute('preserveAspectRatio', 'none'); im.setAttribute('result', 'map');
+  im.setAttributeNS(XLINK, 'xlink:href', map); im.setAttribute('href', map);
+  const dp = document.createElementNS(NS, 'feDisplacementMap');
+  dp.setAttribute('in', 'SourceGraphic'); dp.setAttribute('in2', 'map');
+  dp.setAttribute('scale', String(Math.round(Math.min(h, w) * 0.5)));
+  dp.setAttribute('xChannelSelector', 'R'); dp.setAttribute('yChannelSelector', 'G');
+  f.appendChild(im); f.appendChild(dp);
+  ensureSvg().appendChild(f);
+  el.dataset.filterId = id;
+  const v = 'url(#' + id + ') blur(1.5px) saturate(175%) brightness(1.06)';
+  el.style.backdropFilter = v; el.style.webkitBackdropFilter = v;
+  el.classList.remove('no-refract');
+}
+
+function clearLens(el) {
+  const id = el.dataset.filterId;
+  if (id) { const f = document.getElementById(id); if (f) f.remove(); delete el.dataset.filterId; }
+  el.style.backdropFilter = ''; el.style.webkitBackdropFilter = '';
+}
+
+function refreshLenses() {
+  document.querySelectorAll('[data-lens]').forEach(el => {
+    clearLens(el);
+    if (lensOn && refracSupported) applyLens(el);
+    else el.classList.add('no-refract');
+  });
+}
+
+function toggleLens() {
+  if (!refracSupported) return;
+  lensOn = !lensOn;
+  document.getElementById('lensToggle').textContent = lensOn ? '关掉折射' : '打开折射';
+  refreshLenses();
+}
+
+(function init() {
+  const bar = document.getElementById('warnbar');
+  if (!refracSupported) {
+    lensOn = false;
+    bar.textContent = (isFirefox ? 'Firefox' : 'Safari') +
+      '：不支持"真折射"，玻璃已自动降级成普通毛玻璃（不会出现透明空洞）。想看真折射请用 Edge / Chrome 打开。';
+    bar.classList.add('on');
+    document.getElementById('lensToggle').style.display = 'none';
+  }
+  refreshLenses();
+  window.addEventListener('load', () => setTimeout(refreshLenses, 150));
+  let t = null;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(refreshLenses, 200); });
+})();
+</script>
+</body>
+</html>
