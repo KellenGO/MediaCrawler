@@ -6,8 +6,10 @@ import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { INITIAL_POPOVER_STATE, searchPopoverReducer } from "@/lib/searchPopover";
 import type { PlatformLimitMap } from "@/lib/platformLimits";
 import { SearchPopover } from "./SearchPopover";
+import { PLATFORM_SLUGS } from "@/lib/platformMeta";
 
-const ALL_PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
+const ALL_PLATFORMS = PLATFORM_SLUGS;
+
 
 interface SearchBarProps {
   home?: boolean;

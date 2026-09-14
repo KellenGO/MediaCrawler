@@ -619,7 +619,8 @@ figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
       <li><strong>跨平台收藏</strong>：把你在各平台已经收藏过的内容拉到一页里统一看（每次每平台 20 条，只读，不会改动你在平台上的收藏）。</li>
     </ul>
     <div class="callout warn">
-      <b>收藏存在浏览器里</b>：清除网站数据或换浏览器会丢。做这些操作前，先在「本地收藏」里点
+      <b>收藏存在本机</b>：数据落在程序的 <code>data/library.db</code> 里，清除浏览器数据、换浏览器都不会丢。
+      想额外留一份副本，可在「本地收藏」里点
       <b>「备份全部收藏」</b>下载 JSON，之后可以导回来。
     </div>
 
@@ -635,7 +636,7 @@ figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
       <tr><th>第一次搜索很慢</th><td>首次要启动浏览器，之后快很多；同样的关键词 90 秒内有缓存，会立刻返回。</td></tr>
       <tr><th>双击没反应</th><td>确认是完整解压、目录可写；看控制台窗口里的报错。杀毒软件拦截的话把目录加白名单。</td></tr>
       <tr><th>8080 端口被占用</th><td>说明已经有一个四野在跑，关掉它的控制台再启动。</td></tr>
-      <tr><th>收藏不见了</th><td>清了网站数据或换了浏览器，只能用之前备份的 JSON 导入恢复。</td></tr>
+      <tr><th>收藏不见了</th><td>收藏存在程序的 <code>data/library.db</code>，正常不会因为清浏览器缓存而丢。先确认打开的是同一个安装目录（换目录会读不到原来的库），再用之前备份的 JSON 导入恢复。</td></tr>
       <tr><th>能商用吗</th><td><strong>不能。</strong>本项目为非商业学习许可，严禁任何商业用途或盈利活动，详见<a href="index.html#license">许可与免责声明</a>。</td></tr>
     </table>
 

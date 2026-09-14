@@ -9,8 +9,10 @@ import { useFavorites } from "@/hooks/useFavorites";
 import { parseGroupKey } from "@/lib/resultTools";
 import type { PlatformSlug } from "@/types/search";
 import { PLATFORM_COLORS, PLATFORM_LABELS, STATUS_LABELS } from "@/types/search";
+import { PLATFORM_SLUGS } from "@/lib/platformMeta";
 
-const PLATFORMS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
+const PLATFORMS = PLATFORM_SLUGS;
+
 
 function errorMessage(error: unknown): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;

@@ -3,6 +3,9 @@ import { Loader2, RotateCcw } from "lucide-react";
 import type { PlatformSlug, PlatformStatus as PStatus, SearchJobResponse } from "@/types/search";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import { cooldownSeconds, freshnessLine, statusLine } from "@/lib/statusDisplay";
+import { PLATFORM_SLUGS } from "@/lib/platformMeta";
+
+const PLATFORM_ORDER = PLATFORM_SLUGS;
 
 interface PlatformStatusProps {
   response: SearchJobResponse | undefined;
@@ -11,7 +14,6 @@ interface PlatformStatusProps {
   retryDisabled?: boolean;
 }
 
-const PLATFORM_ORDER: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
 const RETRYABLE_STATUSES: PStatus[] = ["failed", "timed_out", "rate_limited", "login_required"];
 
 export function PlatformStatus({ response, onRetry, retryingPlatform, retryDisabled }: PlatformStatusProps) {

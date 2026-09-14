@@ -17,8 +17,12 @@ import type {
   SearchJobResponse,
   UnifiedSearchResult,
 } from "@/types/search";
+import { PLATFORM_SLUGS, isPlatformSlug } from "./platformMeta.js";
 
-export const PLATFORM_SLUGS: PlatformSlug[] = ["xhs", "douyin", "bilibili", "zhihu"];
+// 平台列表与 slug 守卫的唯一来源是 platformMeta（历史上这里各有一份拷贝）。
+// 继续从这里导出，是为了不改动既有调用点与测试。
+export { PLATFORM_SLUGS, isPlatformSlug };
+
 export const HISTORY_STORAGE_KEY = "aggregate_search_history";
 export const PLATFORM_PREF_STORAGE_KEY = "aggregate_search_platform_pref";
 export const MAX_HISTORY_ITEMS = 10;
@@ -48,10 +52,7 @@ export interface BusyFlags {
 }
 
 // ── Slug validation ────────────────────────────────────────────────────
-
-export function isPlatformSlug(value: unknown): value is PlatformSlug {
-  return typeof value === "string" && (PLATFORM_SLUGS as string[]).includes(value);
-}
+// isPlatformSlug 见 lib/platformMeta.ts（上面已 re-export）。
 
 // ── Search history ─────────────────────────────────────────────────────
 

@@ -64,25 +64,16 @@ class BilibiliCrawler(AbstractCrawler):
         self.cookie_urls = [self.index_url]
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
-        self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self):
         self._begin_phase_timing()
-        playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
-            from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
-
-            self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
-            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
-            playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
-
         async with async_playwright() as playwright:
             # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
                 utils.logger.info("[BilibiliCrawler] Launching browser using CDP mode")
                 self.browser_context = await self.launch_browser_with_cdp(
                     playwright,
-                    playwright_proxy_format,
+                    None,
                     self.user_agent,
                     headless=config.CDP_HEADLESS,
                 )
@@ -106,7 +97,7 @@ class BilibiliCrawler(AbstractCrawler):
             self._report_metric("navigation")
 
             # Create a client to interact with the xiaohongshu website.
-            self.bili_client = await self.create_bilibili_client(httpx_proxy_format)
+            self.bili_client = await self.create_bilibili_client(None)
             if not await self.bili_client.pong():
                 if self._login_fail_fast():
                     from base.exceptions import LoginRequiredError
@@ -271,7 +262,6 @@ class BilibiliCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
-            proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
         )
         return bilibili_client_obj
 
@@ -292,7 +282,6 @@ class BilibiliCrawler(AbstractCrawler):
             },
             playwright_page=None,
             cookie_dict=dict(cookie_dict),
-            proxy_ip_pool=None,
             reuse_http_client=self._reuse_http_client(),
         )
 

@@ -40,6 +40,30 @@ _REQUIRED_SECTIONS = (
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)#]+)\)")
 
+# 「代码入口」里用反引号包起来的路径（形如 `api/services/accounts.py`）。
+# 只认带扩展名且不含空格/通配符的那些，避免把普通术语当成路径。
+_CODE_PATH_RE = re.compile(r"`([A-Za-z0-9_./-]+\.(?:py|ts|tsx|js|json|ps1|bat|spec|toml|md))`")
+# 允许写不存在的路径：明确标注为「历史 / 已删 / 计划」时用这个后缀
+_CODE_PATH_OK_SUFFIX = "（历史记录，已不存在）"
+
+
+def _code_entry_paths(text: str):
+    """抽出 feature 文档里提到的代码路径（相对仓库根）。"""
+    for match in _CODE_PATH_RE.finditer(text):
+        candidate = match.group(1).strip()
+        if candidate.startswith(("/", "../")):
+            continue
+        # 排除明显是「函数/表/字段」的写法与通配符
+        if "*" in candidate or candidate.endswith("/"):
+            continue
+        # 只校验「相对仓库根」的路径（带目录分隔符）。文档里也会出现
+        # 与同格其它文件并列的裸文件名（如 `useAccounts.ts`），
+        # 它们相对的是同格已写出的目录，无法单独解析，跳过。
+        if "/" not in candidate:
+            continue
+        yield candidate
+
+
 
 def _feature_files():
     """真实的 feature 文档（以下划线开头的模板/草稿不计）。"""
@@ -131,3 +155,22 @@ def test_template_is_not_treated_as_a_feature():
     stray = [p.name for p in _FEATURES_DIR.glob("*.md")
              if "TEMPLATE" in p.name.upper() and not p.name.startswith("_")]
     assert stray == [], f"模板文件应以下划线开头: {stray}"
+
+
+def test_feature_code_entry_paths_exist():
+    """「代码入口」里写的文件必须真的存在。
+
+    这是唯一能自动抓住「文档腐坏」的一条：文件被改名 / 移动 / 删除后，
+    文档里的路径不会自己报错，新 agent 照着找就会找空。
+    （行号不在校验范围内 —— 也正因为会漂移，文档里不要写行号。）
+    """
+    missing = []
+    for path in _feature_files():
+        for candidate in _code_entry_paths(path.read_text(encoding="utf-8")):
+            if not (_ROOT / candidate).exists():
+                missing.append(f"{path.name} → {candidate}")
+    assert missing == [], (
+        "feature 文档的「代码入口」指向不存在的文件（改文件名后请同步文档；"
+        "确属历史记录请在该路径后标注「" + _CODE_PATH_OK_SUFFIX + "」）: "
+        + "; ".join(missing))
+

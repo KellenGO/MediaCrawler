@@ -17,33 +17,18 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from base.runtime_paths import writable_path
 from .favorite_snapshot import decode_metrics, encode_metrics
+from .sqlite_base import RESULT_FIELDS, SqliteStoreBase, default_db_path, utc_now
 
 SCHEMA_VERSION = 1
 MAX_NOTE_LENGTH = 1000
 MAX_ITEMS = 500
 
-# 结果的公开字段白名单：只持久化这些，避免把内部/嵌套字段写进库里。
-RESULT_FIELDS: Tuple[str, ...] = (
-    "platform",
-    "content_id",
-    "content_type",
-    "title",
-    "snippet",
-    "author",
-    "url",
-    "published_at",
-    "cover_url",
-)
-
-_SCHEMA = """
+_LIBRARY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -88,57 +73,18 @@ CREATE INDEX IF NOT EXISTS idx_items_saved_at
 """
 
 
-def default_db_path() -> Path:
-    """Return the default SQLite file location for the local library."""
-    return writable_path("data", "library.db")
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class LibraryStore:
+class LibraryStore(SqliteStoreBase):
     """SQLite-backed local bookmark library.
 
-    每次操作都开一条短连接：SQLite 本身支持多连接，配合 WAL 即可满足
-    "前端并发点击收藏 + 后台同步写库"这种低并发场景，也避免跨线程复用连接的问题。
+    连接、事务与外键开关见 `api/services/sqlite_base.py`（与跨平台收藏归档共用）。
     """
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path) if db_path else default_db_path()
-        self._connections = threading.local()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as conn:
-            self._init_schema(conn)
+    _SCHEMA = _LIBRARY_SCHEMA
+    _FOREIGN_KEYS = True
 
-    # ------------------------------------------------------------------ 基础
-
-    @contextmanager
-    def _conn(self, write: bool = False) -> Iterator[sqlite3.Connection]:
-        current = getattr(self._connections, "current", None)
-        if current is not None:
-            yield current
-            return
-        conn = sqlite3.connect(str(self.db_path), timeout=10)
-        try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")
-            if write:
-                conn.execute("BEGIN IMMEDIATE")
-            self._connections.current = conn
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._connections.current = None
-            conn.close()
-
-    @staticmethod
-    def _init_schema(conn: sqlite3.Connection) -> None:
-        conn.executescript(_SCHEMA)
+    def _bootstrap(self, conn: sqlite3.Connection) -> None:
+        super()._bootstrap(conn)
+        self._enable_wal(conn)
         conn.execute(
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -226,7 +172,7 @@ class LibraryStore:
         if any(value is not None and not isinstance(value, str) for value in (saved_at, fetched_at)):
             raise ValueError("收藏时间格式无效")
         note = (note or "")[:MAX_NOTE_LENGTH]
-        now = _now()
+        now = utc_now()
 
         with self._conn(write=True) as conn:
             for collection_id in collection_ids or []:
@@ -423,7 +369,7 @@ class LibraryStore:
             position = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 AS p FROM collections").fetchone()["p"]
             cursor = conn.execute(
                 "INSERT INTO collections (name, position, created_at) VALUES (?, ?, ?)",
-                (name, position, _now()),
+                (name, position, utc_now()),
             )
             collection_id = int(cursor.lastrowid)
         return {"id": collection_id, "name": name, "position": int(position), "item_count": 0}
@@ -480,7 +426,7 @@ class LibraryStore:
                     INSERT OR IGNORE INTO item_collections (item_id, collection_id, added_at)
                     VALUES (?, ?, ?)
                     """,
-                    (int(item["id"]), collection_id, _now()),
+                    (int(item["id"]), collection_id, utc_now()),
                 )
                 added += cursor.rowcount
         return {"added": added, "missing": missing}
@@ -514,7 +460,7 @@ class LibraryStore:
             ]
         return {
             "version": 2,
-            "exported_at": _now(),
+            "exported_at": utc_now(),
             "collections": self.list_collections(),
             "items": items,
         }
@@ -625,7 +571,7 @@ class LibraryStore:
 
     @staticmethod
     def _attach(conn: sqlite3.Connection, item_id: int, collection_ids: Sequence[int]) -> None:
-        now = _now()
+        now = utc_now()
         for collection_id in collection_ids:
             conn.execute(
                 "INSERT OR IGNORE INTO item_collections (item_id, collection_id, added_at) VALUES (?, ?, ?)",

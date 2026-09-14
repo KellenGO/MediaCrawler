@@ -25,12 +25,9 @@ Round 16 短内存结果缓存测试。
 """
 
 import asyncio
-import os
-import sys
 import time
 from types import SimpleNamespace
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 import pytest_asyncio

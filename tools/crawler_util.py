@@ -174,32 +174,6 @@ def convert_str_cookie_to_dict(cookie_str: str) -> Dict:
     return cookie_dict
 
 
-def format_proxy_info(ip_proxy_info) -> Tuple[Optional[Dict], Optional[str]]:
-    """format proxy info for playwright and httpx"""
-    # fix circular import issue
-    from proxy.proxy_ip_pool import IpInfoModel
-    ip_proxy_info = cast(IpInfoModel, ip_proxy_info)
-
-    # Playwright proxy server should be in format "host:port" without protocol prefix
-    server = f"{ip_proxy_info.ip}:{ip_proxy_info.port}"
-    
-    playwright_proxy = {
-        "server": server,
-    }
-    
-    # Only add username and password if they are not empty
-    if ip_proxy_info.user and ip_proxy_info.password:
-        playwright_proxy["username"] = ip_proxy_info.user
-        playwright_proxy["password"] = ip_proxy_info.password
-    
-    # httpx 0.28.1 requires passing proxy URL string directly, not a dictionary
-    if ip_proxy_info.user and ip_proxy_info.password:
-        httpx_proxy = f"http://{ip_proxy_info.user}:{ip_proxy_info.password}@{ip_proxy_info.ip}:{ip_proxy_info.port}"
-    else:
-        httpx_proxy = f"http://{ip_proxy_info.ip}:{ip_proxy_info.port}"
-    return playwright_proxy, httpx_proxy
-
-
 def extract_text_from_html(html: str) -> str:
     """Extract text from HTML, removing all tags."""
     if not html:

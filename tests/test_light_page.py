@@ -23,10 +23,7 @@ XHR/fetch、analytics hostname 例外仍拦截。
 """
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from tools.light_page import (

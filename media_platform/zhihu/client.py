@@ -19,7 +19,7 @@
 
 # -*- coding: utf-8 -*-
 import json
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 from httpx import Response
@@ -32,18 +32,14 @@ import config
 from base.base_crawler import AbstractApiClient
 from constant import zhihu as zhihu_constant
 from model.m_zhihu import ZhihuContent
-from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
-
-if TYPE_CHECKING:
-    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import DataFetchError, ForbiddenError
 from .field import SearchSort, SearchTime, SearchType
 from .help import ZhihuExtractor, sign
 
 
-class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
+class ZhiHuClient(AbstractApiClient):
 
     def __init__(
         self,
@@ -53,7 +49,6 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         headers: Dict[str, str],
         playwright_page: Page,
         cookie_dict: Dict[str, str],
-        proxy_ip_pool: Optional["ProxyIpPool"] = None,
         reuse_http_client: bool = False,
     ):
         self.proxy = proxy
@@ -65,8 +60,6 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         self.cookie_urls = ["https://www.zhihu.com"]
         self.cookie_dict = cookie_dict
         self._extractor = ZhihuExtractor()
-        # Initialize proxy pool (from ProxyRefreshMixin)
-        self.init_proxy_pool(proxy_ip_pool)
 
     async def _get_reused_client(self):
         """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
@@ -124,7 +117,6 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
 
         """
         # Check if proxy is expired before each request
-        await self._refresh_proxy_if_expired()
 
         # return response.text
         return_response = kwargs.pop('return_response', False)
@@ -187,10 +179,16 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         base_url = (zhihu_constant.ZHIHU_URL if "/p/" not in uri else zhihu_constant.ZHIHU_ZHUANLAN_URL)
         return await self.request(method="GET", url=base_url + final_uri, headers=headers, **kwargs)
 
-    async def pong(self, raise_on_error: bool = False) -> bool:
+    async def pong(
+        self,
+        raise_on_error: bool = False,
+        browser_context: object = None,
+    ) -> bool:
         """
         Check if login status is still valid
         Args:
+            browser_context: 为与其它平台统一签名而接受，本平台不使用
+                （登录态直接查 /api/v4/me）。
             raise_on_error: True 时异常不再吞掉 —— 网络错误/超时/403
                 ForbiddenError/DataFetchError 等向上传播（供账号验证 probe
                 区分"明确未登录"与"无法验证"）；False（默认）保持 console/

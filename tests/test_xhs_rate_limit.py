@@ -30,10 +30,8 @@ Round 17.2 小红书 461/471 风控（XhsRateLimitError）测试。
 
 import asyncio
 import io
-import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 import httpx

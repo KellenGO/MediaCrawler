@@ -14,6 +14,7 @@
  */
 
 import type { PlatformSlug } from "../types/search.js";
+import { PLATFORM_SLUGS } from "./platformMeta.js";
 
 export const PLATFORM_LIMITS_STORAGE_KEY = "aggregate_search_platform_limits_v1";
 export const MIN_PLATFORM_LIMIT = 1;
@@ -22,12 +23,8 @@ export const DEFAULT_PLATFORM_LIMIT = 20;
 
 export type PlatformLimitMap = Record<PlatformSlug, number>;
 
-export const PLATFORM_ORDER: readonly PlatformSlug[] = [
-  "xhs",
-  "douyin",
-  "bilibili",
-  "zhihu",
-];
+// 顺序的唯一来源见 lib/platformMeta.ts（保留旧名字，避免改动调用点）
+export const PLATFORM_ORDER: readonly PlatformSlug[] = PLATFORM_SLUGS;
 
 export const DEFAULT_PLATFORM_LIMITS: PlatformLimitMap = {
   xhs: DEFAULT_PLATFORM_LIMIT,

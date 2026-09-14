@@ -11,7 +11,7 @@
 |---|---|
 | 持久化（表 `remote_favorites` / `remote_sync_runs`） | `api/services/remote_favorites_store.py` |
 | 任务编排、逐平台落库、错误 drain | `api/services/favorites_job_manager.py`（`FavoritesJobManager`） |
-| HTTP 路由（前缀 `/api/search`） | `api/routers/search.py`：`POST /favorites/jobs`、`GET /favorites/jobs/latest`、`GET /favorites/jobs/{job_id}` |
+| HTTP 路由（前缀 `/api/search`） | `api/routers/search.py`：`POST /favorites/jobs`、`GET /favorites/jobs/latest`、`GET /favorites/jobs/{job_id}`、`POST /favorites/jobs/{job_id}/cancel` |
 | 请求 / 响应模型（`limit_per_platform` 默认 20、上限 100） | `api/schemas/favorites.py` |
 | 抓取侧（超时、分页、错误码） | `aggregate_search/worker.py` + 各平台 `media_platform/*/core.py` |
 | 前端 | `webui/src/hooks/useFavorites.ts` |

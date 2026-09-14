@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from aggregate_search.models import (
     agg_to_core_platform, core_to_agg_platform, is_valid_platform, PLATFORM_SLUGS,

@@ -31,11 +31,17 @@ def test_platform_core_does_not_load_legacy_store_or_proxy_pool_at_import_time()
         assert "proxy.proxy_ip_pool" not in imports, path
 
 
-def test_platform_core_keeps_search_and_runtime_proxy_paths():
+def test_platform_core_no_longer_references_the_proxy_pool():
+    """IP 代理池是 fork 遗留，2026-09-14 整体删除。
+
+    ``ENABLE_IP_PROXY`` 恒为 False 且 worker 四条主路径还各自再强制赋值一次，
+    所以这些分支从未执行过。这里守住的是「不要再被加回来」。
+    """
     for path in CORE_FILES:
         source = path.read_text(encoding="utf-8")
-        assert "from proxy.proxy_ip_pool import" in source, path
-        assert "if config.ENABLE_IP_PROXY" in source, path
+        assert "proxy.proxy_ip_pool" not in source, path
+        assert "ip_proxy_pool" not in source, path
+        assert "ENABLE_IP_PROXY" not in source, path
 
 
 def test_platform_search_entrypoints_are_preserved():

@@ -47,5 +47,3 @@ class DataFetchError(RequestError):
         self.safe_message = safe_message
 
 
-class IPBlockError(RequestError):
-    """fetch so fast that the server block us ip"""

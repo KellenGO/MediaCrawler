@@ -11,7 +11,7 @@
 | 存储层（表 `items` / `collections` / `item_collections`） | `api/services/library_store.py`（`LibraryStore`，依赖注入 `get_library_store`） |
 | 旧格式互动数据 / 元信息兼容编解码 | `api/services/favorite_snapshot.py` |
 | 请求 / 响应模型 | `api/schemas/library.py` |
-| HTTP 路由（14 个，前缀 `/api/library`） | `api/routers/library.py`，在 `api/main.py` 注册 |
+| HTTP 路由（前缀 `/api/library`） | `api/routers/library.py`，在 `api/main.py` 注册 |
 | 前端 API 层（纯函数 + axios 两段） | `webui/src/lib/libraryApi.ts` |
 | 前端状态与写操作 | `webui/src/hooks/useBookmarks.ts` |
 | 收藏夹界面（左列表 / 右结果） | `webui/src/components/favorites/FavoritesPage.tsx` |

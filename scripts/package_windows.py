@@ -17,7 +17,6 @@ RUNTIME_DIRECTORIES = (
     "libs",
     "media_platform",
     "model",
-    "proxy",
     "tools",
     "browser_extension",
 )

@@ -11,6 +11,7 @@
 
 import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
 import { safeContentUrl } from "./resultTools.js";
+import { isPlatformSlug } from "./platformMeta.js";
 
 export const MAX_NOTE_LENGTH = 1000;
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
@@ -30,7 +31,7 @@ const validTime = (value: unknown): value is string => typeof value === "string"
 /** Store public DTO fields only; never persist arbitrary extra data from a response.
  *  收藏库（后端 SQLite）也复用这个白名单，保证入库内容与本地收藏一致。 */
 export function publicResult(value: unknown): UnifiedSearchResult {
-  if (!isRecord(value) || !["xhs", "douyin", "bilibili", "zhihu"].includes(String(value.platform))
+  if (!isRecord(value) || !isPlatformSlug(value.platform)
       || typeof value.content_id !== "string" || !value.content_id || typeof value.title !== "string"
       || typeof value.url !== "string" || !safeContentUrl(value.url)) throw new Error("收藏内容格式或原文链接无效");
   const metrics: Record<string, number> = {};

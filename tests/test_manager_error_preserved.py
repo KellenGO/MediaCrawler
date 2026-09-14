@@ -16,12 +16,9 @@ Uses a fake subprocess object (StreamReader-based) so the full production
 
 import asyncio
 import json
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from aggregate_search.protocol import EVENT_PREFIX, EVENT_SEPARATOR
 from api.schemas.search import SearchJobRequestSchema

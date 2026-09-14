@@ -13,8 +13,8 @@
 - ``api/main.py``（``python -m api.main``）
 - ``desktop_main.py``（桌面/打包入口）
 
-启动脚本（``启动.bat`` / ``scripts/start.ps1``）读同一个变量名；扩展与文档保持
-产品默认，见各自的说明。
+启动脚本（``MediaCrawler.bat`` / ``启动-源码.bat`` / ``scripts/start.ps1``）读同一个变量名；
+扩展与文档保持产品默认，见各自的说明。
 """
 
 from __future__ import annotations

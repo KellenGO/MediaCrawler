@@ -12,12 +12,9 @@
 因此弹窗只在无头模式保留（无头时没有别的办法把二维码递给用户）。
 """
 
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
 import tools.crawler_util as crawler_util

@@ -20,25 +20,21 @@
 import copy
 import json
 import urllib.parse
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 
 from playwright.async_api import BrowserContext
 
 from base.base_crawler import AbstractApiClient
-from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
 from tools.httpx_util import make_async_client
 from var import request_keyword_var
-
-if TYPE_CHECKING:
-    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import *
 from .field import *
 from .help import *
 
 
-class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
+class DouYinClient(AbstractApiClient):
 
     def __init__(
         self,
@@ -48,7 +44,6 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         headers: Dict,
         playwright_page: Optional[Page],
         cookie_dict: Dict,
-        proxy_ip_pool: Optional["ProxyIpPool"] = None,
         reuse_http_client: bool = False,
     ):
         self.proxy = proxy
@@ -67,8 +62,6 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         ]
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
-        # Initialize proxy pool (from ProxyRefreshMixin)
-        self.init_proxy_pool(proxy_ip_pool)
 
     async def _get_reused_client(self):
         """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
@@ -150,7 +143,6 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
 
     async def request(self, method, url, **kwargs):
         # Check whether the proxy has expired before each request
-        await self._refresh_proxy_if_expired()
 
         if self.reuse_http_client:
             client = await self._get_reused_client()
@@ -181,7 +173,24 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         headers = headers or self.headers
         return await self.request(method="POST", url=f"{self._host}{uri}", data=data, headers=headers)
 
-    async def pong(self, browser_context: BrowserContext) -> bool:
+    async def pong(
+        self,
+        *,
+        raise_on_error: bool = False,
+        browser_context: Optional[BrowserContext] = None,
+    ) -> bool:
+        """探测登录态。
+
+        签名与其它三个平台保持一致（``*, raise_on_error, browser_context``），
+        这样调用方不必按平台分支。douyin 的探测本身不主动抛异常
+        （localStorage 只是快路径，失败一律回退到 Cookie 校验），
+        所以 ``raise_on_error`` 在这里只作为接口占位。
+
+        注意：``raise_on_error`` 以外的关键字参数是**必须**的 ——
+        ``browser_context`` 缺失时无法校验 Cookie，直接返回 False。
+        """
+        if browser_context is None:
+            return False
         # localStorage 校验只是快路径：page 可能为 None（账号同步场景只传
         # context），或页面未加载完 —— 任何失败都回退到 context Cookie 校验，
         # 绝不在这里抛异常把整个验证打挂。

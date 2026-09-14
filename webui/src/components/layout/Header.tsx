@@ -19,6 +19,9 @@ import {
   type AccountTone,
 } from '@/lib/accounts'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '@/types/search'
+import { PLATFORM_SLUGS } from '@/lib/platformMeta'
+
+const PLATFORM_ORDER = PLATFORM_SLUGS
 
 export type ViewMode = 'search' | 'favorites' | 'accounts' | 'help'
 export type SettingsSection = 'search' | 'accounts' | 'appearance'
@@ -28,7 +31,6 @@ interface HeaderProps {
   onNavigate: (mode: ViewMode, section?: SettingsSection) => void
 }
 
-const PLATFORM_ORDER = ['xhs', 'douyin', 'bilibili', 'zhihu'] as const
 
 const TONE_DOT: Record<AccountTone, string> = {
   ok: 'bg-[#4f9e79]',

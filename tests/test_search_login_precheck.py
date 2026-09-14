@@ -17,15 +17,12 @@ profile 的 cookie 库里有没有**未过期**的登录标记 cookie。
 所有测试都指向临时目录，绝不触碰真实 ``browser_data``。
 """
 
-import os
 import sqlite3
-import sys
 import time
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from api.services import accounts as acc
 from api.services.accounts import (

@@ -63,7 +63,6 @@ class ZhihuCrawler(AbstractCrawler):
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         self._extractor = ZhihuExtractor()
         self.cdp_manager = None
-        self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self) -> None:
         """
@@ -71,25 +70,13 @@ class ZhihuCrawler(AbstractCrawler):
         Returns:
 
         """
-        playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
-            from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
-
-            self.ip_proxy_pool = await create_ip_pool(
-                config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
-            )
-            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
-            playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(
-                ip_proxy_info
-            )
-
         async with async_playwright() as playwright:
             # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
                 utils.logger.info("[ZhihuCrawler] Launching browser in CDP mode")
                 self.browser_context = await self.launch_browser_with_cdp(
                     playwright,
-                    playwright_proxy_format,
+                    None,
                     self.user_agent,
                     headless=config.CDP_HEADLESS,
                 )
@@ -108,7 +95,7 @@ class ZhihuCrawler(AbstractCrawler):
             await self.context_page.goto(self.index_url, wait_until="domcontentloaded")
 
             # Create a client to interact with the zhihu website.
-            self.zhihu_client = await self.create_zhihu_client(httpx_proxy_format)
+            self.zhihu_client = await self.create_zhihu_client(None)
             if not await self.zhihu_client.pong():
                 if self._login_fail_fast():
                     from base.exceptions import LoginRequiredError
@@ -289,7 +276,6 @@ class ZhihuCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
-            proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
         )
         return zhihu_client_obj
 

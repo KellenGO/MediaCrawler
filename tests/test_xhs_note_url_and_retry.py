@@ -6,13 +6,10 @@
 
 """XHS note URL construction and safe adapter URL handling."""
 
-import os
-import sys
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
 from aggregate_search.adapters import XhsAdapter

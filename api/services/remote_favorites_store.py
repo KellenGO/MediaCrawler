@@ -18,29 +18,18 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
-from base.runtime_paths import writable_path
 from .favorite_snapshot import decode_metrics, encode_metrics
+from .sqlite_base import (
+    RESULT_FIELDS as _RESULT_FIELDS,
+    SqliteStoreBase,
+    utc_now,
+)
 
 DEFAULT_ACCOUNT_KEY = "default"
 
-_RESULT_FIELDS = (
-    "platform",
-    "content_id",
-    "content_type",
-    "title",
-    "snippet",
-    "author",
-    "url",
-    "published_at",
-    "cover_url",
-)
-
-_SCHEMA = """
+_REMOTE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS remote_favorites (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     account_key      TEXT NOT NULL DEFAULT 'default',
@@ -78,36 +67,17 @@ CREATE INDEX IF NOT EXISTS idx_remote_sync_runs_platform
 """
 
 
-def default_db_path() -> Path:
-    return writable_path("data", "library.db")
+class RemoteFavoritesStore(SqliteStoreBase):
+    """Persist synced favourites so they survive a backend restart.
 
+    连接、事务与时间戳见 `api/services/sqlite_base.py`（与本地收藏库共用一个库文件）。
+    """
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    _SCHEMA = _REMOTE_SCHEMA
 
-
-class RemoteFavoritesStore:
-    """Persist synced favourites so they survive a backend restart."""
-
-    def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path) if db_path else default_db_path()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as conn:
-            conn.executescript(_SCHEMA)
-
-    @contextmanager
-    def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.db_path), timeout=10)
-        try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode = WAL")
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    def _bootstrap(self, conn: sqlite3.Connection) -> None:
+        super()._bootstrap(conn)
+        self._enable_wal(conn)
 
     # ------------------------------------------------------------------ 写入
 
@@ -122,7 +92,7 @@ class RemoteFavoritesStore:
         account_key: str = DEFAULT_ACCOUNT_KEY,
     ) -> int:
         """保存某个平台本次同步到的条目 + 本次运行状态。返回写入条数。"""
-        now = _now()
+        now = utc_now()
         written = 0
         with self._conn() as conn:
             for raw in results:
@@ -223,7 +193,7 @@ class RemoteFavoritesStore:
         return {
             "job_id": "saved",
             "overall": overall,
-            "created_at": latest_time or _now(),
+            "created_at": latest_time or utc_now(),
             "completed_at": latest_time or None,
             "platforms": platforms,
             "results": results,

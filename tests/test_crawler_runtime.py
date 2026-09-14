@@ -24,11 +24,8 @@ existing behaviour when options are not set (default / CLI path).
 """
 
 import pytest
-import sys
-import os
 
 # Ensure project root is importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from base.crawler_runtime import CrawlerRuntimeOptions
 from base.base_crawler import AbstractCrawler

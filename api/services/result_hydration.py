@@ -126,7 +126,6 @@ class ResultHydrator:
 
     def __init__(self) -> None:
         self._clients: Dict[str, object] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
         self._metric_details: Dict[tuple, dict] = {}
         self._metric_stopped: set[str] = set()
         self.metric_errors: Dict[str, dict] = {}
@@ -400,7 +399,6 @@ class ResultHydrator:
                 },
                 playwright_page=None,
                 cookie_dict=snapshot,
-                proxy_ip_pool=None,
                 reuse_http_client=True,
             )
         return self._clients["bilibili"]
@@ -424,7 +422,6 @@ class ResultHydrator:
                 },
                 playwright_page=None,
                 cookie_dict=dict(snapshot),
-                proxy_ip_pool=None,
                 reuse_http_client=True,
             )
         return self._clients["xhs"]
@@ -450,7 +447,6 @@ class ResultHydrator:
                 },
                 playwright_page=None,
                 cookie_dict=dict(snapshot),
-                proxy_ip_pool=None,
                 reuse_http_client=True,
             )
         return self._clients["zhihu"]

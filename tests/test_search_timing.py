@@ -20,11 +20,9 @@
 （monkeypatch time.perf_counter）做确定性断言，不用墙钟 sleep。"""
 
 import sys
-import os
 import io
 import asyncio
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from api.services import search_job_manager as sjm

@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Header, Request
+from fastapi import APIRouter, HTTPException, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -262,7 +262,7 @@ class LoginStatusResponse(BaseModel):
 
 
 @search_router.post("/login")
-async def start_login(req: LoginRequest, background_tasks: BackgroundTasks):
+async def start_login(req: LoginRequest):
     valid = {"xhs", "douyin", "bilibili", "zhihu"}
     if req.platform not in valid:
         raise HTTPException(status_code=422, detail=f"Invalid platform: {req.platform}")

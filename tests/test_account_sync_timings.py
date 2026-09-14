@@ -27,10 +27,7 @@ Round 16.1 账号同步去重复导航 + 同步耗时指标测试。
 """
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from api.services import accounts as acc

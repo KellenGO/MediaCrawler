@@ -23,18 +23,14 @@
 # @Desc    : bilibili request client
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlencode
 
 from playwright.async_api import BrowserContext, Page
 from tools.httpx_util import make_async_client
 
 from base.base_crawler import AbstractApiClient
-from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
-
-if TYPE_CHECKING:
-    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import DataFetchError
 from .field import CommentOrderType, SearchOrderType
@@ -85,7 +81,7 @@ def _safe_bili_error_message(message: Optional[str], code: Any,
     return f"B站{label}请求失败，请稍后重试"
 
 
-class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
+class BilibiliClient(AbstractApiClient):
 
     def __init__(
         self,
@@ -95,7 +91,6 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         headers: Dict[str, str],
         playwright_page: Page,
         cookie_dict: Dict[str, str],
-        proxy_ip_pool: Optional["ProxyIpPool"] = None,
         reuse_http_client: bool = False,
     ):
         self.proxy = proxy
@@ -108,8 +103,6 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         self.cookie_urls = ["https://www.bilibili.com"]
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
-        # Initialize proxy pool (from ProxyRefreshMixin)
-        self.init_proxy_pool(proxy_ip_pool)
 
     async def _get_reused_client(self):
         """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
@@ -146,7 +139,6 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
 
     async def request(self, method, url, **kwargs) -> Any:
         # Check if proxy has expired before each request
-        await self._refresh_proxy_if_expired()
 
         stage = _stage_for_uri(url)
         response = await self._send(method, url, **kwargs)
@@ -238,9 +230,15 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         json_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
         return await self.request(method="POST", url=f"{self._host}{uri}", data=json_str, headers=self.headers)
 
-    async def pong(self, raise_on_error: bool = False) -> bool:
+    async def pong(
+        self,
+        raise_on_error: bool = False,
+        browser_context: object = None,
+    ) -> bool:
         """get a note to check if login state is ok
         Args:
+            browser_context: 为与其它平台统一签名而接受，本平台不使用
+                （登录态直接查 /x/web-interface/nav）。
             raise_on_error: True 时异常不再吞掉 —— 网络错误/超时/403/-412
                 风控等向上传播（供账号验证 probe 区分"明确未登录"与"无法
                 验证"）；DataFetchError(platform_code=-101) 是平台明确返回

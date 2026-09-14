@@ -41,7 +41,6 @@ for package in (
     "constant",
     "media_platform",
     "model",
-    "proxy",
     "tools",
     "uvicorn",
 ):
@@ -56,7 +55,6 @@ hiddenimports.extend([
     "httpx",
     "pydantic",
     "anyio",
-    "websockets",
 ])
 
 a = Analysis(

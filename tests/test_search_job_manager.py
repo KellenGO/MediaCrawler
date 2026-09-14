@@ -24,12 +24,9 @@ All tests use in-process simulation — no real platform API calls.
 
 import asyncio
 import json
-import os
-import sys
 import uuid
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from api.schemas.search import SearchJobRequestSchema, SearchJobResponse

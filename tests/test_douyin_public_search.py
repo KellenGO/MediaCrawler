@@ -13,12 +13,9 @@
 """
 
 import asyncio
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config  # noqa: E402
 from base.crawler_runtime import CrawlerRuntimeOptions  # noqa: E402

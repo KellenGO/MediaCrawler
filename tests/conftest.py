@@ -21,12 +21,6 @@ Pytest configuration and shared fixtures
 """
 
 import pytest
-import sys
-from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 
 @pytest.fixture(autouse=True)
@@ -67,72 +61,3 @@ def _default_search_login_precheck_allow(monkeypatch):
     import api.services.search_job_manager as sjm
 
     monkeypatch.setattr(sjm, "search_login_block", lambda platform: None)
-
-
-@pytest.fixture(scope="session")
-def project_root_path():
-    """Return project root path"""
-    return project_root
-
-
-@pytest.fixture
-def sample_xhs_note():
-    """Sample Xiaohongshu note data for testing"""
-    return {
-        "note_id": "test_note_123",
-        "type": "normal",
-        "title": "Test Title",
-        "desc": "This is a test description",
-        "video_url": "",
-        "time": 1700000000,
-        "last_update_time": 1700000000,
-        "user_id": "user_123",
-        "nickname": "Test User",
-        "avatar": "https://example.com/avatar.jpg",
-        "liked_count": 100,
-        "collected_count": 50,
-        "comment_count": 25,
-        "share_count": 10,
-        "ip_location": "Shanghai",
-        "image_list": "https://example.com/img1.jpg,https://example.com/img2.jpg",
-        "tag_list": "test,programming,Python",
-        "note_url": "https://www.xiaohongshu.com/explore/test_note_123",
-        "source_keyword": "test keyword",
-        "xsec_token": "test_token_123"
-    }
-
-
-@pytest.fixture
-def sample_xhs_comment():
-    """Sample Xiaohongshu comment data for testing"""
-    return {
-        "comment_id": "comment_123",
-        "create_time": 1700000000,
-        "ip_location": "Beijing",
-        "note_id": "test_note_123",
-        "content": "This is a test comment",
-        "user_id": "user_456",
-        "nickname": "Comment User",
-        "avatar": "https://example.com/avatar2.jpg",
-        "sub_comment_count": 5,
-        "pictures": "",
-        "parent_comment_id": 0,
-        "like_count": 15
-    }
-
-
-@pytest.fixture
-def sample_xhs_creator():
-    """Sample Xiaohongshu creator data for testing"""
-    return {
-        "user_id": "creator_123",
-        "nickname": "Creator Name",
-        "gender": "Female",
-        "avatar": "https://example.com/creator_avatar.jpg",
-        "desc": "This is the creator bio",
-        "ip_location": "Guangzhou",
-        "follows": 500,
-        "fans": 10000,
-        "interaction": 50000,
-        "tag_list": '{"profession": "Designer", "interest": "Photography"}'
-    }

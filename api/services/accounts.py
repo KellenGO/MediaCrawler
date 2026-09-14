@@ -34,9 +34,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..schemas.search import PlatformDiagnostic
-from base.runtime_paths import application_root, resource_path, writable_path
+from base.runtime_paths import resource_path, writable_path
 
-_PROJECT_ROOT = application_root()
 BROWSER_DATA_DIR = writable_path("browser_data")
 
 # Platform -> official cookie domains (subdomain match allowed).
@@ -390,7 +389,6 @@ def _resolve_profile_path(platform: str) -> Path:
 # ── In-memory platform state ────────────────────────────────────────────
 
 _platform_state: Dict[str, Dict[str, Any]] = {}
-_state_lock = asyncio.Lock()
 
 
 def _fresh_state() -> Dict[str, Any]:
@@ -1622,7 +1620,7 @@ async def _pong_with_profile(
             try:
                 # douyin pong 本身不吞异常（localStorage 快路径除外）：
                 # cookies 读取失败会直接传播 → unavailable。
-                return "verified" if bool(await client.pong(context)) else "not_logged_in"
+                return "verified" if bool(await client.pong(browser_context=context)) else "not_logged_in"
             except Exception:
                 return "unavailable"
         finally:

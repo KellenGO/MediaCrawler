@@ -17,14 +17,11 @@
 
 import type { PlatformSlug } from "../types/search.js";
 import { isAccountVerified } from "./accounts.js";
+import { PLATFORM_SLUGS } from "./platformMeta.js";
 
 /** 固定平台顺序（一键同步与测试共用）。 */
-export const BULK_SYNC_PLATFORM_ORDER: readonly PlatformSlug[] = [
-  "xhs",
-  "douyin",
-  "bilibili",
-  "zhihu",
-];
+// 顺序的唯一来源见 lib/platformMeta.ts
+export const BULK_SYNC_PLATFORM_ORDER: readonly PlatformSlug[] = PLATFORM_SLUGS;
 
 /** 一键同步最大并发（Phase 4.3：两个账号操作可同时执行）。 */
 export const BULK_SYNC_MAX_CONCURRENCY = 2;

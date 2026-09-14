@@ -792,12 +792,10 @@ async def _verify_login_success(crawler: Any, core_platform: str) -> bool:
         pong = getattr(client, "pong", None)
         if not callable(pong):
             return False
-        import inspect
-        try:
-            sig = inspect.signature(pong)
-            result = pong(ctx) if "browser_context" in sig.parameters else pong()
-        except Exception:
-            result = pong()
+        # 四个平台的 pong 统一是 ``pong(*, raise_on_error=False, browser_context=None)``，
+        # 所以这里直接传关键字即可（历史上 douyin 是位置参数、导致这里要用
+        # inspect 反射猜签名 —— 那个写法已经去掉了）。
+        result = pong(browser_context=ctx)
         if asyncio.iscoroutine(result):
             return bool(await result)
         return bool(result)

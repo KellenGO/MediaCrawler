@@ -32,11 +32,9 @@ Round 16 无浏览器快速路径（fast path）测试。
 
 import asyncio
 import io
-import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 

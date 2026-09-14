@@ -17,12 +17,10 @@ Verifies:
 """
 
 import asyncio
-import os
 import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import aggregate_search.worker as worker
 from aggregate_search.models import WorkerRequest
@@ -72,7 +70,7 @@ class _FakeClient:
     async def update_cookies(self, browser_context=None, urls=None):
         pass
 
-    async def pong(self):
+    async def pong(self, *, raise_on_error=False, browser_context=None):
         self.pong_called += 1
         return self._pong_result
 

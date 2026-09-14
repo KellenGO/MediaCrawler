@@ -27,10 +27,7 @@ Round 17.1 XiaoHongShuClient.get_note_by_keyword 请求契约测试。
 """
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from media_platform.xhs.client import XiaoHongShuClient
 from media_platform.xhs.field import SearchNoteType, SearchSortType

@@ -19,7 +19,7 @@
 
 import json
 import re
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 from urllib.parse import quote
 
 from playwright.async_api import BrowserContext, Page
@@ -29,11 +29,7 @@ from tools.httpx_util import make_async_client
 
 import config
 from base.base_crawler import AbstractApiClient
-from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
-
-if TYPE_CHECKING:
-    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import (
     DataFetchError, IPBlockError, NoteNotFoundError, XhsRateLimitError,
@@ -56,7 +52,7 @@ def _safe_debug_message(value: Any) -> Optional[str]:
     return message[:120]
 
 
-class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
+class XiaoHongShuClient(AbstractApiClient):
 
     def __init__(
         self,
@@ -66,7 +62,6 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         headers: Dict[str, str],
         playwright_page: Page,
         cookie_dict: Dict[str, str],
-        proxy_ip_pool: Optional["ProxyIpPool"] = None,
         reuse_http_client: bool = False,
     ):
         self.proxy = proxy
@@ -94,8 +89,6 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self.last_response_status: Optional[int] = None
         self.last_business_code: Any = None
         self.last_business_msg: Optional[str] = None
-        # Initialize proxy pool (from ProxyRefreshMixin)
-        self.init_proxy_pool(proxy_ip_pool)
 
     async def _get_reused_client(self):
         """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
@@ -178,7 +171,6 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
 
         """
         # Check if proxy is expired before each request
-        await self._refresh_proxy_if_expired()
 
         # return response.text
         return_response = kwargs.pop("return_response", False)
@@ -292,10 +284,16 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 return response.json()
         return None
 
-    async def pong(self, raise_on_error: bool = False) -> bool:
+    async def pong(
+        self,
+        raise_on_error: bool = False,
+        browser_context: object = None,
+    ) -> bool:
         """
         Check if login state is still valid by querying self user info
         Args:
+            browser_context: 为与其它平台统一签名而接受，本平台不使用
+                （登录态直接查自己的接口，不需要浏览器上下文）。
             raise_on_error: True 时异常不再吞掉 —— 网络错误/超时/风控/接口
                 异常向上传播（供账号验证 probe 区分"明确未登录"与"无法验证"）；
                 False（默认）保持 console/login 模块的原始行为：任何异常
