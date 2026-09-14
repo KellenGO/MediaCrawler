@@ -12,12 +12,9 @@ import {
   accountTone,
   diagnosticAccountStateLabel,
   diagnosticSearchModeLabel,
-  diagnosticTone,
-  diagnosticToneLabel,
   accountUsageHint,
   summarizeAccounts,
   type AccountTone,
-  type DiagnosticTone,
 } from "@/lib/accounts";
 import { MAX_PLATFORM_LIMIT, MIN_PLATFORM_LIMIT, PLATFORM_ORDER, parsePlatformLimitInput } from "@/lib/platformLimits";
 import {
@@ -101,33 +98,6 @@ const TONE_BADGE: Record<AccountTone, string> = {
   bad: "bg-danger-soft text-danger border-danger/40",
   idle: "bg-cyber-bg-tertiary text-cyber-text-muted border-cyber-border-subtle",
 };
-
-const DOCTOR_TONE_BADGE: Record<DiagnosticTone, string> = {
-  normal: "bg-ok-soft text-[#3d7d60] border-ok/40",
-  available: "bg-brand-soft text-brand-strong border-brand/40",
-  limited: "bg-warn-soft text-warn border-warn/40",
-  unavailable: "bg-danger-soft text-danger border-danger/40",
-};
-
-function DoctorCapabilityChip({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: "ok" | "limited" | "muted";
-}) {
-  const styles = tone === "ok"
-    ? "bg-ok-soft border-ok/30 text-[#3d7d60]"
-    : tone === "limited"
-      ? "bg-warn-soft border-warn/30 text-warn"
-      : "bg-cyber-bg-tertiary border-cyber-border-subtle text-cyber-text-muted";
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-medium ${styles}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${tone === "ok" ? "bg-ok" : tone === "limited" ? "bg-warn" : "bg-cyber-text-muted"}`} />
-      {label}
-    </span>
-  );
-}
 
 /**
  * 单个平台的搜索数量设置行（Round 15）：
@@ -763,7 +733,6 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
           const color = PLATFORM_COLORS[acc.platform as keyof typeof PLATFORM_COLORS] || "#4ca4dc";
           const tone = accountTone(acc);
           const diagnostic = acc.diagnostic;
-          const doctorTone = diagnostic ? diagnosticTone(diagnostic) : null;
           const hasDiag = !!diagnostic || !!lastDiag[acc.platform];
           const snippetLabel = diagnostic?.snippet_available === true
             ? "简介可用"
@@ -791,11 +760,6 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                     </h3>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {doctorTone && (
-                    <span className={`px-2 py-0.5 rounded-full text-[10.5px] border ${DOCTOR_TONE_BADGE[doctorTone]}`}>
-                      {diagnosticToneLabel(doctorTone)}
-                    </span>
-                  )}
                   {busyLabel && (
                     <span className="flex items-center gap-1.5 text-xs text-brand-strong">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -812,21 +776,6 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
               <div className="sr-only">后台会话：{acc.profile_exists ? "已存在" : "不存在"}；浏览器后端：{acc.browser_backend ? (BACKEND_TEXT[acc.browser_backend] || acc.browser_backend) : "未知"}</div>
 
               <p>{accountUsageHint(acc)}</p>
-              {diagnostic && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-brand-soft/35 px-2.5 py-2">
-                  <DoctorCapabilityChip
-                    label={diagnostic.search_available ? "可尝试搜索" : "暂时无法搜索"}
-                    tone={diagnostic.search_available ? "ok" : "limited"}
-                  />
-                  <DoctorCapabilityChip
-                    label={snippetLabel}
-                    tone={diagnostic.snippet_available === false ? "limited" : "ok"}
-                  />
-                  {diagnostic.fallback_active && (
-                    <DoctorCapabilityChip label="已启用备用搜索方式" tone="ok" />
-                  )}
-                </div>
-              )}
 
               {acc.safe_message && (
                 <div className="mb-3 px-3.5 py-2 rounded-lg bg-warn-soft border border-warn/30 text-xs text-warn">
@@ -849,13 +798,14 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                     <div className="mt-2 px-3.5 py-2.5 rounded-lg bg-cyber-bg-tertiary border border-cyber-border-subtle text-[11px] text-cyber-text-secondary">
                       {diagnostic && (
                         <>
-                          <div className="text-cyber-text-primary mb-1 font-semibold">平台诊断</div>
-                          <div>当前路径：{diagnosticSearchModeLabel(diagnostic.search_mode)}</div>
+                          <div className="text-cyber-text-primary mb-1 font-semibold">历史搜索与内部诊断（非实时检测）</div>
+                          <p>以下信息可能来自重新登录之前，不代表当前搜索是否可用。</p>
+                          <div>记录路径：{diagnosticSearchModeLabel(diagnostic.search_mode)}</div>
                           <div>账号状态：{diagnosticAccountStateLabel(diagnostic.account_state)}</div>
                           <div>备用路径：{diagnostic.fallback_active ? "正在使用" : "未启用"}</div>
                           <div>简介能力：{snippetLabel}</div>
-                          <div>最近问题：{diagnostic.user_message || "无致命错误"}</div>
-                          <div>建议：{diagnostic.recommended_action || "当前无需处理"}</div>
+                          <div>诊断记录：{diagnostic.user_message || "暂无记录"}</div>
+                          <div>记录中的建议：{diagnostic.recommended_action || "无"}</div>
                         </>
                       )}
                       {lastDiag[acc.platform] && (

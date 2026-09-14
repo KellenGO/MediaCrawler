@@ -70,16 +70,13 @@ export function diagnosticToneLabel(tone: DiagnosticTone): string {
 }
 
 export function accountUsageHint(acc: AccountStatusInfo): string {
-  const diagnostic = acc.diagnostic;
-  if (!diagnostic) return "暂未获取搜索状态；可以重新检查登录状态。";
-  if (!diagnostic.search_available) {
-    if (diagnostic.limitation_code === "login_required") return "上次搜索要求登录，请重新登录后再试。";
-    if (diagnostic.limitation_code === "rate_limited") return "平台暂时限制了请求，请稍后再试；不代表账号已退出登录。";
-    return "上次搜索未成功，请稍后重试；不一定是登录失效。";
-  }
-  if (!isAccountVerified(acc)) return "可以先尝试搜索公开内容，但尚未确认账号登录。同步个人收藏前请先确认登录；若平台要求登录，再重新登录。";
-  if (diagnostic.snippet_available === false) return "登录已确认，可以尝试搜索；部分结果可能没有简介，可打开原文查看。";
-  return "登录已确认，可以尝试搜索和同步收藏。实际结果仍取决于平台响应。";
+  // Historical search outcomes must not override a newly verified login.
+  if (isAccountVerified(acc)) return "登录信息已确认，无需重复登录。";
+  if (acc.status === "verifying") return "正在确认登录信息，请稍候。";
+  if (acc.status === "syncing") return "正在同步登录信息，请稍候。";
+  if (acc.status === "expired") return "登录信息已失效，请重新扫码登录。";
+  if (acc.profile_exists) return "本机已保存登录信息，尚未确认是否有效；可点击重新验证，或重新扫码登录。";
+  return "请先扫码登录；也可以从已登录的浏览器同步。";
 }
 
 export function diagnosticSearchModeLabel(mode: PlatformDiagnostic["search_mode"]): string {

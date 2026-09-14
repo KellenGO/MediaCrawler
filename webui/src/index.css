@@ -428,9 +428,14 @@ html.dark .search-submit { color: #101525; }
 .library-side-item.active { background: var(--siye-brand-soft); color: var(--siye-brand-ink); font-weight: 600; }
 .library-side-row { display: flex; align-items: center; gap: 2px; }
 .library-side-row .library-side-item { flex: 1; min-width: 0; }
-.library-side-action { flex: none; opacity: 0; transition: opacity .12s ease; }
-.library-side-row:hover .library-side-action, .library-side-action:focus-visible { opacity: 1; }
-.library-side-title { margin: 14px 0 5px; padding: 0 12px; color: var(--siye-muted); font-size: 11px; letter-spacing: .04em; }
+.library-side .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; flex: none; border: 1px solid transparent; border-radius: 7px; color: var(--siye-muted); background: transparent; }
+.library-side .icon-btn svg { width: 14px; height: 14px; stroke-width: 1.6; }
+.library-side .icon-btn:hover { color: var(--siye-brand-ink); background: var(--siye-soft); border-color: var(--siye-line); }
+.library-side .icon-btn:focus-visible { outline: 2px solid var(--siye-brand); outline-offset: 2px; }
+.library-side-action { opacity: 0; transition: opacity .12s ease; }
+.library-side-row:hover .library-side-action, .library-side-row:focus-within .library-side-action { opacity: 1; }
+.library-side-title { position: relative; margin: 18px 0 9px; padding: 15px 12px 10px; border-top: 1px solid var(--siye-line); color: var(--siye-ink); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.library-side-title::after { content: ""; position: absolute; bottom: 0; left: 12px; width: 24px; height: 2px; border-radius: 2px; background: var(--siye-brand); }
 .library-new { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 12px; border-radius: 9px; color: var(--siye-secondary); font-size: 12.5px; }
 .library-new:hover { background: var(--siye-brand-soft); color: var(--siye-brand-ink); }
 .library-new svg { width: 15px; height: 15px; }
@@ -441,7 +446,7 @@ html.dark .search-submit { color: #101525; }
 @media (max-width: 900px) {
   .library-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .library-side { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
-  .library-side-title { display: none; }
+  .library-side-title { flex-basis: 100%; margin-top: 10px; }
   .library-side-row { flex: none; }
   .library-side-action { opacity: 1; }
 }

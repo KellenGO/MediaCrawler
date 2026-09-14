@@ -383,11 +383,15 @@ test("accountCardStatusLabel: 与诊断行一致的状态沿用基础文案", ()
   assert.equal(accountCardStatusLabel({ status: "unavailable" }), "暂未确认登录");
 });
 
-test("账号使用提示区分公开搜索、个人收藏和平台限流", () => {
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({}) })).includes("尚未确认账号登录"));
-  assert.ok(accountUsageHint(acc({ status: "connected", verified: true, diagnostic: diagnostic({}) })).includes("登录已确认"));
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "rate_limited" }) })).includes("不代表账号已退出登录"));
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "login_required" }) })).includes("请重新登录"));
+test("重新确认登录后，旧搜索失败不能要求用户再次登录", () => {
+  const confirmed = acc({ status: "connected", verified: true });
+  const hint = accountUsageHint(confirmed);
+  for (const limitation_code of ["login_required", "rate_limited", "platform_unavailable"]) {
+    assert.equal(accountUsageHint({ ...confirmed, diagnostic: diagnostic({ search_available: false, limitation_code }) }), hint);
+  }
+  assert.ok(hint.includes("无需重复登录"));
+  assert.ok(accountUsageHint(acc({ profile_exists: true })).includes("尚未确认是否有效"));
+  assert.ok(accountUsageHint(acc({ status: "expired" })).includes("请重新扫码登录"));
 });
 
 test("accountCardStatusLabel: 小红书风控特例 → 验证请求受限", () => {
