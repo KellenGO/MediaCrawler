@@ -109,3 +109,40 @@ test("waitForAccountOpsIdle：探测返回 null（未加载）不阻塞搜索", 
   });
   assert.equal(allowed, true);
 });
+
+// ── extraBusy：账号状态之外仍占用排他租约的操作（扫码登录）────────────
+
+test("waitForAccountOpsIdle：extraBusy 为真也算占用，结束后放行", async () => {
+  let loginRunning = true;
+  const allowed = await waitForAccountOpsIdle({
+    now: () => 0,
+    sleep: async () => { loginRunning = false; },
+    fetchAccounts: async () => [{ platform: "xhs", status: "connected" }],
+    extraBusy: () => loginRunning,
+  });
+  assert.equal(allowed, true);
+});
+
+test("waitForAccountOpsIdle：extraBusy 一直为真 → 超时返回 false（后端 409 兜底）", async () => {
+  const h = harness([[{ platform: "xhs", status: "connected" }]]);
+  const allowed = await waitForAccountOpsIdle({ ...h.options, extraBusy: () => true });
+  assert.equal(allowed, false);
+  assert.ok(h.now >= ACCOUNT_GATE_TIMEOUT_MS, "一直占用时必须走到超时");
+});
+
+test("waitForAccountOpsIdle：extraBusy 抛异常 → 失败开放，不阻塞搜索", async () => {
+  const allowed = await waitForAccountOpsIdle({
+    now: () => 0,
+    sleep: async () => {},
+    fetchAccounts: async () => [{ platform: "xhs", status: "connected" }],
+    extraBusy: () => { throw new Error("registry broken"); },
+  });
+  assert.equal(allowed, true);
+});
+
+test("waitForAccountOpsIdle：extraBusy=false 时不改变原有行为（无额外延迟）", async () => {
+  const h = harness([[{ platform: "xhs", status: "connected" }]]);
+  assert.equal(await waitForAccountOpsIdle({ ...h.options, extraBusy: () => false }), true);
+  assert.equal(h.calls, 1);
+  assert.equal(h.now, 0);
+});

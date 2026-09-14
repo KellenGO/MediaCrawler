@@ -36,6 +36,8 @@ _AUTOSYNC_HOOK = (_ROOT / "hooks" / "useAutoAccountSync.ts").read_text(encoding=
 _AUTOSYNC_COMPONENT = (_ROOT / "components" / "accounts" / "AccountAutoSync.tsx").read_text(encoding="utf-8")
 _EXTENSION_SYNC = (_ROOT / "lib" / "extensionSync.ts").read_text(encoding="utf-8")
 _ACCOUNT_GATE = (_ROOT / "lib" / "accountGate.ts").read_text(encoding="utf-8")
+_ACCOUNT_BULK = (_ROOT / "lib" / "accountBulkSync.ts").read_text(encoding="utf-8")
+_SCAN_LOGIN = (_ROOT / "lib" / "scanLogin.ts").read_text(encoding="utf-8")
 
 
 # ── cancelling / cancelled UI text ──────────────────────────────────────
@@ -215,6 +217,41 @@ def test_accounts_page_no_longer_autosyncs():
     """账号页只保留手动一键同步；自动同步由根部负责，避免两处各跑一套队列。"""
     assert "decideAutoSync" not in _ACCOUNTS
     assert "runSyncQueue" in _ACCOUNTS
+
+
+def test_autosync_reverifies_without_extension():
+    """方案 A：没装扩展时，重启后也要把已有登录状态复核回来。
+
+    后端"已验证"只存在内存里，重启后 profile 还在但状态退化成
+    "已导入，未确认登录"（accounts.py 的 _state_of）。装了扩展时自动同步会
+    顺带验回来；没装扩展（扫码登录主路径）时这里是唯一补救路径：
+    对"本地有 profile 但未确认"的平台直接调 verify 端点。
+    """
+    assert "decideStartupVerify" in _AUTOSYNC_HOOK
+    assert "requestPlatformVerify" in _AUTOSYNC_HOOK
+    assert "shouldAnnounceStartupVerify" in _AUTOSYNC_HOOK
+    assert "decideStartupVerify" in _ACCOUNT_BULK
+    assert "platformsNeedingVerify" in _ACCOUNT_BULK
+    assert "profile_exists" in _ACCOUNT_BULK, "只有本地已有 profile 才值得验证"
+
+
+def test_autosync_verify_path_is_quiet_on_expected_success():
+    """全部确认成功是预期结果（重开程序的正常路径），不许每次开程序都弹提示。"""
+    assert "shouldAnnounceStartupVerify" in _ACCOUNT_BULK
+    assert "counts.verified < counts.total" in _ACCOUNT_BULK
+
+
+def test_accounts_page_uses_scan_login_as_primary_path():
+    """方案 A：卡片主按钮是扫码登录；扩展同步是可选加速（不删）。"""
+    assert "startScanLogin" in _ACCOUNTS
+    assert "扫码登录" in _ACCOUNTS
+    assert "requestPlatformSync" in _ACCOUNTS, "扩展同步必须保留"
+    # 登录任务与搜索互斥：扫码登录也要让搜索闸门看见（见 lib/accountGate.ts）
+    assert "markScanLoginActive" in _ACCOUNTS
+    assert "extraBusy" in _ACCOUNT_GATE
+    assert "isAnyScanLoginActive" in _HOOK
+    # 后端登录成功前不得声称成功；任务状态机在 lib/scanLogin.ts
+    assert "isScanLoginTerminal" in _SCAN_LOGIN
 
 
 def test_search_waits_for_account_ops():

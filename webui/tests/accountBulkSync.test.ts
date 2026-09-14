@@ -22,12 +22,16 @@ import {
   BULK_SYNC_PLATFORM_ORDER,
   buildBulkBlockedMessage,
   buildBulkSummaryMessage,
+  buildVerifySummaryMessage,
   createBulkSyncGuard,
   decideAutoSync,
+  decideStartupVerify,
   platformsNeedingSync,
+  platformsNeedingVerify,
   resolveBulkTargets,
   runBulkSync,
   shouldAnnounceAutoSync,
+  shouldAnnounceStartupVerify,
   summarizeBulkOutcomes,
   type BulkSyncBlockReason,
   type SyncAttemptOutcome,
@@ -427,6 +431,142 @@ test("shouldAnnounceAutoSync：全部失败/不可用 → 保持安静", () => {
     { verified: 0, imported: 0, verifying: 0, unavailable: 2, failed: 2, total: 4 }), false);
   assert.equal(shouldAnnounceAutoSync(
     { verified: 0, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 0 }), false);
+});
+
+// ── 启动后"重新验证已有登录状态"（方案 A：不依赖扩展）──────────────────
+//
+// 后端"已验证"是内存态：重启后 profile 还在，状态却退化成"已导入，未确认
+// 登录"。下面这些规则决定要不要自动复核一次。
+
+const VERIFY_ACCOUNT = (over: Partial<{ platform: string; status: string; verified: boolean; profile_exists: boolean }> = {}) => ({
+  platform: "xhs",
+  status: "unverified",
+  verified: false,
+  profile_exists: true,
+  ...over,
+});
+
+test("platformsNeedingVerify：有 profile 但未确认登录的平台需要复核", () => {
+  assert.deepEqual(
+    platformsNeedingVerify([
+      VERIFY_ACCOUNT({ platform: "xhs" }),
+      VERIFY_ACCOUNT({ platform: "douyin", status: "connected", verified: true }),
+      VERIFY_ACCOUNT({ platform: "bilibili", status: "expired" }),
+    ]),
+    ["xhs", "bilibili"]
+  );
+});
+
+test("platformsNeedingVerify：没有 profile 的平台不参与（验证只会得到未登录）", () => {
+  assert.deepEqual(
+    platformsNeedingVerify([
+      VERIFY_ACCOUNT({ platform: "xhs", profile_exists: false }),
+      VERIFY_ACCOUNT({ platform: "zhihu", profile_exists: undefined as unknown as boolean }),
+    ]),
+    []
+  );
+});
+
+test("platformsNeedingVerify：已连接并验证的平台不需要复核，输出保持固定顺序", () => {
+  assert.deepEqual(
+    platformsNeedingVerify([
+      VERIFY_ACCOUNT({ platform: "zhihu" }),
+      VERIFY_ACCOUNT({ platform: "xhs" }),
+      VERIFY_ACCOUNT({ platform: "douyin", status: "connected", verified: true }),
+    ]),
+    ["xhs", "zhihu"]
+  );
+});
+
+test("platformsNeedingVerify：null（未加载）不启动任何验证", () => {
+  assert.deepEqual(platformsNeedingVerify(null), []);
+});
+
+const decidedVerify = (over: Partial<Parameters<typeof decideStartupVerify>[0]> = {}) =>
+  decideStartupVerify({
+    accounts: [VERIFY_ACCOUNT()],
+    apiRunning: true,
+    syncing: false,
+    msSinceLastAttempt: null,
+    extensionState: "not-installed",
+    ...over,
+  });
+
+test("decideStartupVerify：扩展不可用 + 有未确认平台 → 复核这些平台", () => {
+  const d = decidedVerify();
+  assert.equal(d.run, true);
+  assert.deepEqual(d.platforms, ["xhs"]);
+});
+
+test("decideStartupVerify：扩展已连接 → 交给扩展同步路径，不重复劳动", () => {
+  const d = decidedVerify({ extensionState: "connected" });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "extension_connected");
+});
+
+test("decideStartupVerify：全部已确认 → 什么都不做", () => {
+  const d = decidedVerify({
+    accounts: [VERIFY_ACCOUNT({ status: "connected", verified: true })],
+  });
+  assert.equal(d.run, false);
+  assert.equal(d.skipReason, "nothing_to_verify");
+});
+
+test("decideStartupVerify：守卫顺序 —— 队列在跑 / 冷却 / API 不可用优先", () => {
+  assert.equal(decidedVerify({ syncing: true }).skipReason, "already_syncing");
+  assert.equal(decidedVerify({ msSinceLastAttempt: 0 }).skipReason, "cooldown");
+  assert.equal(decidedVerify({ apiRunning: false }).skipReason, "api_unavailable");
+  assert.equal(decidedVerify({ apiRunning: null }).skipReason, "api_unavailable");
+  assert.equal(decidedVerify({ accounts: null }).skipReason, "accounts_loading");
+  // 冷却是与自动同步共用的：冷却未到时即使扩展不可用也不复核
+  assert.equal(
+    decidedVerify({ msSinceLastAttempt: 0, extensionState: "not-installed" }).skipReason,
+    "cooldown");
+  // 冷却结束 → 可以复核（覆盖"重开程序/回前台"的场景）
+  assert.equal(decidedVerify({ msSinceLastAttempt: AUTO_SYNC_COOLDOWN_MS }).run, true);
+});
+
+test("decideStartupVerify：与 decideAutoSync 共用冷却语义，两者不会同一轮都启动", () => {
+  const shared = { accounts: [VERIFY_ACCOUNT()], syncing: false };
+  // 扩展不可用：自动同步不跑，复核跑
+  assert.equal(decideAutoSync({ ...shared, extensionState: "not-installed", apiRunning: true, msSinceLastAttempt: null }).run, false);
+  assert.equal(decideStartupVerify({ ...shared, extensionState: "not-installed", apiRunning: true, msSinceLastAttempt: null }).run, true);
+  // 扩展已连接：自动同步跑，复核不跑
+  assert.equal(decideAutoSync({ ...shared, extensionState: "connected", apiRunning: true, msSinceLastAttempt: null }).run, true);
+  assert.equal(decideStartupVerify({ ...shared, extensionState: "connected", apiRunning: true, msSinceLastAttempt: null }).run, false);
+});
+
+test("shouldAnnounceStartupVerify：全部确认成功保持安静（这是预期结果）", () => {
+  assert.equal(shouldAnnounceStartupVerify(
+    { verified: 4, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 4 }), false);
+});
+
+test("shouldAnnounceStartupVerify：有需要处理的结果才提示", () => {
+  assert.equal(shouldAnnounceStartupVerify(
+    { verified: 3, imported: 1, verifying: 0, unavailable: 0, failed: 0, total: 4 }), true);
+  assert.equal(shouldAnnounceStartupVerify(
+    { verified: 2, imported: 0, verifying: 0, unavailable: 1, failed: 1, total: 4 }), true);
+  assert.equal(shouldAnnounceStartupVerify(
+    { verified: 0, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 0 }), false);
+});
+
+test("buildVerifySummaryMessage：用「复核」措辞（这次并没有导入 Cookie）", () => {
+  const msg = buildVerifySummaryMessage(
+    { verified: 3, imported: 1, verifying: 0, unavailable: 0, failed: 0, total: 4 });
+  assert.ok(msg.title.includes("复核"));
+  assert.ok(msg.title.includes("3 个已确认"));
+  assert.ok(msg.title.includes("1 个仍未确认"));
+  assert.equal(msg.tone, "warning");
+  for (const s of SENSITIVE) {
+    assert.ok(!msg.title.toLowerCase().includes(s), `文案不得包含 ${s}`);
+  }
+});
+
+test("buildVerifySummaryMessage：一切正常时是 info 且不带诊断提示", () => {
+  const msg = buildVerifySummaryMessage(
+    { verified: 4, imported: 0, verifying: 0, unavailable: 0, failed: 0, total: 4 });
+  assert.equal(msg.tone, "info");
+  assert.equal(msg.description, undefined);
 });
 
 

@@ -247,3 +247,58 @@ export function mapSyncResultToOutcome(
     safeMessage: result.safe_message || undefined,
   };
 }
+
+// ── 直接验证（不经过扩展）───────────────────────────────────────────────
+//
+// 后端 `POST /api/search/accounts/{platform}/verify` 会用本地 profile 起一个
+// 无头上下文、跑平台自己的 pong，然后写回状态。它**不需要浏览器扩展** ——
+// 这是方案 A（应用自带登录）在"重启后复核登录状态"上的对应能力。
+
+/** verify 端点的响应（与 accounts_service._finalize_verdict 的返回值一致）。 */
+export interface VerifyResponse {
+  success?: boolean;
+  platform?: string;
+  verified?: boolean;
+  status?: string;
+  safe_error_code?: string | null;
+  safe_message?: string | null;
+}
+
+/**
+ * 把 verify 端点的响应折成 SyncResult 形状（纯函数），好复用同一套
+ * mapSyncResultToOutcome 判定，避免出现第二份"什么算已验证"的规则。
+ *
+ * 注意 verify 响应里没有 Cookie 计数/登录标记这些同步专有字段：一律填 null，
+ * 不虚构数字。sync_stage 固定为 "verification"。
+ */
+export function verifyResponseToSyncResult(
+  data: VerifyResponse | null | undefined
+): SyncResult {
+  const d = data ?? {};
+  return {
+    success: d.success !== false,
+    verified: d.verified === true,
+    status: typeof d.status === "string" ? d.status : "",
+    safe_error_code: typeof d.safe_error_code === "string" ? d.safe_error_code : "",
+    safe_message: typeof d.safe_message === "string" ? d.safe_message : "",
+    sync_stage: "verification",
+    received_cookie_count: null,
+    accepted_cookie_count: null,
+    skipped_cookie_count: null,
+    required_cookie_present: null,
+    login_marker_presence: null,
+  };
+}
+
+/**
+ * 直接让后端复核该平台的登录状态（不依赖扩展）。
+ *
+ * 失败（409 搜索/账号操作进行中等）会抛出，由调用方决定如何呈现。
+ */
+export async function requestPlatformVerify(
+  platform: PlatformSlug
+): Promise<SyncResult> {
+  const { data } = await axios.post<VerifyResponse>(
+    `${ACCOUNTS_API_BASE}/${platform}/verify`);
+  return verifyResponseToSyncResult(data);
+}

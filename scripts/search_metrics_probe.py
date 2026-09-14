@@ -22,7 +22,12 @@ async def main():
     from aggregate_search.models import UnifiedSearchResult
 
     logging.disable(logging.CRITICAL)
-    data = json.load(urllib.request.urlopen("http://127.0.0.1:8080/api/search/jobs/current", timeout=10))
+    # 端口与 base/server_port.py 同一套规则（SIYE_PORT，默认 8080）——
+    # 同一个仓库的多个 check-out 并行跑时，探针要打到自己那个实例上。
+    from base.server_port import base_url
+
+    data = json.load(urllib.request.urlopen(
+        f"{base_url()}/api/search/jobs/current", timeout=10))
     rows = {}
     for result in data["results"]:
         for source in result.get("grouped_sources") or [result]:

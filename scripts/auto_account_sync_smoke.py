@@ -42,7 +42,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from playwright.sync_api import sync_playwright
 
-DEFAULT_BASE = "http://127.0.0.1:8080"
+from base.server_port import base_url
+
+# 默认跟着 base/server_port.py 的规则走（SIYE_PORT 可覆盖，产品默认 8080），
+# 也可以用 --base-url 显式指定。
+DEFAULT_BASE = base_url()
 
 # 伪造 content script：只应答 ping，让网页认为扩展已安装且版本可用。
 FAKE_EXTENSION = """

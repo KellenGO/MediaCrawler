@@ -12,9 +12,12 @@ import urllib.request
 import webbrowser
 
 from base.runtime_paths import application_root, resource_path
+from base.server_port import resolve_port
 
 HOST = "127.0.0.1"
-PORT = 8080
+# 端口统一由 base.server_port 解析（产品默认 8080，可用 SIYE_PORT 覆盖）——
+# 同一仓库的多个 check-out 并行运行时靠它避开端口冲突。
+PORT = resolve_port()
 BASE_URL = f"http://{HOST}:{PORT}"
 HEALTH_URL = f"{BASE_URL}/api/health"
 READY_TIMEOUT_SECONDS = 45
@@ -57,7 +60,7 @@ def _wait_for_health(server_thread: threading.Thread | None = None) -> dict:
 
 
 def _is_mediacrawler_health(payload: dict) -> bool:
-    """Recognize this app's health shape before reusing port 8080."""
+    """Recognize this app's health shape before reusing the configured port."""
     return (
         payload.get("backend_available") is True
         and isinstance(payload.get("api_version"), str)
@@ -74,7 +77,7 @@ def _port_is_open() -> bool:
 def _run_existing_backend() -> int:
     health = _request_health()
     if not health or not _is_mediacrawler_health(health):
-        print("[X] 8080 端口已被其他程序占用，无法启动 MediaCrawler。")
+        print(f"[X] {PORT} 端口已被其他程序占用，无法启动 MediaCrawler。")
         return 1
     print("已检测到正在运行的 MediaCrawler backend，直接打开页面。")
     webbrowser.open(BASE_URL)

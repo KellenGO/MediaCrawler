@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight, Minus, Plus, Palette, SlidersHorizontal, UserRound } from "lucide-react";
+import { Check, Loader2, RefreshCw, Trash2, ExternalLink, Plug, ShieldCheck, ChevronDown, ChevronRight, Minus, Plus, Palette, SlidersHorizontal, UserRound, QrCode } from "lucide-react";
 import { PLATFORM_LABELS, PLATFORM_COLORS } from "@/types/search";
 import type { PlatformSlug } from "@/types/search";
 import { invalidateAccounts, useAccounts } from "@/hooks/useAccounts";
@@ -14,6 +14,7 @@ import {
   diagnosticSearchModeLabel,
   diagnosticTone,
   diagnosticToneLabel,
+  summarizeAccounts,
   type AccountTone,
   type DiagnosticTone,
 } from "@/lib/accounts";
@@ -36,18 +37,34 @@ import {
   requestPlatformSync,
   type SyncResult,
 } from "@/lib/extensionSync";
+import {
+  SCAN_LOGIN_API_BASE,
+  SCAN_LOGIN_POLL_INTERVAL_MS,
+  clearAllScanLogins,
+  clearScanLoginActive,
+  isScanLoginActive,
+  isScanLoginTerminal,
+  markScanLoginActive,
+  pendingScanLoginJob,
+  scanLoginActionLabel,
+  scanLoginErrorMessage,
+  scanLoginView,
+  type ScanLoginJob,
+  type ScanLoginTone,
+} from "@/lib/scanLogin";
 import type { SettingsSection } from "@/components/layout/Header";
 import { useThemeStore } from "@/store/themeStore";
 import { useHomePreferencesStore } from "@/store/homePreferencesStore";
 
-interface LoginStatus {
-  job_id: string;
-  platform: string;
-  status: string;
-  message: string;
-}
-
 const API_BASE = ACCOUNTS_API_BASE;
+
+/** 扫码登录状态行的文字色调（与 TONE_BADGE 的语义保持一致）。 */
+const LOGIN_TONE_TEXT: Record<ScanLoginTone, string> = {
+  idle: "text-cyber-text-muted",
+  active: "text-brand-strong",
+  ok: "text-[#3d7d60]",
+  bad: "text-danger",
+};
 
 const SYNC_STAGE_TEXT: Record<string, string> = {
   profile_import: "导入 Cookie",
@@ -222,9 +239,16 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
   const [lastDiag, setLastDiag] = useState<Record<string, SyncResult>>({});
   /** 诊断信息默认折叠（Round 14），用户点击"查看诊断"再展开。 */
   const [openDiag, setOpenDiag] = useState<Record<string, boolean>>({});
-  const [auxOpen, setAuxOpen] = useState(false);
-  const [auxPlatform, setAuxPlatform] = useState<string | null>(null);
-  const [auxStatus, setAuxStatus] = useState<LoginStatus | null>(null);
+  // ── 应用自带扫码登录（方案 A：主路径）────────────────────────────────
+  // 面板按平台独立展开：旧实现用单个布尔量，展开一个平台会串到所有卡片。
+  const [loginOpen, setLoginOpen] = useState<Record<string, boolean>>({});
+  /** 每个平台最近一次登录任务（不随折叠/切换卡片丢失，用户回头能看到结果）。 */
+  const [loginJobs, setLoginJobs] = useState<Record<string, ScanLoginJob>>({});
+  // 轮询需要读到最新任务但不能成为 effect 依赖：用 ref 镜像 + 已汇报集合。
+  const loginJobsRef = useRef<Record<string, ScanLoginJob>>({});
+  loginJobsRef.current = loginJobs;
+  /** 已汇报过终态的任务（同一次轮询可能重复读到终态，toast 只出一次）。 */
+  const reportedLoginJobsRef = useRef<Set<string>>(new Set());
   const [extensionVersion, setExtensionVersion] = useState("");
 
   // ── 扩展检测（content script ping/pong，协议实现在 lib/extensionSync）──
@@ -296,7 +320,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
       if (extensionState === "not-installed") {
         return fail({
           safeErrorCode: "extension_not_installed",
-          safeMessage: "未检测到浏览器扩展，请先安装（见页面底部安装说明）后刷新本页。",
+          safeMessage: "未检测到浏览器扩展。可以改用该平台的「扫码登录」，或安装扩展后刷新本页再试。",
         });
       }
       if (extensionState === "outdated") {
@@ -304,7 +328,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
         // 后端需要的字段，继续同步会得到不可靠的诊断结果。
         return fail({
           safeErrorCode: "extension_outdated",
-          safeMessage: "扩展版本过旧，请在 edge://extensions 点击\"重新加载\"后刷新本页再同步。",
+          safeMessage: "扩展版本过旧，请在 edge://extensions 点击\"重新加载\"后刷新本页再同步；也可以改用「扫码登录」。",
         });
       }
       setBusyPlatform(platform, "syncing");
@@ -317,7 +341,8 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
           setBusyPlatform(platform, "");
           const msg = `扩展 ${Math.round(SYNC_RESPONSE_TIMEOUT_MS / 1000)} 秒未响应。`
             + "请确认：1) 扩展已加载并启用；2) 已刷新本页（扩展注入后需刷新一次）；"
-            + "3) 后端验证会话最长约 30 秒，若仍在验证可稍等后查看账号卡片诊断。";
+            + "3) 后端验证会话最长约 30 秒，若仍在验证可稍等后查看账号卡片诊断。"
+            + "也可以改用该平台的「扫码登录」。";
           if (!silent) toast.error(msg);
           return {
             platform, kind: "failed", success: false, verified: false,
@@ -533,35 +558,93 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
 
   const handleBulkSync = useCallback(() => runSyncQueue(undefined), [runSyncQueue]);
 
-  // ── 备用辅助登录（默认折叠，仅用户主动点击）──────────────────────────
-  const startAuxLogin = useCallback(async (platform: string) => {
-    setAuxPlatform(platform);
-    setAuxStatus({ job_id: "", platform, status: "pending", message: "正在启动独立辅助浏览器…" });
+  // ── 应用自带扫码登录（方案 A：主路径）────────────────────────────────
+  // 后端 POST /api/search/login 会用用户自己的 Edge/Chrome 打开一个可见窗口，
+  // 扫码成功后会话直接写进搜索实际读取的 profile，并做一次真实验证。
+  // 这是不依赖任何浏览器扩展的登录方式。
+  const startScanLogin = useCallback(async (platform: string) => {
+    const name = PLATFORM_LABELS[platform as keyof typeof PLATFORM_LABELS] || platform;
+    // 先展开面板并给出即时反馈：POST 返回前也要让用户看到"正在启动"。
+    setLoginOpen((prev) => (prev[platform] ? prev : { ...prev, [platform]: true }));
+    setLoginJobs((prev) => ({
+      ...prev,
+      [platform]: pendingScanLoginJob(platform, `正在启动 ${name} 登录窗口…`),
+    }));
+    // 登录期间搜索会被后端 409 拒绝：登记起来，让搜索提交前等待（见 lib/accountGate.ts）。
+    markScanLoginActive(platform);
     try {
-      const { data } = await axios.post("/api/search/login", { platform });
-      setAuxStatus(data as LoginStatus);
+      const { data } = await axios.post(SCAN_LOGIN_API_BASE, { platform });
+      setLoginJobs((prev) => ({ ...prev, [platform]: data as ScanLoginJob }));
     } catch (e) {
-      setAuxStatus({ job_id: "", platform, status: "failed", message: "启动失败（可能有搜索正在运行）" });
+      clearScanLoginActive(platform);
+      const message = scanLoginErrorMessage(e);
+      setLoginJobs((prev) => ({
+        ...prev,
+        [platform]: { job_id: "", platform, status: "failed", message },
+      }));
+      toast.error(`${name}：${message}`);
     }
   }, []);
 
+  /** 登录任务到达终态：提示 + 让账号卡片立刻反映新会话。 */
+  const onScanLoginTerminal = useCallback((job: ScanLoginJob) => {
+    clearScanLoginActive(job.platform);
+    const name = PLATFORM_LABELS[job.platform as keyof typeof PLATFORM_LABELS] || job.platform;
+    if (job.status === "succeeded") {
+      toast.success(`${name} 登录成功，会话已验证并保存。`);
+      // 登录 worker 刚结束，主动验证一次让卡片从"未确认"翻成"已连接"；
+      // 验证可能撞上尚未释放的排他租约，失败也无妨 —— 仍刷新账号缓存。
+      void axios
+        .post(`${API_BASE}/${job.platform}/verify`)
+        .catch(() => undefined)
+        .finally(() => invalidateAccounts(queryClient));
+      return;
+    }
+    if (job.status === "timed_out") {
+      toast.warning(`${name} 登录超时：10 分钟内未完成扫码，可重新打开登录窗口。`);
+    } else {
+      toast.error(`${name} 登录失败：${job.message || "请重试"}`);
+    }
+    invalidateAccounts(queryClient);
+  }, [queryClient]);
+
+  // 轮询进行中的登录任务（后端最长 10 分钟），到达终态即停止对该任务的轮询。
   useEffect(() => {
-    if (!auxPlatform || !auxStatus?.job_id) return;
-    const id = setInterval(async () => {
-      try {
-        const { data } = await axios.get(`/api/search/login/${auxStatus.job_id}`);
-        setAuxStatus(data as LoginStatus);
-        if (["succeeded", "failed", "timed_out"].includes(data.status)) {
-          clearInterval(id);
-        }
-      } catch { clearInterval(id); }
-    }, 1500);
+    const id = setInterval(() => {
+      const active = Object.values(loginJobsRef.current)
+        .filter((job) => job.job_id && isScanLoginActive(job.status));
+      for (const job of active) {
+        void (async () => {
+          let next: ScanLoginJob;
+          try {
+            const { data } = await axios.get(`${SCAN_LOGIN_API_BASE}/${job.job_id}`);
+            next = data as ScanLoginJob;
+          } catch {
+            // 单轮失败（网络抖动 / 后端重启）不改变状态，下一轮继续。
+            return;
+          }
+          setLoginJobs((prev) => ({ ...prev, [job.platform]: next }));
+          if (!isScanLoginTerminal(next.status)) return;
+          if (reportedLoginJobsRef.current.has(next.job_id)) return;
+          reportedLoginJobsRef.current.add(next.job_id);
+          onScanLoginTerminal(next);
+        })();
+      }
+    }, SCAN_LOGIN_POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [auxPlatform, auxStatus?.job_id]);
+  }, [onScanLoginTerminal]);
+
+  // 离开账号页后没人再轮询这些任务，登记不能比轮询活得更久 —— 否则每次搜索
+  // 都会先白等一轮账号闸门。后端 409 仍是兜底。
+  useEffect(() => () => { clearAllScanLogins(); }, []);
 
   const toggleDiag = (platform: string) => {
     setOpenDiag((prev) => ({ ...prev, [platform]: !prev[platform] }));
   };
+
+  /** 已真实验证登录的平台数（只统计 connected + verified）。 */
+  const verifiedCount = accounts ? summarizeAccounts(accounts).verified : 0;
+  const totalPlatforms = PLATFORM_ORDER.length;
 
   // ── 渲染 ─────────────────────────────────────────────────────────────
   return (
@@ -597,13 +680,18 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
       {activeSection === "accounts" && <section>
         <div className="settings-title"><h2>账号与登录</h2><p>连接你的平台账号，让搜索与收藏顺畅一点。</p></div>
         <div className="account-top">
-          <p>浏览器扩展{extensionState === "connected" ? "已连接" : "等待连接"}{extensionVersion ? ` · v${extensionVersion}` : ""}</p>
-          {/* 一键同步四平台：并发 2，固定顺序 xhs → douyin → bilibili → zhihu */}
+          <p>
+            {verifiedCount > 0
+              ? `已连接 ${verifiedCount}/${totalPlatforms} 个平台`
+              : "推荐：用手机扫码登录四个平台"}
+          </p>
+          {/* 「从浏览器同步」是可选加速：需要扩展，扫码登录不依赖它。 */}
           <button
             type="button"
             onClick={handleBulkSync}
             disabled={bulkSyncing || extensionState !== "connected" || apiRunning === false}
-            className="btn small primary"
+            className="btn small"
+            title={extensionState === "connected" ? undefined : "需要先安装浏览器扩展（可选加速方式，不装也能用扫码登录）"}
           >
             {bulkSyncing ? (
               <>
@@ -615,13 +703,13 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
             ) : (
               <>
                 <RefreshCw className="w-4 h-4" />
-                一键同步
+                从浏览器同步（需扩展）
               </>
             )}
           </button>
         </div>
 
-      {/* 扩展状态 */}
+      {/* 扩展状态（可选加速：扫码登录不依赖它） */}
       <div className={`extension-status ${
         extensionState === "connected"
           ? "border-ok/40 bg-ok-soft text-[#3d7d60]"
@@ -630,12 +718,12 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
             : "border-cyber-border-subtle bg-cyber-bg-secondary text-cyber-text-muted"
       }`}>
         <Plug className="w-3.5 h-3.5 inline mr-1.5" />
-        {extensionState === "checking" && "正在检测浏览器扩展…"}
+        {extensionState === "checking" && "正在检测浏览器扩展…（可选，不装也能用扫码登录）"}
         {extensionState === "connected"
-          && `扩展已安装并连接（v${extensionVersion || "?"}，协议 v2）`}
+          && `扩展已安装并连接（v${extensionVersion || "?"}，协议 v2）· 可用「从浏览器同步」快速复用登录状态`}
         {extensionState === "outdated"
-          && `扩展版本过旧${extensionVersion ? `（检测到 v${extensionVersion}）` : ""}，请在 edge://extensions 点击"重新加载"后刷新本页`}
-        {extensionState === "not-installed" && "未检测到扩展（安装后刷新本页，或切走再切回以重新检测）"}
+          && `扩展版本过旧${extensionVersion ? `（检测到 v${extensionVersion}）` : ""}，请在 edge://extensions 点击"重新加载"后刷新本页；也可以直接用扫码登录`}
+        {extensionState === "not-installed" && "未安装扩展（可选加速）。不装也可以直接点平台卡片的「扫码登录」"}
         {apiRunning === false && " · 本地 API 未运行"}
       </div>
 
@@ -647,9 +735,22 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
               <h3><i className="pd" style={{ backgroundColor: PLATFORM_COLORS[platform] }} aria-hidden="true" />{PLATFORM_LABELS[platform]}</h3>
               <span className="pill">状态暂不可用</span>
             </div>
-            <p>本地服务尚未返回账号状态。启动服务后可同步或重新验证。</p>
+            <p>
+              {apiRunning === false
+                ? "本地服务尚未返回账号状态。启动服务后即可扫码登录。"
+                : "账号状态正在加载。可以先扫码登录，或稍等片刻查看。"
+              }
+            </p>
             <div className="account-actions">
-              <button type="button" className="btn small" disabled>同步登录状态</button>
+              <button
+                type="button"
+                className="btn small primary"
+                disabled={apiRunning === false}
+                onClick={() => startScanLogin(platform)}
+              >
+                <QrCode className="w-3.5 h-3.5 inline mr-1.5" />扫码登录
+              </button>
+              <button type="button" className="btn small" disabled>从浏览器同步</button>
               <button type="button" className="btn ghost small" disabled>重新验证</button>
               <button type="button" className="btn ghost small" onClick={() => openOfficial(platform)}>前往登录 <ExternalLink /></button>
             </div>
@@ -669,6 +770,12 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
             : diagnostic?.snippet_available === false
               ? "简介暂不可用"
               : "简介状态未知";
+          // 扫码登录（方案 A 主路径）该平台的状态。
+          const loginJob = loginJobs[acc.platform];
+          const loginBusy = isScanLoginActive(loginJob?.status);
+          const loginView = scanLoginView(loginJob);
+          const loginLabel = scanLoginActionLabel(loginJob);
+          const extensionReady = extensionState === "connected";
           return (
             <article key={acc.platform} className="account-card">
               {/* 头部：平台标记 + 名称 + 状态徽章 + busy */}
@@ -784,20 +891,37 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                 </div>
               )}
 
-              {/* 主要操作 */}
+              {/* 主要操作：方案 A —— 扫码登录是主路径，扩展同步是可选加速 */}
               <div className="account-actions">
+                <button
+                  onClick={() => startScanLogin(acc.platform)}
+                  disabled={loginBusy || apiRunning === false || bulkSyncing}
+                  className="btn small primary"
+                  title={apiRunning === false
+                    ? "本地服务未运行，无法打开登录窗口"
+                    : "用手机 App 扫码登录，不需要安装任何东西"}
+                >
+                  {loginBusy
+                    ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" />
+                    : <QrCode className="w-3.5 h-3.5 inline mr-1.5" />}
+                  {loginLabel}
+                </button>
+                <button
+                  onClick={() => syncAccount(acc.platform as PlatformSlug)}
+                  disabled={!!busyLabel || !extensionReady || bulkSyncing}
+                  className="btn small"
+                  title={extensionReady
+                    ? "复用当前浏览器里已有的登录状态（需扩展）"
+                    : "可选加速：安装浏览器扩展后才能复用浏览器登录状态；不装也可以直接用扫码登录"}
+                >
+                  <Plug className="w-3.5 h-3.5 inline mr-1.5" />
+                  从浏览器同步
+                </button>
                 <button
                   onClick={() => openOfficial(acc.platform)}
                   className="btn ghost small"
                 >
                   <ExternalLink className="w-3.5 h-3.5 inline mr-1.5" />打开官网
-                </button>
-                <button
-                  onClick={() => syncAccount(acc.platform as PlatformSlug)}
-                  disabled={!!busyLabel || extensionState !== "connected" || bulkSyncing}
-                  className="btn small"
-                >
-                  同步当前浏览器登录状态
                 </button>
                 <button
                   onClick={() => verifyAccount(acc.platform)}
@@ -815,45 +939,49 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                 </button>
               </div>
 
-              {/* 备用辅助登录（折叠） */}
-              <div className="mt-3">
-                <button
-                  onClick={() => { setAuxOpen(!auxOpen); setAuxPlatform(null); setAuxStatus(null); }}
-                  className="text-[11.5px] text-cyber-text-muted hover:text-cyber-text-primary underline underline-offset-2 transition-colors"
-                >
-                  {auxOpen ? "收起" : "备用辅助登录"}（扩展同步失败时使用）
-                </button>
-                {auxOpen && (
-                  <div className="mt-2 px-3.5 py-2.5 rounded-lg border border-cyber-border-subtle bg-cyber-bg-tertiary/60">
-                    <p className="text-[11.5px] text-warn mb-2">
-                      ⚠ 将打开独立辅助浏览器窗口进行扫码登录（不会复用当前浏览器会话）。
+              {/* 扫码登录面板（主路径，按平台独立展开；登录结果不随折叠丢失） */}
+              {loginOpen[acc.platform] && (
+                <div className="mt-3 px-3.5 py-2.5 rounded-lg border border-cyber-border-subtle bg-cyber-bg-tertiary/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-[11.5px] text-cyber-text-secondary">
+                      会在你电脑上打开一个浏览器窗口，用手机 App 扫码即可；登录成功后窗口自动关闭，
+                      会话保存在本机，不经过网页也不依赖任何插件。
                     </p>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => startAuxLogin(acc.platform)}
-                        disabled={!!auxStatus && ["pending", "running"].includes(auxStatus.status)}
-                        className="px-3 py-1.5 rounded-lg bg-warn-soft border border-warn/40 text-warn text-xs hover:bg-warn/10 transition-all disabled:opacity-40"
-                      >
-                        {auxStatus && auxStatus.status === "running" ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
-                        打开辅助登录窗口
-                      </button>
-                      {auxStatus && auxStatus.message && (
-                        <span className="text-[11.5px] text-cyber-text-muted">{auxStatus.message}</span>
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLoginOpen((prev) => ({ ...prev, [acc.platform]: false }))}
+                      className="text-[11px] text-cyber-text-muted hover:text-cyber-text-primary transition-colors whitespace-nowrap"
+                    >
+                      收起
+                    </button>
                   </div>
-                )}
-              </div>
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    {loginBusy && <Loader2 className="w-3 h-3 animate-spin text-brand-strong" />}
+                    {loginView.tone === "ok" && <Check className="w-3.5 h-3.5 text-[#3d7d60]" />}
+                    {loginView.text && (
+                      <span className={`text-[11.5px] ${LOGIN_TONE_TEXT[loginView.tone]}`}>
+                        {loginView.text}
+                      </span>
+                    )}
+                    {loginBusy && loginJob?.job_id && (
+                      <span className="text-[11px] text-cyber-text-muted">
+                        · 未完成扫码可等到 10 分钟；期间不能同时搜索或同步
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </article>
           );
         })}
       </div>
 
-      {/* 安装说明 */}
+      {/* 首次使用说明：主路径是扫码登录，扩展是可选加速 */}
       <div className="info-box">
-        <h3>第一次使用？先连接浏览器扩展</h3>
-        <p>在你常用的浏览器登录平台，通过扩展同步到本机服务。网页只接收同步结果，不展示账号凭据。</p>
-        {onNavigateHelp && <button type="button" className="text-link" onClick={onNavigateHelp}>查看扩展安装说明 <ExternalLink /></button>}
+        <h3>第一次使用？先扫码登录</h3>
+        <p>点任意平台卡片的「扫码登录」，四野会在你电脑上打开一个浏览器窗口，用手机 App 扫一下即可。四个平台各扫一次，之后打开程序就能直接搜。</p>
+        <p className="mt-2">想复用浏览器里已经登录好的状态？装一次浏览器扩展，就能用「从浏览器同步」——这是可选加速方式，不装也能用。</p>
+        {onNavigateHelp && <button type="button" className="text-link" onClick={onNavigateHelp}>查看登录与安装说明 <ExternalLink /></button>}
       </div>
       </section>}
 
