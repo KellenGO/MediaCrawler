@@ -94,6 +94,11 @@
 - **`git pull/push` 需要本机代理 `127.0.0.1:7890` 在跑**（git 里配了 `http.proxy`）；
   代理没起时会报 "Failed to connect to github.com port 443"。离线时用
   `git bundle create <项目外的路径>.bundle <branch>` 做本地备份。
+- **agent 沙箱里 `refs/remotes/**` 可能写不进去**：`git fetch` 会报成功，
+  但 `git branch -vv` 里上游仍显示 `[origin/xxx: gone]`、`git rev-parse origin/master` 报
+  `fatal: Needed a single revision`。**这是沙箱的限制，不是仓库损坏**（对照实验：写到
+  `refs/tags/` 能持久、Python 直接写文件也成功，只有 `refs/remotes` 被丢弃）。
+  要拉取更新就用 `git fetch origin <branch>` + `git merge FETCH_HEAD`，别依赖 remote-tracking ref。
 
 ## 工作区与合并（2026-09-14）
 
