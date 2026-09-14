@@ -11,8 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
-import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -24,7 +22,6 @@ from aggregate_search.models import (
 )
 from aggregate_search.hydration import hydration_candidates, metric_candidates
 from aggregate_search.protocol import parse_event_line, WorkerRequest
-from base.runtime_paths import application_root
 from ..schemas.search import (
     SearchJobResponse, SearchJobRequestSchema, PlatformStatusInfo,
     PlatformTimingInfo,
@@ -40,6 +37,12 @@ from . import result_cache
 from .result_hydration import ResultHydrator
 from .search_metrics import PlatformCooldowns, SearchMetrics
 from .search_exploration import Exploration
+from .worker_process import (
+    cancel_task_quietly,
+    drain_stderr_to_eof,
+    spawn_worker,
+    terminate_worker,
+)
 from aggregate_search.pagination import PageState
 
 WORKER_TIMEOUT_SECONDS = 100
@@ -47,9 +50,6 @@ GRACE_PERIOD_SECONDS = 5.0
 # Bound on waiting for an already in-flight cancel to finish (idempotent
 # repeat cancel). The cancel cleanup itself is bounded by GRACE_PERIOD.
 CANCEL_WAIT_TIMEOUT = 30.0
-_MAX_STDERR_TAIL = 40
-_PROJECT_ROOT = application_root()
-_WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 
 # Production defaults to resident worker supervisors; one-shot mode remains for
 # 手工调试（tests/conftest.py 会把默认置为 oneshot，新增 supervisor 测试
@@ -57,13 +57,6 @@ _WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 SEARCH_WORKER_MODE = os.environ.get("MC_SEARCH_WORKER_MODE", "supervisor")
 
 logger = logging.getLogger(__name__)
-
-
-def _worker_command(*args: str) -> list[str]:
-    """Use the frozen executable for workers, source script otherwise."""
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--aggregate-worker", *args]
-    return [sys.executable, _WORKER_SCRIPT, *args]
 
 
 # ── Resident platform worker supervisor ─────────────────────────────────
@@ -96,15 +89,9 @@ class PlatformWorkerSupervisor:
     async def _spawn(self, platform: str) -> "_ResidentWorker":
         # The supervisor is the single source of truth for the max-request
         # 把上限写进子进程 env，worker 与 supervisor 绝不各自维护不一致的上限。
-        env = {**os.environ, "PYTHONUTF8": "1",
-               "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
-               "MC_WORKER_MAX_REQUESTS": str(self.MAX_REQUESTS_PER_WORKER)}
-        proc = await asyncio.create_subprocess_exec(
-            *_worker_command("--resident"),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
-            limit=2 * 1024 * 1024,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        proc = await spawn_worker(
+            "--resident",
+            env_extra={"MC_WORKER_MAX_REQUESTS": str(self.MAX_REQUESTS_PER_WORKER)},
         )
         worker = _ResidentWorker(platform=platform, proc=proc)
         worker.stderr_task = asyncio.create_task(
@@ -193,29 +180,8 @@ class PlatformWorkerSupervisor:
         async with self._lock:
             if self._workers.get(platform) is worker:
                 self._workers.pop(platform, None)
-        proc = worker.proc
-        try:
-            if proc.stdin:
-                proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=GRACE_PERIOD_SECONDS)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                await asyncio.wait_for(proc.wait(),
-                                       timeout=GRACE_PERIOD_SECONDS)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        if worker.stderr_task and not worker.stderr_task.done():
-            worker.stderr_task.cancel()
-            try:
-                await worker.stderr_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        await terminate_worker(worker.proc, grace=GRACE_PERIOD_SECONDS, graceful=True)
+        await cancel_task_quietly(worker.stderr_task)
 
     async def stop_worker(self, platform: str, kill: bool = True) -> None:
         """终止平台 worker（cancel/timeout/账号操作前/shutdown）。
@@ -227,35 +193,9 @@ class PlatformWorkerSupervisor:
             worker = self._workers.pop(platform, None)
         if worker is None:
             return
-        proc = worker.proc
-        if kill:
-            try:
-                if proc.returncode is None:
-                    proc.kill()
-            except Exception:
-                pass
-        else:
-            try:
-                if proc.stdin:
-                    proc.stdin.close()
-            except Exception:
-                pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=GRACE_PERIOD_SECONDS)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                await asyncio.wait_for(proc.wait(), timeout=GRACE_PERIOD_SECONDS)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        if worker.stderr_task and not worker.stderr_task.done():
-            worker.stderr_task.cancel()
-            try:
-                await worker.stderr_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        await terminate_worker(
+            worker.proc, grace=GRACE_PERIOD_SECONDS, graceful=not kill)
+        await cancel_task_quietly(worker.stderr_task)
 
     async def stop_all(self) -> None:
         for platform in list(self._workers.keys()):
@@ -284,29 +224,12 @@ class PlatformWorkerSupervisor:
             pass
 
     async def _drain_stderr(self, platform: str, proc) -> None:
-        """常驻 drain worker stderr（防管道填满死锁）；只保留过滤后的 tail。"""
-        tail: List[str] = []
-        if proc.stderr is None:
-            return
-        try:
-            while True:
-                raw = await proc.stderr.readline()
-                if not raw:
-                    break
-                try:
-                    line = raw.decode("utf-8", errors="replace").strip()
-                except Exception:
-                    continue
-                if not line:
-                    continue
-                lowered = line.lower()
-                if any(w in lowered for w in _STDERR_FILTER_WORDS):
-                    continue
-                tail.append(line)
-                if len(tail) > _MAX_STDERR_TAIL:
-                    tail.pop(0)
-        except Exception:
-            pass
+        """常驻排空 worker stderr，防管道填满导致子进程卡死。
+
+        历史实现会把过滤后的行攒进 tail，但那个 tail 从未被读取（也不落日志）——
+        和 `_read_worker_stderr` 是同一个白算的毛病，已一并去掉。
+        """
+        await drain_stderr_to_eof(proc)
 
 
 class _ResidentWorker:
@@ -322,12 +245,6 @@ class _ResidentWorker:
         self.busy: bool = False
         # Record whether this request reused an existing worker.
         self.reused: bool = False
-
-# ── Stderr safety ───────────────────────────────────────────────────────
-
-# Only filter the most obvious leak patterns. Do NOT duplicate protocol.py.
-_STDERR_FILTER_WORDS = ("cookie=", "authorization:", "xsec_token=",
-                        "access_token=", "refresh_token=", "password=")
 
 
 def _safe_error_summary(msg: str) -> str:
@@ -686,16 +603,8 @@ class SearchJobManager:
         stderr_task = None
 
         try:
-            env = {**os.environ, "PYTHONUTF8": "1",
-                   "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
             job.mark_spawn_start(platform)
-            proc = await asyncio.create_subprocess_exec(
-                *_worker_command(),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
-                limit=2 * 1024 * 1024,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
+            proc = await spawn_worker()
             job.mark_spawn_end(platform)
             job.procs.append(proc)
 
@@ -737,20 +646,10 @@ class SearchJobManager:
             except (asyncio.TimeoutError, Exception):
                 pass
 
-            # Wait for process exit
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=GRACE_PERIOD_SECONDS + 2)
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    pass
-            except Exception:
-                # Round 13: 取消清理可能正并发 wait 同一进程 —— 该异常
-                # 绝不能逃逸进 job.task（否则 cancel_job 的 await 会收到
-                # 非 CancelledError 异常）。
-                pass
+            # 等待退出。取消清理可能正并发 wait 同一进程 —— terminate_worker
+            # 内部吞掉这类异常，绝不能让它逃逸进 job.task（否则 cancel_job
+            # 的 await 会收到非 CancelledError 异常，见 Round 13）。
+            await terminate_worker(proc, grace=GRACE_PERIOD_SECONDS + 2)
 
             exit_code = proc.returncode if proc.returncode is not None else -1
 
@@ -865,44 +764,18 @@ class SearchJobManager:
         return done_received
 
     async def _read_worker_stderr(self, proc: asyncio.subprocess.Process) -> None:
-        if not proc.stderr:
-            return
-        tail: List[str] = []
-        while True:
-            raw = await proc.stderr.readline()
-            if not raw:
-                break
-            try:
-                line = raw.decode("utf-8", errors="replace").strip()
-            except Exception:
-                continue
-            if not line:
-                continue
-            lowered = line.lower()
-            if any(w in lowered for w in _STDERR_FILTER_WORDS):
-                continue
-            tail.append(line)
-            if len(tail) > _MAX_STDERR_TAIL:
-                tail.pop(0)
+        """排空 stderr 防管道写满。
+
+        历史实现会把过滤后的行攒进一个 tail 列表，但**既不返回也不落日志**，
+        纯属白算 —— 现在只做必要的排空。
+        """
+        await drain_stderr_to_eof(proc)
 
     async def _terminate_process(
         self, proc: asyncio.subprocess.Process, platform: str, job: "_ActiveJob",
     ) -> None:
-        try:
-            if proc.returncode is None:
-                proc.terminate()
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=GRACE_PERIOD_SECONDS)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
-        except Exception:
-            pass  # Round 13: 并发清理异常不得逃逸
+        # 并发清理异常不得逃逸（Round 13）。
+        await terminate_worker(proc, grace=GRACE_PERIOD_SECONDS)
         # Only set timed_out if not already terminal
         cur = job.platforms_state.get(platform)
         if cur and cur.status not in ("succeeded", "empty", "login_required",

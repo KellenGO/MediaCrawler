@@ -9,10 +9,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
-import subprocess
-import sys
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -28,23 +27,74 @@ from ..services.search_job_manager import (
     search_job_manager, JobConflictError, InvalidPlatformsError,
 )
 from ..services import accounts as accounts_service
-from base.runtime_paths import application_root
+from ..services.worker_process import (
+    cancel_task_quietly, spawn_worker, terminate_worker,
+)
 
 search_router = APIRouter(prefix="/api/search", tags=["aggregate-search"])
 
-_PROJECT_ROOT = application_root()
-_WORKER_SCRIPT = str(_PROJECT_ROOT / "aggregate_search" / "worker.py")
 
-
-def _worker_command(*args: str) -> list[str]:
-    """Use the frozen executable for login workers when packaged."""
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--aggregate-worker", *args]
-    return [sys.executable, _WORKER_SCRIPT, *args]
 
 # ── Operation coordinator（Phase 4.2：搜索/登录排他，账号操作共享 2 槽）──
 
 _operation_coordinator = accounts_service.operation_coordinator
+
+#: 未达并发上限、但该平台正在后台验证时的通用说明（三个端点各不相同的那句
+#: 由各自传入 —— 同步要"再同步"、清除要"再清除"）。
+_ACCOUNT_BUSY_MESSAGE = "已有两个账号操作正在进行，请稍后再试"
+
+
+@contextlib.asynccontextmanager
+async def _account_operation_gate(
+    platform: str,
+    kind: str,
+    action: str,
+    verify_busy_message: str,
+    *,
+    skip_release_if_verifying: bool = False,
+):
+    """账号操作（同步 / 验证 / 清除）的统一守卫。
+
+    三个端点原先各抄了一遍同样的 12 行，还各抄了一遍"竞态复查"，改一处漏两处。
+    这里把顺序固定下来（顺序本身是正确性的一部分）：
+
+    1. 抢槽位：搜索排他 + 同平台串行 + 全局最多两个并发账号操作；
+    2. **acquire 之后复查搜索** —— 搜索的排他租约创建后立即释放、运行期靠
+       ``is_search_active()`` 判断，所以拿到槽位后仍可能已有搜索在跑；
+    3. 停掉该平台常驻 worker，避免与 profile 锁冲突。
+
+    未被拒时 yield ``None``；被拒时 yield 一个现成的 409 响应，调用方直接
+    ``return`` 即可。
+    """
+    reason = await _operation_coordinator.acquire_account(platform, kind)
+    if reason:
+        if search_job_manager.is_search_active():
+            yield _account_error(409, "search_in_progress",
+                                 f"正在搜索，暂时不能{action}，请等待搜索完成", platform)
+            return
+        if reason == "platform":
+            yield _account_error(409, "verification_in_progress",
+                                 verify_busy_message, platform)
+            return
+        yield _account_error(409, "account_op_in_progress",
+                             _ACCOUNT_BUSY_MESSAGE, platform)
+        return
+
+    if search_job_manager.is_search_active():
+        await _operation_coordinator.release_account(platform)
+        yield _account_error(409, "search_in_progress",
+                             f"正在搜索，暂时不能{action}，请等待搜索完成", platform)
+        return
+
+    await search_job_manager.stop_platform_worker(platform)
+    try:
+        yield None
+    finally:
+        # 后台验证仍在跑时槽位不释放（由任务 done 回调释放）；
+        # 任务已完成则这里释放。
+        if not (skip_release_if_verifying
+                and accounts_service.is_verify_active(platform)):
+            await _operation_coordinator.release_account(platform)
 
 # ── Login state ─────────────────────────────────────────────────────────
 
@@ -86,14 +136,7 @@ async def _run_login_worker(platform: str, job_id: str):
     final_message = "Unknown error"
 
     try:
-        env = {**os.environ, "PYTHONUTF8": "1",
-               "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
-        proc = await asyncio.create_subprocess_exec(
-            *_worker_command(),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
+        proc = await spawn_worker()
         _login_procs[job_id] = proc
 
         request_json = json.dumps({
@@ -159,20 +202,7 @@ async def _run_login_worker(platform: str, job_id: str):
         except asyncio.TimeoutError:
             final_status = "timed_out"
             final_message = "Login process timed out"
-            # Terminate → kill
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=LOGIN_KILL_TIMEOUT)
-                except asyncio.TimeoutError:
-                    try:
-                        proc.kill()
-                        await proc.wait()
-                    except Exception:
-                        pass
+            await terminate_worker(proc, grace=LOGIN_KILL_TIMEOUT)
 
         # Drain remaining stdout/stderr to EOF
         try:
@@ -190,15 +220,7 @@ async def _run_login_worker(platform: str, job_id: str):
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # Wait for exit
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=LOGIN_DRAIN_TIMEOUT)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+        await terminate_worker(proc, grace=LOGIN_DRAIN_TIMEOUT)
 
         rc = proc.returncode if proc.returncode is not None else -1
 
@@ -225,19 +247,9 @@ async def _run_login_worker(platform: str, job_id: str):
         final_status = "failed"
         final_message = type(e).__name__
     finally:
-        for t in (stdout_task, stderr_task):
-            if t and not t.done():
-                t.cancel()
-        if stdout_task or stderr_task:
-            await asyncio.gather(
-                *(t for t in (stdout_task, stderr_task) if t),
-                return_exceptions=True)
-        if proc is not None and proc.returncode is None:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+        await cancel_task_quietly(stdout_task)
+        await cancel_task_quietly(stderr_task)
+        await terminate_worker(proc)
         _login_procs.pop(job_id, None)
 
     _login_jobs[job_id].update(
@@ -522,30 +534,14 @@ async def sync_account_cookies(
                               "缺少一次性同步票据", platform)
 
     # Phase 4.2: 账号操作共享槽位（不同平台最多 2 并发，同平台串行）。
-    reason = await _operation_coordinator.acquire_account(platform, "sync")
-    if reason:
-        if search_job_manager.is_search_active():
-            return _account_error(409, "search_in_progress",
-                                  "正在搜索，暂时不能同步账号，请等待搜索完成", platform)
-        if reason == "platform":
-            # 有界验证超时后任务在后台继续跑：再次 sync 会与后台任务并发
-            # 操作同一 profile —— 409。检查在 ticket 消费之前，新 ticket
-            # 不被消费（可重试语义：等验证完成拿新票据再同步）。
-            return _account_error(409, "verification_in_progress",
-                                  "该平台正在后台验证登录状态，请稍等验证完成后再同步",
-                                  platform)
-        return _account_error(409, "account_op_in_progress",
-                              "已有两个账号操作正在进行，请稍后再试", platform)
-    # 竞态消除（Round 16）：搜索的排他租约在创建后立即释放，运行期由
-    # is_search_active() 覆盖 —— acquire 成功、真正操作前必须复查；若发现
-    # 搜索已启动，释放 lease 并返回 409，绝不与搜索并发打开同一 profile。
-    if search_job_manager.is_search_active():
-        await _operation_coordinator.release_account(platform)
-        return _account_error(409, "search_in_progress",
-                              "正在搜索，暂时不能同步账号，请等待搜索完成", platform)
-    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
-    await search_job_manager.stop_platform_worker(platform)
-    try:
+    # 检查在 ticket 消费之前，新 ticket 不被消费（可重试语义：等验证完成拿新票据再同步）。
+    async with _account_operation_gate(
+        platform, "sync", "同步账号",
+        "该平台正在后台验证登录状态，请稍等验证完成后再同步",
+        skip_release_if_verifying=True,
+    ) as denied:
+        if denied is not None:
+            return denied
         try:
             await accounts_service.consume_sync_ticket(x_sync_ticket, platform)
         except accounts_service.TicketError as e:
@@ -565,11 +561,6 @@ async def sync_account_cookies(
             return _account_error_from_exc(e, 400, platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
-    finally:
-        # 后台验证仍在跑时槽位不释放（由任务 done 回调释放）；
-        # 任务已完成则这里释放。
-        if not accounts_service.is_verify_active(platform):
-            await _operation_coordinator.release_account(platform)
 
     # No background verify is spawned here: sync_platform_cookies' bounded
     # verify keeps running inside the accounts service (single task per
@@ -581,69 +572,35 @@ async def sync_account_cookies(
 @search_router.post("/accounts/{platform}/verify")
 async def verify_account(platform: str):
     """Re-open the headless profile and verify the session via pong."""
-    reason = await _operation_coordinator.acquire_account(platform, "verify")
-    if reason:
-        if search_job_manager.is_search_active():
-            return _account_error(409, "search_in_progress",
-                                  "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
-        if reason == "platform":
-            # 后台验证进行中：直接再验证会与后台任务并发操作同一 profile
-            # 并等待同一 profile 锁（丢失历史状态或重复验证）—— 409。
-            return _account_error(409, "verification_in_progress",
-                                  "该平台正在后台验证登录状态，请稍等验证完成后再试",
-                                  platform)
-        return _account_error(409, "account_op_in_progress",
-                              "已有两个账号操作正在进行，请稍后再试", platform)
-    # 竞态消除（Round 16）：acquire 成功后、操作前复查搜索是否已启动。
-    if search_job_manager.is_search_active():
-        await _operation_coordinator.release_account(platform)
-        return _account_error(409, "search_in_progress",
-                              "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
-    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
-    await search_job_manager.stop_platform_worker(platform)
-    try:
+    async with _account_operation_gate(
+        platform, "verify", "验证账号",
+        "该平台正在后台验证登录状态，请稍等验证完成后再试",
+    ) as denied:
+        if denied is not None:
+            return denied
         try:
             return await accounts_service.verify_platform(platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
         except accounts_service.SessionImportError as e:
             return _account_error_from_exc(e, 400, platform)
-    finally:
-        await _operation_coordinator.release_account(platform)
 
 
 @search_router.delete("/accounts/{platform}/session")
 async def delete_account_session(platform: str):
     """Delete the platform's profile (browser_data only, path-verified)."""
-    reason = await _operation_coordinator.acquire_account(platform, "delete")
-    if reason:
-        if search_job_manager.is_search_active():
-            return _account_error(409, "search_in_progress",
-                                  "正在搜索，暂时不能清除账号，请等待搜索完成", platform)
-        if reason == "platform":
-            # 后台验证进行中：删除 profile 会让验证任务操作已删除的目录 /
-            # 验证结果与删除动作竞态 —— 409。
-            return _account_error(409, "verification_in_progress",
-                                  "该平台正在后台验证登录状态，请稍等验证完成后再清除",
-                                  platform)
-        return _account_error(409, "account_op_in_progress",
-                              "已有两个账号操作正在进行，请稍后再试", platform)
-    # 竞态消除（Round 16）：acquire 成功后、操作前复查搜索是否已启动。
-    if search_job_manager.is_search_active():
-        await _operation_coordinator.release_account(platform)
-        return _account_error(409, "search_in_progress",
-                              "正在搜索，暂时不能清除账号，请等待搜索完成", platform)
-    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
-    await search_job_manager.stop_platform_worker(platform)
-    try:
+    async with _account_operation_gate(
+        platform, "delete", "清除账号",
+        "该平台正在后台验证登录状态，请稍等验证完成后再清除",
+    ) as denied:
+        if denied is not None:
+            return denied
         try:
             return await accounts_service.delete_platform_session(platform)
         except accounts_service.PlatformError as e:
             return _account_error_from_exc(e, 422, platform)
         except accounts_service.SessionImportError as e:
             return _account_error_from_exc(e, 400, platform)
-    finally:
-        await _operation_coordinator.release_account(platform)
 
 
 # ── Shutdown ────────────────────────────────────────────────────────────

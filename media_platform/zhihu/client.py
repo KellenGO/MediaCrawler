@@ -24,12 +24,12 @@ from urllib.parse import urlencode
 
 from httpx import Response
 from playwright.async_api import BrowserContext, Page
-from tools.httpx_util import make_async_client
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
 from aggregate_search.pagination import allow_client_retry, check_search_http_status
 
 import config
 from base.base_crawler import AbstractApiClient
+from base.base_platform_client import ReusableHttpClientMixin
 from constant import zhihu as zhihu_constant
 from model.m_zhihu import ZhihuContent
 from tools import utils
@@ -39,7 +39,10 @@ from .field import SearchSort, SearchTime, SearchType
 from .help import ZhihuExtractor, sign
 
 
-class ZhiHuClient(AbstractApiClient):
+class ZhiHuClient(ReusableHttpClientMixin, AbstractApiClient):
+    #: zhihu 用 default_headers + 小写 cookie 键（其余三家是 headers/Cookie）
+    _cookie_header_bag = "default_headers"
+    _cookie_header_name = "cookie"
 
     def __init__(
         self,
@@ -55,37 +58,10 @@ class ZhiHuClient(AbstractApiClient):
         self.timeout = timeout
         self.default_headers = headers
         self.reuse_http_client = reuse_http_client
-        self._http_client = None
-        self._http_client_proxy: Optional[str] = None
+        self._init_http_client_state()
         self.cookie_urls = ["https://www.zhihu.com"]
         self.cookie_dict = cookie_dict
         self._extractor = ZhihuExtractor()
-
-    async def _get_reused_client(self):
-        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
-        if self._http_client is None or self._http_client_proxy != self.proxy:
-            await self._close_http_client()
-            self._http_client = make_async_client(proxy=self.proxy)
-            self._http_client_proxy = self.proxy
-        return self._http_client
-
-    async def _close_http_client(self) -> None:
-        client = self._http_client
-        self._http_client = None
-        self._http_client_proxy = None
-        if client is not None:
-            try:
-                await client.aclose()
-            except Exception:
-                pass
-
-    async def aclose(self) -> None:
-        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
-        await self._close_http_client()
-
-    async def close(self) -> None:
-        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
-        await self._close_http_client()
 
     async def _pre_headers(self, url: str) -> Dict:
         """
@@ -121,14 +97,8 @@ class ZhiHuClient(AbstractApiClient):
         # return response.text
         return_response = kwargs.pop('return_response', False)
 
-        if self.reuse_http_client:
-            client = await self._get_reused_client()
-            response = await client.request(
-                method, url, timeout=self.timeout, **kwargs)
-        else:
-            async with make_async_client(proxy=self.proxy) as client:
-                response = await client.request(
-                    method, url, timeout=self.timeout, **kwargs)
+        # 复用 / 独立生命周期由 ReusableHttpClientMixin._send 统一处理。
+        response = await self._send(method, url, **kwargs)
 
         check_search_http_status(response.status_code)
         if response.status_code != 200:
@@ -212,22 +182,6 @@ class ZhiHuClient(AbstractApiClient):
                 raise
             ping_flag = False
         return ping_flag
-
-    async def update_cookies(self, browser_context: BrowserContext, urls: Optional[list[str]] = None):
-        """
-        Update cookies method provided by API client, typically called after successful login
-        Args:
-            browser_context: Browser context object
-
-        Returns:
-
-        """
-        cookie_str, cookie_dict = await utils.convert_browser_context_cookies(
-            browser_context,
-            urls=urls or self.cookie_urls,
-        )
-        self.default_headers["cookie"] = cookie_str
-        self.cookie_dict = cookie_dict
 
     async def get_current_user_info(self) -> Dict:
         """

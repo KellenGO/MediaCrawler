@@ -37,6 +37,7 @@ import pytest_asyncio
 
 import api.services.search_job_manager as sjm
 import api.services.accounts as accounts
+import api.services.worker_process as worker_process
 from aggregate_search.models import WorkerRequest
 from api.schemas.search import SearchJobRequestSchema
 
@@ -46,7 +47,7 @@ _FAKE_WORKER = str(Path(__file__).parent / "fake_resident_worker.py")
 @pytest_asyncio.fixture
 async def manager(monkeypatch):
     """Supervisor 模式 manager：指向假 worker，测试后清理全部驻留进程。"""
-    monkeypatch.setattr(sjm, "_WORKER_SCRIPT", _FAKE_WORKER)
+    monkeypatch.setattr(worker_process, "WORKER_SCRIPT", _FAKE_WORKER)
     monkeypatch.setattr(sjm, "SEARCH_WORKER_MODE", "supervisor")
     mgr = sjm.SearchJobManager()
     yield mgr

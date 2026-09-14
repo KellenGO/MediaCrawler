@@ -78,7 +78,9 @@ class _FakeAsyncClient:
 @pytest.fixture
 def fake_client_factory(monkeypatch):
     _FakeAsyncClient.created = []
-    monkeypatch.setattr(xhs_client_module, "make_async_client", _FakeAsyncClient)
+    # 复用的 httpx client 现在由 base.base_platform_client 创建，patch 那里才生效。
+    monkeypatch.setattr("base.base_platform_client.make_async_client",
+                        _FakeAsyncClient)
     return _FakeAsyncClient
 
 

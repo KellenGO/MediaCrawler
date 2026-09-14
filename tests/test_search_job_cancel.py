@@ -100,7 +100,7 @@ async def test_full_flow_cancel_mid_search(monkeypatch, tmp_path):
     - 所有子进程退出"""
     fake = tmp_path / "fake_worker.py"
     fake.write_text(FAKE_WORKER, encoding="utf-8")
-    monkeypatch.setattr("api.services.search_job_manager._WORKER_SCRIPT", str(fake))
+    monkeypatch.setattr("api.services.worker_process.WORKER_SCRIPT", str(fake))
 
     mgr = SearchJobManager()
     resp = await mgr.create_job(

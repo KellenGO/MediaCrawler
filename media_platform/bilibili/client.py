@@ -27,9 +27,9 @@ from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlencode
 
 from playwright.async_api import BrowserContext, Page
-from tools.httpx_util import make_async_client
 
 from base.base_crawler import AbstractApiClient
+from base.base_platform_client import ReusableHttpClientMixin
 from tools import utils
 
 from .exception import DataFetchError
@@ -81,7 +81,7 @@ def _safe_bili_error_message(message: Optional[str], code: Any,
     return f"B站{label}请求失败，请稍后重试"
 
 
-class BilibiliClient(AbstractApiClient):
+class BilibiliClient(ReusableHttpClientMixin, AbstractApiClient):
 
     def __init__(
         self,
@@ -97,45 +97,11 @@ class BilibiliClient(AbstractApiClient):
         self.timeout = timeout
         self.headers = headers
         self.reuse_http_client = reuse_http_client
-        self._http_client = None
-        self._http_client_proxy: Optional[str] = None
+        self._init_http_client_state()
         self._host = "https://api.bilibili.com"
         self.cookie_urls = ["https://www.bilibili.com"]
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
-
-    async def _get_reused_client(self):
-        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
-        if self._http_client is None or self._http_client_proxy != self.proxy:
-            await self._close_http_client()
-            self._http_client = make_async_client(proxy=self.proxy)
-            self._http_client_proxy = self.proxy
-        return self._http_client
-
-    async def _close_http_client(self) -> None:
-        client = self._http_client
-        self._http_client = None
-        self._http_client_proxy = None
-        if client is not None:
-            try:
-                await client.aclose()
-            except Exception:
-                pass
-
-    async def aclose(self) -> None:
-        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
-        await self._close_http_client()
-
-    async def close(self) -> None:
-        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
-        await self._close_http_client()
-
-    async def _send(self, method, url, **kwargs):
-        if self.reuse_http_client:
-            client = await self._get_reused_client()
-            return await client.request(method, url, timeout=self.timeout, **kwargs)
-        async with make_async_client(proxy=self.proxy) as client:
-            return await client.request(method, url, timeout=self.timeout, **kwargs)
 
     async def request(self, method, url, **kwargs) -> Any:
         # Check if proxy has expired before each request
@@ -266,14 +232,6 @@ class BilibiliClient(AbstractApiClient):
                 raise
             ping_flag = False
         return ping_flag
-
-    async def update_cookies(self, browser_context: BrowserContext, urls: Optional[list[str]] = None):
-        cookie_str, cookie_dict = await utils.convert_browser_context_cookies(
-            browser_context,
-            urls=urls or self.cookie_urls,
-        )
-        self.headers["Cookie"] = cookie_str
-        self.cookie_dict = cookie_dict
 
     async def search_video_by_keyword(
         self,

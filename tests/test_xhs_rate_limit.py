@@ -235,13 +235,16 @@ class _FakeAsyncClientCM:
     async def get(self, url, headers=None):
         return self._responder()
 
+    async def request(self, method, url, timeout=None, **kwargs):
+        return self._responder()
+
     async def aclose(self):
         pass
 
 
 def _patch_http_client_factory(monkeypatch, responder):
     monkeypatch.setattr(
-        "media_platform.xhs.client.make_async_client",
+        "base.base_platform_client.make_async_client",
         lambda proxy=None: _FakeAsyncClientCM(responder))
 
 

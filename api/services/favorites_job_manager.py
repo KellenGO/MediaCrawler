@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -14,17 +11,11 @@ from base.runtime_paths import application_root
 from ..schemas.favorites import FavoritePlatformInfo, FavoritesJobRequest, FavoritesJobResponse
 from .accounts import mark_login_required_from_search
 from .remote_favorites_store import get_remote_favorites_store
+from .worker_process import drain_stderr_to_eof, spawn_worker, terminate_worker
 
 _ROOT = application_root()
-_WORKER = str(_ROOT / "aggregate_search" / "worker.py")
 # 每个平台最多取 100 条时，分页请求会明显变多，超时相应放宽。
 _TIMEOUT = 300
-
-
-def _command() -> List[str]:
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--aggregate-worker"]
-    return [sys.executable, _WORKER]
 
 
 class _Job:
@@ -159,13 +150,7 @@ class FavoritesJobManager:
         info.status = "running"
         proc = None
         try:
-            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
-                   "PYTHONUNBUFFERED": "1"}
-            proc = await asyncio.create_subprocess_exec(
-                *_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, cwd=str(_ROOT), env=env,
-                limit=2 * 1024 * 1024,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            proc = await spawn_worker()
             job.procs.append(proc)
             payload = WorkerRequest(job_id=job.job_id, mode="favorites", platform=platform,
                                     limit=job.limit).model_dump_json().encode("utf-8") + b"\n"
@@ -205,22 +190,13 @@ class FavoritesJobManager:
                 return done
 
             # 持续排空 stderr，避免大量日志填满管道后 worker 卡死。
-            async def drain_errors() -> None:
-                if proc.stderr:
-                    while await proc.stderr.read(65536):
-                        pass
-
-            stderr_task = asyncio.create_task(drain_errors())
+            stderr_task = asyncio.create_task(drain_stderr_to_eof(proc))
             try:
                 done = await asyncio.wait_for(read(), timeout=_TIMEOUT)
             finally:
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+            await terminate_worker(proc, grace=5)
             if not done and info.status == "running":
                 info.status, info.error_summary = "failed", "平台 worker 未正常结束"
             elif info.status == "running":
@@ -230,12 +206,7 @@ class FavoritesJobManager:
         except Exception as exc:
             info.status, info.error_summary = "failed", type(exc).__name__
         finally:
-            if proc is not None and proc.returncode is None:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    pass
+            await terminate_worker(proc)
             if proc in job.procs:
                 job.procs.remove(proc)
             # 逐平台落库：本平台失败也保留其他平台已保存的数据，

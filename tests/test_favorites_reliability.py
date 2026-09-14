@@ -47,7 +47,7 @@ sys.stderr.flush()
 for event, data in [('status', {'status':'empty'}), ('done', None)]:
  print('MC_AGG_EVENT\\t'+json.dumps({'event':event,'job_id':r['job_id'],'platform':r['platform'],'data':data}), flush=True)
 '''
-    monkeypatch.setattr("api.services.favorites_job_manager._command", lambda: [sys.executable, "-c", code])
+    monkeypatch.setattr("api.services.worker_process.worker_command", lambda *a: [sys.executable, "-c", code])
     def fail(*args, **kwargs):
         raise OSError("synthetic disk error")
     monkeypatch.setattr(store, "save_platform", fail)
@@ -61,7 +61,7 @@ for event, data in [('status', {'status':'empty'}), ('done', None)]:
 @pytest.mark.asyncio
 async def test_cancel_persists_terminal_status(store, monkeypatch):
     code = "import sys,time;sys.stdin.readline();time.sleep(30)"
-    monkeypatch.setattr("api.services.favorites_job_manager._command", lambda: [sys.executable, "-c", code])
+    monkeypatch.setattr("api.services.worker_process.worker_command", lambda *a: [sys.executable, "-c", code])
     manager = FavoritesJobManager()
     await manager.create(FavoritesJobRequest(platforms=["xhs"]))
     for _ in range(100):
@@ -83,7 +83,7 @@ print('MC_AGG_EVENT\\t'+json.dumps({'event':'result','job_id':r['job_id'],'platf
 'data':{'platform':r['platform'],'content_id':'partial','title':'partial','url':'https://example.com'}}),flush=True)
 time.sleep(30)
 '''
-    monkeypatch.setattr("api.services.favorites_job_manager._command", lambda: [sys.executable, "-c", code])
+    monkeypatch.setattr("api.services.worker_process.worker_command", lambda *a: [sys.executable, "-c", code])
     manager = FavoritesJobManager()
     created = await manager.create(FavoritesJobRequest(platforms=["xhs", "douyin"]))
     try:

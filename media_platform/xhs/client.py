@@ -25,10 +25,10 @@ from urllib.parse import quote
 from playwright.async_api import BrowserContext, Page
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type, retry_if_exception
 from aggregate_search.pagination import allow_client_retry, check_search_http_status
-from tools.httpx_util import make_async_client
 
 import config
 from base.base_crawler import AbstractApiClient
+from base.base_platform_client import ReusableHttpClientMixin
 from tools import utils
 
 from .exception import (
@@ -52,7 +52,7 @@ def _safe_debug_message(value: Any) -> Optional[str]:
     return message[:120]
 
 
-class XiaoHongShuClient(AbstractApiClient):
+class XiaoHongShuClient(ReusableHttpClientMixin, AbstractApiClient):
 
     def __init__(
         self,
@@ -69,8 +69,7 @@ class XiaoHongShuClient(AbstractApiClient):
         self.headers = headers
         self.reuse_http_client = reuse_http_client
         # 复用的 httpx client（懒创建；代理变化时安全关闭并重建）。
-        self._http_client = None
-        self._http_client_proxy: Optional[str] = None
+        self._init_http_client_state()
         if config.XHS_INTERNATIONAL:
             self._host = "https://webapi.rednote.com"
             self._domain = "https://www.rednote.com"
@@ -89,32 +88,6 @@ class XiaoHongShuClient(AbstractApiClient):
         self.last_response_status: Optional[int] = None
         self.last_business_code: Any = None
         self.last_business_msg: Optional[str] = None
-
-    async def _get_reused_client(self):
-        """懒创建并复用单个 httpx.AsyncClient；代理变化时关闭旧 client 重建。"""
-        if self._http_client is None or self._http_client_proxy != self.proxy:
-            await self._close_http_client()
-            self._http_client = make_async_client(proxy=self.proxy)
-            self._http_client_proxy = self.proxy
-        return self._http_client
-
-    async def _close_http_client(self) -> None:
-        client = self._http_client
-        self._http_client = None
-        self._http_client_proxy = None
-        if client is not None:
-            try:
-                await client.aclose()
-            except Exception:
-                pass
-
-    async def aclose(self) -> None:
-        """幂等关闭复用的 httpx client（未启用复用时为空操作）。"""
-        await self._close_http_client()
-
-    async def close(self) -> None:
-        """幂等关闭（aclose 的别名，便于统一清理调用）。"""
-        await self._close_http_client()
 
     async def _pre_headers(self, url: str, params: Optional[Dict] = None, payload: Optional[Dict] = None) -> Dict:
         """请求头参数签名 (使用 xhshow 纯算法)
@@ -174,14 +147,8 @@ class XiaoHongShuClient(AbstractApiClient):
 
         # return response.text
         return_response = kwargs.pop("return_response", False)
-        if self.reuse_http_client:
-            # Phase 3.2: 复用单个 client（代理变化时内部会关闭并重建）。
-            client = await self._get_reused_client()
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
-        else:
-            # 旧行为：每个请求独立 client 生命周期。
-            async with make_async_client(proxy=self.proxy) as client:
-                response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        # 复用 / 独立生命周期由 ReusableHttpClientMixin._send 统一处理。
+        response = await self._send(method, url, **kwargs)
 
         check_search_http_status(response.status_code)
 
@@ -274,14 +241,15 @@ class XiaoHongShuClient(AbstractApiClient):
         """
         uri = "/api/sns/web/v1/user/selfinfo"
         headers = await self._pre_headers(uri, params={})
-        async with make_async_client(proxy=self.proxy) as client:
-            response = await client.get(f"{self._host}{uri}", headers=headers)
-            # Round 17.2: 461/471 是平台风控（验证码/访问限制）—— 抛专用
-            # 异常（不读取 Verifyuuid/Verifytype、不记录 body/URL）。
-            if response.status_code in (461, 471):
-                raise XhsRateLimitError(http_status=response.status_code)
-            if response.status_code == 200:
-                return response.json()
+        # 与其它请求共用同一套 httpx 生命周期（ReusableHttpClientMixin._send）——
+        # 未启用复用时它同样是"每次请求新建 client"，行为不变。
+        response = await self._send("GET", f"{self._host}{uri}", headers=headers)
+        # Round 17.2: 461/471 是平台风控（验证码/访问限制）—— 抛专用
+        # 异常（不读取 Verifyuuid/Verifytype、不记录 body/URL）。
+        if response.status_code in (461, 471):
+            raise XhsRateLimitError(http_status=response.status_code)
+        if response.status_code == 200:
+            return response.json()
         return None
 
     async def pong(
@@ -320,22 +288,6 @@ class XiaoHongShuClient(AbstractApiClient):
             ping_flag = False
         utils.logger.info(f"[XiaoHongShuClient.pong] Login state result: {ping_flag}")
         return ping_flag
-
-    async def update_cookies(self, browser_context: BrowserContext, urls: Optional[list[str]] = None):
-        """
-        Update cookies method provided by API client, usually called after successful login
-        Args:
-            browser_context: Browser context object
-
-        Returns:
-
-        """
-        cookie_str, cookie_dict = await utils.convert_browser_context_cookies(
-            browser_context,
-            urls=urls or self.cookie_urls,
-        )
-        self.headers["Cookie"] = cookie_str
-        self.cookie_dict = cookie_dict
 
     async def get_note_by_keyword(
         self,
