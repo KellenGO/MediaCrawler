@@ -56,6 +56,17 @@
 | 位置 | 分支 | 负责 | 内容 |
 |---|---|---|---|
 | `MediaCrawler-main/` | `master` | 主工作区 | 收藏、托盘与扫码登录在此集成；日常运行统一使用 dist |
-| `MediaCrawler-scanlogin/`（git worktree） | `feat-scan-login` | 保留的历史工作区 | 扫码登录分支已纳入 master；不是另一份日常运行入口 |
+| `MediaCrawler-scanlogin/`（git worktree） | `side-tasks` | 支线任务工作区 | 独立目录、独立端口（8090）；**第一个支线任务是「应用自带扫码登录」，已合入 master**；下一个支线从这里开分支 |
 
 两个目录**共用一个 `.git`**，可以分别提交，不需要 push/pull。合并前核对未提交改动，代码也可能冲突，不能只看文档。并行开发用 `SIYE_PORT` 显式分配端口；产品默认 8080，扩展目前只支持该端口。
+
+### 支线任务 worktree 怎么启动
+
+`启动.bat` / `MediaCrawler.bat` 的**产品行为不变**：存在 `dist\MediaCrawler\四野.exe` 就直接启动它。
+**没有打包产物时**（开发用 worktree 通常如此）回退到 `启动-源码.bat` —— 从源码起后端，
+**端口默认 8090**（本目录专用，避免和主目录的 8080 撞车），可用 `SIYE_PORT` 覆盖。
+
+- 端口只有 `base/server_port.py` 一处解析（`api/main.py`、`desktop_main.py`、`tray_main.py`、
+  `scripts/start.ps1 -Port`、vite dev 代理都读它）。
+- 浏览器扩展仍固定 8080，所以换端口的实例请用内置扫码登录，不要用扩展同步。
+- 想临时换端口：`set SIYE_PORT=8123` 后再双击启动。
