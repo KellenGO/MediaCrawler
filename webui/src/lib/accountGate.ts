@@ -8,6 +8,10 @@
  * 这里不做后端改动：后端在账号操作期间会把平台状态置为 ``syncing`` /
  * ``verifying``，而这两个状态本来就会被账号轮询读到。搜索在真正提交前等
  * 这两个状态消失即可 —— 让搜索等一小会儿，好过直接失败。
+ *
+ * 应用自带扫码登录是另一种占用：它不写账号状态，但后端同样持有排他租约
+ * （搜索期间登录、登录期间搜索都返回 409）。这类"状态之外"的占用通过
+ * ``extraBusy`` 注入，判定与超时行为完全一致。
  */
 
 /** 账号操作占用共享浏览器 profile 的状态。 */
@@ -43,6 +47,12 @@ export interface WaitForAccountOpsIdleOptions {
    * 绝不因为探测失败而把用户的搜索卡住。
    */
   fetchAccounts: () => Promise<readonly AccountGateProbe[] | null>;
+  /**
+   * 账号状态之外还会占用排他租约的操作（例如应用自带扫码登录 —— 它不写
+   * 账号状态，后端同样会以 409 拒绝搜索）。返回 true 表示"仍在忙"。
+   * 抛异常视为不忙（失败开放，与 fetchAccounts 一致）。
+   */
+  extraBusy?: () => boolean;
 }
 
 /**
@@ -55,6 +65,7 @@ export async function waitForAccountOpsIdle(
 ): Promise<boolean> {
   const {
     fetchAccounts,
+    extraBusy,
     timeoutMs = ACCOUNT_GATE_TIMEOUT_MS,
     pollMs = ACCOUNT_GATE_POLL_MS,
     now = () => Date.now(),
@@ -66,7 +77,8 @@ export async function waitForAccountOpsIdle(
   for (;;) {
     let busy = false;
     try {
-      busy = accountOpsBusy(await fetchAccounts());
+      busy = accountOpsBusy(await fetchAccounts())
+        || (extraBusy ? extraBusy() === true : false);
     } catch {
       return true; // 读不到状态 → 放行
     }

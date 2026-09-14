@@ -2,7 +2,9 @@
 param(
     [switch]$DryRun,
     [switch]$NoBrowser,
-    [int]$ReadyTimeoutSeconds = 45
+    [int]$ReadyTimeoutSeconds = 45,
+    # 后端端口：0（默认）= 读 SIYE_PORT，再回退产品默认 8080。
+    [int]$Port = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +13,9 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $repoRoot = Split-Path -Parent $scriptRoot
 $webRoot = Join-Path $repoRoot "webui"
 $distRoot = Join-Path $webRoot "dist"
-$backendUrl = "http://127.0.0.1:8080"
+# 端口优先级：-Port > SIYE_PORT > 产品默认 8080（与 base/server_port.py 同一套规则）。
+$SiyePort = if ($Port -gt 0) { $Port } elseif ($env:SIYE_PORT) { [int]$env:SIYE_PORT } else { 8080 }
+$backendUrl = "http://127.0.0.1:$SiyePort"
 $healthUrl = "$backendUrl/api/health"
 $testMode = $env:MEDIACRAWLER_LAUNCHER_TEST -eq "1"
 $ownedProcesses = [System.Collections.Generic.List[object]]::new()
@@ -236,11 +240,11 @@ try {
     $backendHealth = Get-HealthResponse
     if ($backendHealth) {
         Write-Check "Backend" $true "$backendUrl（已运行，复用）"
-    } elseif (Test-TcpPort 8080) {
+    } elseif (Test-TcpPort $SiyePort) {
         Write-Check "Backend" $false "$backendUrl 已被其他程序占用"
-        throw "8080 端口被占用，且不是当前 MediaCrawler backend；不会终止其他程序"
+        throw "$SiyePort 端口被占用，且不是当前 MediaCrawler backend；不会终止其他程序"
     } elseif (-not $DryRun) {
-        $backendArgs = $python.Arguments + @("api.main:app", "--host", "127.0.0.1", "--port", "8080")
+        $backendArgs = $python.Arguments + @("api.main:app", "--host", "127.0.0.1", "--port", "$SiyePort")
         $backendProcess = Start-OwnedProcess -FilePath $python.FilePath -Arguments $backendArgs -Name "backend"
         $backendHealth = Wait-BackendReady -Process $backendProcess
         Write-Check "Backend" $true "$backendUrl"

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>四野使用说明 · 先登录、装插件，然后开始搜索</title>
-<meta name="description" content="四野使用说明：开始前必须做的两件事（在浏览器登录四个平台、安装四野浏览器插件），以及下载启动、搜索、收藏导出与常见问题。">
+<title>四野使用说明 · 先登录四个平台，然后开始搜索</title>
+<meta name="description" content="四野使用说明：开始前先用手机扫码登录四个平台（小红书 / 抖音 / B站 / 知乎），以及下载启动、扩展同步（可选）、搜索、收藏导出与常见问题。">
 <meta name="author" content="KellenGO">
 <meta name="theme-color" content="#6573ff">
 <link rel="canonical" href="https://kellengo.github.io/MediaCrawler/guide.html">
@@ -520,48 +520,60 @@ figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
 
     <h1 style="font-size:clamp(26px,4vw,36px);font-weight:680;letter-spacing:-.8px;color:var(--ink);margin-bottom:10px">使用说明</h1>
     <p style="font-size:15px;color:var(--secondary);max-width:70ch;line-height:1.85">
-      四野装好之后<strong>不能直接开始搜</strong>。先花两分钟做完下面两件事，之后就只是输入关键词而已。
+      四野装好之后<strong>不能直接开始搜</strong>。先用手机扫码登录四个平台，之后就只是输入关键词而已。
     </p>
 
-    <!-- ========== 必做两步 ========== -->
+    <!-- ========== 必做一步：扫码登录 ========== -->
     <div class="must">
-      <h2>开始前，先做完这两件事</h2>
+      <h2>开始前，先登录这四个平台</h2>
 
       <div class="must-step">
         <span class="n">1</span>
         <div>
-          <h3>在你的浏览器里登录这四个平台</h3>
+          <h3>用四野自带的扫码登录，四个平台各扫一次</h3>
           <p>
-            用 Chrome 或 Edge（Windows 一般自带 Edge）打开
-            <strong>小红书、抖音、B 站、知乎</strong>，分别登录你自己的账号。
-            四野是<strong>借用你本人的登录状态</strong>去替你搜索的 —— 没登录，就搜不出东西，或者结果非常少。
+            打开四野，进<strong>「设置 · 账号与登录」</strong>，在平台卡片上点
+            <strong>「扫码登录」</strong>。四野会在你电脑上打开一个浏览器窗口，
+            用<strong>小红书、抖音、B 站、知乎</strong>的手机 App 扫一下即可；
+            登录成功后窗口自动关闭，卡片状态变成「登录已确认」。
+          </p>
+          <p>
+            四野是<strong>借用你本人的登录状态</strong>去替你搜索的 —— 没登录，就搜不出东西，
+            或者结果非常少。四个平台要各扫一次。
+          </p>
+          <p>
+            不需要安装任何插件，不需要开「开发者模式」，也不需要刷新页面。
           </p>
         </div>
       </div>
 
-      <div class="must-step">
-        <span class="n">2</span>
-        <div>
-          <h3>装上四野的浏览器插件，把登录状态同步过来</h3>
-          <p>插件的作用只有一个：把你刚登录的状态交给本机运行的四野。装一次就行，以后打开程序会自动同步。</p>
-          <ol>
-            <li>浏览器地址栏输入 <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>）回车；</li>
-            <li>打开右上角的<strong>「开发者模式」</strong>；</li>
-            <li>点<strong>「加载已解压的扩展程序」</strong>，选择解压目录里的 <code>MediaCrawler/browser_extension/</code>；</li>
-            <li>回到四野页面，打开<strong>「账号设置」</strong>，点各平台的「同步当前浏览器登录状态」。</li>
-          </ol>
-        </div>
-      </div>
-
       <p class="must-note">
-        最常见的误会：以为下载完打开就能搜。没做这两步，搜索结果大概率是空的，或一直提示「需要登录」——不是软件坏了。
+        最常见的误会：以为下载完打开就能搜。没登录，搜索结果大概率是空的，或一直提示「需要登录」——不是软件坏了。
       </p>
     </div>
 
     <figure class="shot">
       <img src="shot-account.png" width="2550" height="1094" alt="四野账号设置页：小红书、抖音、B站、知乎四个平台均显示「已登录」，右上角账号状态 4/4">
-      <figcaption>做完两步后的样子：账号设置里四个平台都是「已登录」，右上角账号状态 4/4</figcaption>
+      <figcaption>扫码登录做完后的样子：账号设置里四个平台都是「登录已确认」，右上角账号状态 4/4</figcaption>
     </figure>
+
+    <!-- ========== 可选：扩展同步 ========== -->
+    <h2>可选：用浏览器扩展同步登录状态</h2>
+    <p>
+      如果你平时就在 Chrome 或 Edge 里登录着这些平台，可以装一次四野的浏览器扩展，
+      把你浏览器里现成的登录状态直接同步过来，省掉四次扫码。这是<strong>可选加速方式</strong>：
+      不装扩展也能用扫码登录，两者可以混用，互不影响。
+    </p>
+    <ol>
+      <li>浏览器地址栏输入 <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>）回车；</li>
+      <li>打开右上角的<strong>「开发者模式」</strong>；</li>
+      <li>点<strong>「加载已解压的扩展程序」</strong>，选择解压目录里的 <code>MediaCrawler/browser_extension/</code>；</li>
+      <li>回到四野页面，打开<strong>「账号与登录」</strong>，点平台卡片的<strong>「从浏览器同步」</strong>。</li>
+    </ol>
+    <div class="callout">
+      <b>什么时候值得装？</b>你已经在浏览器里登录过这几个平台、想省掉扫码的时候。
+      它只做一件事：把你浏览器里已有的会话交给本机的四野，不读取其他数据，也不上传任何东西。
+    </div>
 
     <!-- ========== 安装 ========== -->
     <h2>下载与启动</h2>
@@ -573,8 +585,7 @@ figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
     </ol>
     <div class="callout">
       不需要安装 Python、Node.js，也不用敲命令。关掉浏览器页面程序仍在后台运行，想彻底退出就右键托盘图标选「退出四野」。
-      想在控制台里看运行日志，也可以直接双击同目录的 <code>MediaCrawler.exe</code>（带控制台的版本）。
-      想搜出东西，记得先做完上面那两件事（登录 + 装插件）。
+      想搜出东西，记得先做上面那件事（扫码登录四个平台）。
     </div>
     <div class="callout warn">
       <b>第一次运行被 Windows 拦下来？</b>程序没有代码签名，SmartScreen 可能弹「Windows 已保护你的电脑」——
@@ -615,7 +626,10 @@ figure.todo .d{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
     <!-- ========== FAQ ========== -->
     <h2>常见问题</h2>
     <table class="kv">
-      <tr><th>搜不出东西 / 提示需要登录</th><td>回到最上面那两件事：先在浏览器登录平台，再装插件同步。九成问题出在这里。</td></tr>
+      <tr><th>搜不出东西 / 提示需要登录</th><td>回到最上面：先在「账号与登录」里用手机扫码登录四个平台。九成问题出在这里。</td></tr>
+      <tr><th>重开程序后显示「登录待确认」</th><td>这是正常的：登录状态每次启动都要重新确认一次。程序打开后会自动帮你复核（几秒），通过就变回「登录已确认」。复核期间本地收藏仍可查看，搜索可能等待复核结束，个人收藏同步需要有效登录；如果一直停在未确认，再扫码登录一次即可。</td></tr>
+      <tr><th>扫码登录后窗口没反应</th><td>登录窗口最长等 10 分钟，请确认手机 App 已扫到二维码。期间不能同时搜索或同步；关掉窗口重开一次即可。</td></tr>
+      <tr><th>扫码时提示有其他操作在进行</th><td>四野同一时间只允许一个登录窗口或一次搜索。等当前操作结束（或搜索完成后）再试。</td></tr>
       <tr><th>某平台结果特别少</th><td>平台风控、关键词太窄、字段变化都会导致。建议当作参考，不要当成完整数据。</td></tr>
       <tr><th>提示限流冷却</th><td>本地会等 60 秒，反复触发延长到 120 / 240 / 300 秒。<strong>其他平台不受影响</strong>，冷却结束手动重试。</td></tr>
       <tr><th>第一次搜索很慢</th><td>首次要启动浏览器，之后快很多；同样的关键词 90 秒内有缓存，会立刻返回。</td></tr>

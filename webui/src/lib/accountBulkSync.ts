@@ -244,9 +244,9 @@ export function shouldAnnounceAutoSync(counts: BulkOutcomeCounts): boolean {
 export function buildBulkBlockedMessage(reason: BulkSyncBlockReason | undefined): string {
   switch (reason) {
     case "extension_not_connected":
-      return "未检测到浏览器扩展，已停止后续同步。请安装扩展并刷新本页后重试。";
+      return "未检测到浏览器扩展，已停止后续同步。可以改用平台卡片上的「扫码登录」，或安装扩展并刷新本页后重试。";
     case "extension_outdated":
-      return "扩展版本过旧，已停止后续同步。请在扩展管理页点击“重新加载”后刷新本页。";
+      return "扩展版本过旧，已停止后续同步。请在扩展管理页点击“重新加载”后刷新本页；也可以改用「扫码登录」。";
     case "api_unavailable":
       return "本地 API 不可用，已停止后续同步。请确认后端已启动后重试。";
     case "search_in_progress":
@@ -286,6 +286,11 @@ export interface AutoSyncAccount {
   platform: string;
   status: string;
   verified: boolean;
+  /**
+   * 本地是否已有该平台的 profile。只有 `true` 才值得"重新验证"：
+   * 没有 profile 时验证只会得到"未登录"，那是扫码/同步该做的事。
+   */
+  profile_exists?: boolean;
 }
 
 export interface AutoSyncInput {
@@ -371,4 +376,111 @@ export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
     return { run: false, platforms: [], skipReason: "nothing_to_sync" };
   }
   return { run: true, platforms };
+}
+
+// ── 启动后"重新验证已有登录状态"（方案 A：不依赖扩展）──────────────────
+//
+// 后端把"已验证"存在**内存**里，重启就没了 —— profile 还在，但状态退化成
+// "已导入，未确认登录"（accounts.py 的 _state_of：profile 存在只代表
+// unverified，connected 必须来自真实验证）。装了扩展时，Round 18 的自动同步
+// 会顺带把状态验回来；没装扩展（扫码登录主路径）时没人做这件事，账号卡片就
+// 一直停在"未确认"。这里负责补上：对"本地有 profile 但未确认"的平台，让后端
+// 用 profile 起无头上下文跑一次 pong，把结论验回来。
+
+/**
+ * 需要"重新验证"的平台：本地有 profile，但后端未确认登录（固定顺序）。
+ *
+ * 刻意**不**包含没有 profile 的平台：那种情况验证只会得到"未登录"，
+ * 用户要做的是扫码登录或从浏览器同步，不是验证。
+ */
+export function platformsNeedingVerify(
+  accounts: readonly AutoSyncAccount[] | null
+): PlatformSlug[] {
+  if (!accounts) return [];
+  const need = new Set(
+    accounts
+      .filter((a) => a.profile_exists === true && !isAccountVerified(a))
+      .map((a) => a.platform)
+  );
+  return BULK_SYNC_PLATFORM_ORDER.filter((p) => need.has(p));
+}
+
+export type StartupVerifySkipReason =
+  | "cooldown"
+  | "already_syncing"
+  | "accounts_loading"
+  | "api_unavailable"
+  | "nothing_to_verify"
+  /** 扩展已连接：交给原来的扩展同步路径，别重复劳动。 */
+  | "extension_connected";
+
+export interface StartupVerifyInput {
+  accounts: readonly AutoSyncAccount[] | null;
+  apiRunning: boolean | null;
+  /** 已有同步/验证队列在跑。 */
+  syncing: boolean;
+  /** 距上一次尝试的毫秒数（与自动同步共用同一冷却）。 */
+  msSinceLastAttempt: number | null;
+  /** 扩展状态：connected 时不重复验证（同步会带上验证）。 */
+  extensionState?: "checking" | "connected" | "outdated" | "not-installed" | "unknown";
+  cooldownMs?: number;
+}
+
+export interface StartupVerifyDecision {
+  run: boolean;
+  platforms: PlatformSlug[];
+  skipReason?: StartupVerifySkipReason;
+}
+
+/**
+ * 启动后是否需要"重新验证已有登录状态"。
+ *
+ * 与 decideAutoSync 共用同一套冷却时间戳（调用方传同一个 msSinceLastAttempt），
+ * 所以两条路径不会在同一轮里重复启动浏览器。
+ */
+export function decideStartupVerify(input: StartupVerifyInput): StartupVerifyDecision {
+  const {
+    accounts, apiRunning, syncing, msSinceLastAttempt,
+    extensionState, cooldownMs = AUTO_SYNC_COOLDOWN_MS,
+  } = input;
+  if (syncing) return { run: false, platforms: [], skipReason: "already_syncing" };
+  if (msSinceLastAttempt !== null && msSinceLastAttempt < cooldownMs) {
+    return { run: false, platforms: [], skipReason: "cooldown" };
+  }
+  if (apiRunning !== true) return { run: false, platforms: [], skipReason: "api_unavailable" };
+  if (extensionState === "connected") {
+    return { run: false, platforms: [], skipReason: "extension_connected" };
+  }
+  if (!accounts) return { run: false, platforms: [], skipReason: "accounts_loading" };
+  const platforms = platformsNeedingVerify(accounts);
+  if (platforms.length === 0) {
+    return { run: false, platforms: [], skipReason: "nothing_to_verify" };
+  }
+  return { run: true, platforms };
+}
+
+/**
+ * "重新验证"是否值得提示用户。
+ *
+ * 全部确认成功是**预期结果**（重开程序的正常路径）—— 每次都弹一条
+ * "N 个平台验证成功"是纯噪音。只有出现需要处理的情况（过期/不可用/失败/
+ * 仍未确认）才提示。
+ */
+export function shouldAnnounceStartupVerify(counts: BulkOutcomeCounts): boolean {
+  if (counts.total === 0) return false;
+  return counts.verified < counts.total;
+}
+
+/** "重新验证"的汇总文案（用"复核"措辞，不说"同步"——这次并没有导入 Cookie）。 */
+export function buildVerifySummaryMessage(counts: BulkOutcomeCounts): BulkSummaryMessage {
+  const pending = counts.imported + counts.verifying;
+  const parts = [`${counts.verified} 个已确认`, `${pending} 个仍未确认`];
+  if (counts.unavailable > 0) parts.push(`${counts.unavailable} 个暂不可用`);
+  if (counts.failed > 0) parts.push(`${counts.failed} 个失败`);
+  const problematic = counts.failed > 0 || counts.unavailable > 0 || pending > 0;
+  return {
+    tone: problematic ? "warning" : "info",
+    title: `登录状态复核：${parts.join("，")}`,
+    ...(problematic ? { description: "请查看对应平台卡片诊断" } : {}),
+  };
 }

@@ -805,12 +805,35 @@ async def _verify_login_success(crawler: Any, core_platform: str) -> bool:
         return False
 
 
+# 登录后验证的尝试次数与重试间隔：刚扫码完成时会话可能还没在平台侧生效，
+# 重试一次能显著减少"明明登录成功却报验证失败"的假阴性。
+_LOGIN_VERIFY_ATTEMPTS = 2
+_LOGIN_VERIFY_RETRY_DELAY = 1.0
+
+
+def _login_verify_failure_message(checked: bool) -> str:
+    """登录验证未通过时的安全文案（不含 Cookie、接口原文或堆栈）。
+
+    ``checked=False`` 表示浏览器会话已关闭、根本没能在会话内验证 ——
+    此时断言"未登录"是不准确的，只能说"没能验证"。
+    """
+    if not checked:
+        return "登录流程未走到验证步骤，请重试"
+    return ("登录状态未通过平台验证（可能被风控或接口异常）。"
+            "搜索通常仍可用，可稍后点「重新验证」再试")
+
+
 async def _run_login(job_id: str, platform: str) -> None:
     """Login-only: launch visible browser, do QR login, save profile, exit.
 
     Guarantees exactly one ``done`` event (success, failure, timeout, or
     ``_WorkerExit``) and only emits ``succeeded`` after the session has been
     re-read and verified via the platform's own pong/check_login_state.
+
+    Verification happens **inside** ``crawler.start()`` (see
+    ``_verify_then_noop_search``): every platform wraps its body in
+    ``async with async_playwright()``, so by the time ``start()`` returns the
+    browser context is already closed and any cookie/pong probe fails.
     """
     core_platform = agg_to_core_platform(platform)
 
@@ -828,6 +851,8 @@ async def _run_login(job_id: str, platform: str) -> None:
 
     crawler = None
     done_emitted = False
+    # 会话内验证的结果容器（search() 钩子写入，start() 返回后读取）。
+    verify_state: Dict[str, bool] = {"checked": False, "verified": False}
 
     def _emit_done_once() -> None:
         nonlocal done_emitted
@@ -846,16 +871,35 @@ async def _run_login(job_id: str, platform: str) -> None:
         )
 
         emit_status(job_id, platform, "running",
-                    {"message": "浏览器窗口已打开，请扫码登录。"})
+                    {"message": "浏览器窗口已打开，请扫码登录。"
+                                "若该平台已经是登录状态，窗口会自动关闭。"})
 
-        # Override search so it does NOT run for login-only
+        # Login-only 不跑搜索，但 ``search()`` 是各平台 start() 里唯一
+        # 「登录流程已结束、浏览器还没关」的钩子 —— 用它做验证。
         original_search = getattr(crawler, "search", None)
 
-        async def _noop_search():
-            """Login-only: skip all search/storing."""
-            pass
+        async def _verify_then_noop_search():
+            """Login-only：先在活着的会话里验证登录，再跳过所有搜索与落库。
 
-        crawler.search = _noop_search
+            为什么不能等 start() 返回后再验证：各平台 ``start()`` 把逻辑包在
+            ``async with async_playwright()`` 里，返回后 ``browser_context``
+            已关闭 —— ``ctx.cookies()`` / ``pong()`` 必然抛错，于是"明明扫码
+            成功"的登录会被一律报成 login_verification_failed。
+            （用户实测：四个平台全部显示登录失败，但搜索与收藏夹都正常。）
+            """
+            for attempt in range(_LOGIN_VERIFY_ATTEMPTS):
+                try:
+                    if await _verify_login_success(crawler, core_platform):
+                        verify_state["verified"] = True
+                        break
+                except Exception:
+                    pass
+                if attempt + 1 < _LOGIN_VERIFY_ATTEMPTS:
+                    # 刚扫码完成时会话可能还没在平台侧生效，短暂重试一次。
+                    await asyncio.sleep(_LOGIN_VERIFY_RETRY_DELAY)
+            verify_state["checked"] = True
+
+        crawler.search = _verify_then_noop_search
 
         try:
             await asyncio.wait_for(crawler.start(), timeout=600)
@@ -863,14 +907,20 @@ async def _run_login(job_id: str, platform: str) -> None:
             if original_search is not None:
                 crawler.search = original_search
 
-        # Re-read cookies and verify the session BEFORE declaring success.
-        verified = await _verify_login_success(crawler, core_platform)
+        # 正常情况下结论来自会话内验证。``checked`` 为 False 表示 start() 没
+        # 走到 search()（平台提前返回）—— 此时会话已关闭，再验也只能得到
+        # 失败，因此直接给出可操作的错误，而不是冒充"未登录"。
+        if verify_state["checked"]:
+            verified = verify_state["verified"]
+        else:
+            verified = await _verify_login_success(crawler, core_platform)
+
         if verified:
             emit_status(job_id, platform, "succeeded",
                         {"message": "登录成功，会话已验证并保存。"})
         else:
             emit_error(job_id, platform, "login_verification_failed",
-                       "登录验证失败，请重试")
+                       _login_verify_failure_message(verify_state["checked"]))
         _emit_done_once()
 
     except _WorkerExit:

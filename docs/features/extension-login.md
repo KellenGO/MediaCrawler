@@ -3,8 +3,7 @@
 ## 一句话
 
 应用不保存账号密码，而是把使用者的登录态放进本机 `browser_data/<平台>_user_data_dir` 持久化 profile，
-之后无头搜索复用。登录态有**两条来源**：**浏览器扩展搬运 cookie**（当前主路径）和
-**应用内置扫码登录**（当前是折叠起来的备用路径）。
+之后无头搜索复用。**应用内置扫码登录是主入口**，无需安装扩展；浏览器扩展同步已有登录状态是可选加速方式。
 
 ## 代码入口
 
@@ -17,6 +16,7 @@
 | 浏览器选择（自定义 > Chrome > Edge > 内置 Chromium） | `tools/browser_launcher.py`（`resolve_playwright_browser`） |
 | profile 与登录态配置 | `config/base_config.py`：`USER_DATA_DIR`、`SAVE_LOGIN_STATE` |
 | 前端账号页 | `webui/src/components/accounts/AccountsPage.tsx`、`useAccounts.ts`、`useAutoAccountSync.ts` |
+| 扫码任务状态和跨页面搜索避让 | `webui/src/lib/scanLogin.ts`、`webui/src/App.tsx` |
 | 前端扩展通信与批量同步 | `webui/src/lib/extensionSync.ts`、`accountBulkSync.ts`、`accountGate.ts` |
 
 profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
@@ -27,15 +27,18 @@ profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
   后端导入应用自己的 profile（它不搜索、不抓取、不常驻）。
 - 扩展走**一次性同步票据**（128bit、60s、单次），后端只接受 `chrome-extension://` 来源。
 - **扫码登录写入的 profile 就是搜索读取的那一个**，登录后 `_verify_login_success` 会真验证一次。
+- 验证必须在浏览器会话关闭之前完成；此前会话关闭后验证导致“扫码成功但报失败”。已有登录时可直接验证成功，不必再扫一次。
+- 可见浏览器自身展示二维码，不另弹系统图片查看器；无头模式仍保留图片二维码。
+- 重启不信任磁盘上的旧验证结论。没有扩展时，自动复核本机已有登录状态；与扩展自动同步共用冷却，避免重复操作，全部成功时不打扰。
+- 切去搜索页仍保留登录轮询，任务结束后再释放搜索等待；不能因离开账号页就假定登录结束。整页刷新后仍由后端互斥兜底。
 - 账号卡片把「登录是否确认」与「是否可以尝试搜索」分开说明；未确认登录也可能搜索公开内容，不能因此承诺个人收藏同步可用。使用备用搜索方式不等于账号故障，平台限流也不等于退出登录。
 - 为什么不能「应用直接读浏览器 cookie」：**Chrome 127+ 的 App-Bound Encryption**
   让外部程序即使拿到 cookie 数据库也解不开，只有跑在浏览器进程内的扩展能合法读取。
 
 ## 已知坑 / 边界
 
-- 当前 UI 里**扩展是主路径**：「同步当前浏览器登录状态」按钮在 `extensionState !== "connected"` 时
-  `disabled`；扫码登录被注释为「备用辅助登录（默认折叠，仅用户主动点击）」。
-- `site/guide.html` 把「开发者模式加载扩展」列为开箱必做的第 2 步 —— 普通用户最大的劝退点。
+- 扩展仍固定连接 8080；开发实例改端口时使用扫码登录。
+- 扫码结果仍需四平台真实账号验收；自动化验证生命周期和界面交互，不能替代手机扫码。
 - 登录态有效期（本机 profile 实测 cookie 标称）：抖音 `sessionid` ≈ 58 天、知乎 `z_c0` ≈ 178 天、
   小红书 `web_session` ≈ 332 天；实际使用会不断刷新，通常更久。
 - worker 里 **CDP 模式被显式关掉**（`ENABLE_CDP_MODE=False`、`CDP_CONNECT_EXISTING=False`），
@@ -49,3 +52,4 @@ profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
   `tests/test_extension_runtime.py`、`tests/test_account_coordinator.py`、`tests/test_account_sync_timings.py`
 - 前端：`webui/tests/accountBulkSync.test.ts`、`accountGate.test.ts`、`accounts.test.ts`、
   `extensionSync.test.ts`、`useAccountsOptions.test.ts`
+- 扫码回归：`tests/test_worker_login_done.py`、`tests/test_qrcode_popup.py`、`webui/tests/scanLogin.test.ts`；跨页轮询见 `scripts/favorites_ui_smoke.py`。

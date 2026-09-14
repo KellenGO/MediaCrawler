@@ -134,4 +134,6 @@ async def serve_frontend_path(path: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8080)
+    from base.server_port import resolve_port
+
+    uvicorn.run(app, host="127.0.0.1", port=resolve_port())

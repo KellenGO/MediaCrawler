@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Tuple, cast
 from PIL import Image, ImageDraw, ImageShow
 from playwright.async_api import BrowserContext, Cookie, Page
 
+import config
 from . import utils
 from .httpx_util import make_async_client
 
@@ -82,7 +83,17 @@ async def find_qrcode_img_from_canvas(page: Page, canvas_selector: str) -> str:
 
 
 def show_qrcode(qr_code) -> None:  # type: ignore
-    """parse base64 encode qrcode image and show it"""
+    """parse base64 encode qrcode image and show it
+
+    只在浏览器是**无头**模式时弹窗。
+
+    可见窗口（HEADLESS=False，包括应用自带扫码登录）里，平台登录页自己就画着
+    二维码，再弹一个系统图片查看器纯属重复信息，还会盖住浏览器窗口 ——
+    用户实测反馈"没必要"。无头模式没有别的办法把二维码递到用户眼前，所以
+    保留原来的弹窗行为。
+    """
+    if not config.HEADLESS:
+        return
     if "," in qr_code:
         qr_code = qr_code.split(",")[1]
     qr_code = base64.b64decode(qr_code)

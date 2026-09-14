@@ -2,6 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+// 开发服务器把 /api 代理到本机后端。端口与 base/server_port.py 同一套规则
+// （SIYE_PORT，默认产品端口 8080）—— 同一个仓库的多个 worktree 并行开发时，
+// 各自的 `npm run dev` 都能指向自己的后端。
+const backendPort = process.env.SIYE_PORT || '8080'
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -17,7 +22,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true,
         ws: true,  // 启用 WebSocket 代理
       },

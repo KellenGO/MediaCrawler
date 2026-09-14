@@ -43,12 +43,20 @@ class _Events:
 
 
 class _FakeCtx:
-    """browser_context with real cookie semantics used by _verify_login_success."""
+    """browser_context with real cookie semantics used by _verify_login_success.
+
+    ``closed=True`` reproduces what the real platforms do: ``start()`` wraps its
+    body in ``async with async_playwright()``, so after it returns the context is
+    closed and any cookie read raises.
+    """
 
     def __init__(self, cookies=None):
         self._cookies = cookies or []
+        self.closed = False
 
     async def cookies(self, urls):
+        if self.closed:
+            raise RuntimeError("Target page, context or browser has been closed")
         return list(self._cookies)
 
     async def close(self):
@@ -201,6 +209,90 @@ def test_login_without_cookies_never_succeeds(monkeypatch):
     assert evt.done == [1]
     assert client.pong_called == 0
     assert "succeeded" not in [s[0][2] for s in evt.status]
+
+
+# ── 会话内验证（回归：登录成功被误报为失败）────────────────────────────
+#
+# 真实平台把 start() 的逻辑包在 ``async with async_playwright()`` 里，返回后
+# browser_context 已关闭。验证若放在 start() 之后，ctx.cookies() 必然抛错，
+# 于是"明明扫码成功"的登录被一律报成 login_verification_failed —— 用户实测：
+# 四个平台全部显示登录失败，但搜索与收藏夹都正常。下面两条锁住修复。
+
+def test_login_verified_inside_session_survives_closed_context(monkeypatch):
+    """start() 内部调用 search() 时验证通过；返回后 context 已关闭仍算成功。"""
+    evt = _Events()
+    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    client = _FakeClient(pong_result=True)
+
+    async def start():
+        # 真实平台：登录流程结束后调用 self.search()（login-only 的验证钩子），
+        # 然后退出 async with —— context 从此刻起不可用。
+        await crawler.search()
+        ctx.closed = True
+
+    crawler = _FakeCrawler(start, ctx, client)
+
+    class _Factory:
+        @staticmethod
+        def create_crawler(platform=None):
+            return crawler
+
+    _install(monkeypatch, evt, _Factory)
+    asyncio.run(_run_login("j9", "xhs"))
+
+    assert evt.done == [1]
+    assert client.pong_called == 1, "验证必须在会话内完成，且只验一次"
+    assert "succeeded" in [s[0][2] for s in evt.status]
+    assert evt.counts["errors"] == 0
+
+
+def test_login_not_verified_inside_session_reports_failure_without_retry_outside(monkeypatch):
+    """会话内 pong 失败 → 重试一次后报失败，且不再用已关闭的 context 复验。"""
+    evt = _Events()
+    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    client = _FakeClient(pong_result=False)
+
+    async def start():
+        await crawler.search()
+        ctx.closed = True
+
+    crawler = _FakeCrawler(start, ctx, client)
+
+    class _Factory:
+        @staticmethod
+        def create_crawler(platform=None):
+            return crawler
+
+    _install(monkeypatch, evt, _Factory)
+    asyncio.run(_run_login("j10", "xhs"))
+
+    assert evt.done == [1]
+    assert client.pong_called == 2, "会话内允许重试一次"
+    assert [e[0][2] for e in evt.errors] == ["login_verification_failed"]
+    assert "succeeded" not in [s[0][2] for s in evt.status]
+    # 文案不能说"未登录"（会话已关，无从断言），要指出可稍后重新验证。
+    message = evt.errors[0][0][3]
+    assert "重新验证" in message
+    assert "Traceback" not in message
+
+
+def test_login_flow_not_reaching_search_does_not_claim_success(monkeypatch):
+    """没走到 search() 且会话已关闭 → 绝不说 succeeded，也不用"未登录"糊弄。"""
+    evt = _Events()
+    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    client = _FakeClient(pong_result=True)
+
+    async def start():
+        ctx.closed = True  # 平台提前返回：既没调 search()，会话也已关闭
+
+    _install(monkeypatch, evt, _make_factory(start, ctx, client))
+    asyncio.run(_run_login("j11", "xhs"))
+
+    assert evt.done == [1]
+    assert "succeeded" not in [s[0][2] for s in evt.status]
+    assert [e[0][2] for e in evt.errors] == ["login_verification_failed"]
+    assert "未走到验证步骤" in evt.errors[0][0][3]
+    assert client.pong_called == 0, "会话已关闭，不应再做无意义的 pong"
 
 
 def test_worker_exit_must_not_become_exit0_in_login_mode(monkeypatch):

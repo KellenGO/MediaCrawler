@@ -32,9 +32,10 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from base.runtime_paths import application_root, resource_path
+from base.server_port import resolve_port
 
 HOST = "127.0.0.1"
-PORT = 8080
+PORT = resolve_port()
 BASE_URL = f"http://{HOST}:{PORT}"
 HEALTH_URL = f"{BASE_URL}/api/health"
 BACKEND_READY_TIMEOUT_SECONDS = 60

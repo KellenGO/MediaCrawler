@@ -699,7 +699,7 @@ html.js .reveal.in{opacity:1;transform:none}
         <article class="card">
           <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span>
           <h3>账号状态与平台诊断</h3>
-          <p>打开程序即自动检测账号状态，为未确认登录的平台自动同步；平台诊断会分别展示账号状态、当前搜索路径和 fallback 能力。</p>
+          <p>账号设置里点「扫码登录」用手机扫一下即可完成登录；装了浏览器扩展的话，打开程序还会自动为未确认登录的平台同步一次。平台诊断会分别展示账号状态、当前搜索路径和 fallback 能力。</p>
           <p class="note">账号状态不等同于搜索能力，没登录也可能完成公开搜索。</p>
         </article>
       </div>
@@ -757,7 +757,7 @@ html.js .reveal.in{opacity:1;transform:none}
       <p class="eyebrow">Download</p>
       <h2 class="title">三步就能搜起来</h2>
       <p class="description">Windows 可执行包已经包含 Python runtime、FastAPI 后端和生产版 Web UI。普通使用不需要安装 Python、uv、Node.js、npm。
-        <strong>唯一需要你额外做的</strong>：在浏览器登录四个平台，并装上随包的浏览器插件同步登录状态 —— 没做这两步会搜不出东西。</p>
+        <strong>唯一需要你额外做的</strong>：登录四个平台 —— 在「账号与登录」点「扫码登录」，用手机扫一下即可，不需要安装任何插件。</p>
     </div>
 
     <div class="steps-grid">
@@ -773,8 +773,8 @@ html.js .reveal.in{opacity:1;transform:none}
       </article>
       <article class="card step reveal">
         <span class="num">3</span>
-        <h3>登录 + 装插件，然后开搜</h3>
-        <p>在浏览器登录小红书、抖音、B 站、知乎，装上随包的浏览器插件同步登录状态，就可以开始搜索了。这两步只做一次。</p>
+        <h3>扫码登录，然后开搜</h3>
+        <p>到「设置 · 账号与登录」点任意平台的「扫码登录」，用手机 App 扫一下即可（四个平台各扫一次）。这一步只做一次。</p>
       </article>
     </div>
 
@@ -810,7 +810,7 @@ html.js .reveal.in{opacity:1;transform:none}
           </li>
           <li>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M9 7V5h6v2"/></svg>
-            <span><b>浏览器插件：</b>随包提供，用来同步你在浏览器里的登录状态（装一次即可）</span>
+            <span><b>浏览器插件（可选）：</b>随包提供。已经在浏览器里登录过平台时，装上它可以一键同步登录状态、省掉扫码；不装也能用扫码登录</span>
           </li>
           <li>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="3"/></svg>
@@ -827,22 +827,23 @@ html.js .reveal.in{opacity:1;transform:none}
 
     <div class="panel dl-panel reveal" id="account">
       <div>
-        <h3>用之前，先做完这两步</h3>
-        <p>四野是用<strong>你本人的登录状态</strong>去替你搜索的。装上之后、开始搜索之前，这两步必须做，否则搜不出东西或一直提示「需要登录」。</p>
+        <h3>用之前，先登录四个平台</h3>
+        <p>四野是用<strong>你本人的登录状态</strong>去替你搜索的。开始搜索之前必须登录，否则搜不出东西或一直提示「需要登录」。</p>
         <ol class="steps" style="list-style:none">
-          <li><b>① 在浏览器里登录四个平台</b>：用 Chrome 或 Edge 打开小红书、抖音、B 站、知乎，分别登录你自己的账号。</li>
-          <li><b>② 装上四野的浏览器插件</b>：在 Chrome / Edge 打开 <code>chrome://extensions</code> 或 <code>edge://extensions</code>，打开「开发者模式」，
-              选择「加载已解压的扩展程序」，选中解压目录里的 <code>MediaCrawler/browser_extension/</code>。</li>
-          <li><b>然后同步一次</b>：回到四野的「账号与登录」，点同步登录状态。之后每次打开程序会自动同步，不用再手动点。</li>
+          <li><b>① 扫码登录（推荐）</b>：打开四野的「设置 · 账号与登录」，在平台卡片上点「扫码登录」。
+              程序会在你电脑上打开一个浏览器窗口，用小红书、抖音、B 站、知乎的手机 App 扫一下即可 —— 四个平台各扫一次，之后打开程序就能直接搜。</li>
+          <li><b>② 可选：用浏览器扩展同步</b>：如果你平时就在 Chrome / Edge 里登录着这些平台，
+              装上随包的插件（<code>chrome://extensions</code> → 开发者模式 → 加载已解压的扩展程序 → <code>MediaCrawler/browser_extension/</code>），
+              回到「账号与登录」点「从浏览器同步」即可省掉扫码。不装也能用扫码登录。</li>
         </ol>
-        <p class="small-note">插件只把必要的会话信息交给<strong>本机后端</strong>，用于在你自己的账号下搜索。请只同步和使用你有权使用的账号。详细图文步骤见<a href="guide.html">使用说明</a>。</p>
+        <p class="small-note">两种方式可以混用。插件只把必要的会话信息交给<strong>本机后端</strong>，用于在你自己的账号下搜索。请只同步和使用你有权使用的账号。详细步骤见<a href="guide.html">使用说明</a>。</p>
       </div>
       <div>
         <p class="description" style="font-size:14px">
-          程序打开时会自动检测账号状态，并为尚未确认登录的平台自动同步一次；平台诊断会分别展示账号状态、当前搜索路径与 fallback 能力。
+          装了扩展的话，程序打开时会自动检测账号状态，并为尚未确认登录的平台自动同步一次；平台诊断会分别展示账号状态、当前搜索路径与 fallback 能力。
         </p>
         <p class="small-note">
-          搜索与账号同步互斥，切换时不会互相打断；同步进行中发起搜索，会等同步结束后再提交，不会把你卡住。
+          扫码登录与搜索同一时间只处理一个（后端排他保护），稍等几秒即可；扩展同步进行中发起搜索，也会等同步结束后再提交，不会把你卡住。
         </p>
       </div>
     </div>
@@ -862,7 +863,7 @@ html.js .reveal.in{opacity:1;transform:none}
       <details class="q reveal">
         <summary>用之前必须先登录四个平台吗？</summary>
         <div class="a">
-          <p>不一定。公开搜索不要求四个平台都登录。只有需要登录态、详情接口或更稳定的平台访问时才需要同步账号。</p>
+          <p>不一定。公开搜索不要求四个平台都登录。只有需要登录态、详情接口或更稳定的平台访问时，才需要先在「账号与登录」扫码登录（或用扩展同步已有的浏览器登录状态）。</p>
           <p>没登录时，搜索前的本地预检会在毫秒级告诉你是哪个平台搜不了、为什么，并把你引到账号设置，而不是让你白等浏览器启动。</p>
         </div>
       </details>
@@ -886,7 +887,7 @@ html.js .reveal.in{opacity:1;transform:none}
       <details class="q reveal">
         <summary>某个平台搜不出结果 / 结果不完整怎么办？</summary>
         <div class="a">
-          <p>先看平台状态：需要登录就按提示去账号设置同步；明确被限流会显示冷却倒计时，冷却期间重复搜索不会向该平台发新请求，也不会延长倒计时。</p>
+          <p>先看平台状态：需要登录就按提示去「账号与登录」扫码登录（或用扩展同步）；明确被限流会显示冷却倒计时，冷却期间重复搜索不会向该平台发新请求，也不会延长倒计时。</p>
           <p>单个平台失败不会影响其他平台返回结果，可以对失败平台单独重试。冷却结束后的重试需要手动点。</p>
         </div>
       </details>

@@ -49,6 +49,10 @@ function App() {
   // View mode toggle
   const [viewMode, setViewMode] = useState<ViewMode>(initialRoute.view)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(initialRoute.settings)
+  const [accountsVisited, setAccountsVisited] = useState(initialRoute.view === 'accounts')
+  useEffect(() => {
+    if (viewMode === 'accounts') setAccountsVisited(true)
+  }, [viewMode])
   const [favoritesSection, setFavoritesSection] = useState<FavoritesSection>(initialRoute.favorites)
   const [homeRoute, setHomeRoute] = useState(initialRoute.home)
 
@@ -124,19 +128,23 @@ function App() {
             <Suspense fallback={<PageLoading />}>
               {viewMode === 'search' ? (
                 <SearchPage homeRequested={homeRoute} onSearchStarted={showSearchResultsRoute} onNavigateAccounts={() => navigate('accounts', 'accounts')} />
-              ) : viewMode === 'accounts' ? (
-                <AccountsPage
-                  activeSection={settingsSection}
-                  onSectionChange={(section) => navigate('accounts', section)}
-                  onNavigateSearch={() => navigate('search')}
-                  onNavigateHelp={() => navigate('help')}
-                />
               ) : viewMode === 'favorites' ? (
                 <FavoritesPage activeTab={favoritesSection} onTabChange={changeFavoritesSection} onNavigateAccounts={() => navigate('accounts', 'accounts')} />
               ) : viewMode === 'help' ? (
                 <HelpPage onShowDisclaimer={handleShowDisclaimer} />
               ) : null}
             </Suspense>
+            {/* Keep active login polling alive when navigating back to search. */}
+            {(accountsVisited || viewMode === 'accounts') && <div hidden={viewMode !== 'accounts'}>
+              <Suspense fallback={<PageLoading />}>
+                <AccountsPage
+                  activeSection={settingsSection}
+                  onSectionChange={(section) => navigate('accounts', section)}
+                  onNavigateSearch={() => navigate('search')}
+                  onNavigateHelp={() => navigate('help')}
+                />
+              </Suspense>
+            </div>}
           </div>
         )}
       </main>

@@ -15,6 +15,7 @@ import {
   SYNC_RESPONSE_TIMEOUT_MS,
   classifyExtensionProbe,
   mapSyncResultToOutcome,
+  verifyResponseToSyncResult,
   versionAtLeast,
   type SyncResult,
 } from "../src/lib/extensionSync.js";
@@ -143,4 +144,65 @@ test("mapSyncResultToOutcome：success 但带错误码 → 不冒充 verified", 
   }));
   assert.notEqual(o.kind, "verified");
   assert.equal(o.verified, false);
+});
+
+// ── verify 端点响应 → SyncResult（不经过扩展的复核路径）───────────────
+
+test("verifyResponseToSyncResult：验证通过映射为 connected/verified", () => {
+  const r = verifyResponseToSyncResult({
+    success: true, platform: "xhs", verified: true, status: "connected",
+    safe_error_code: null, safe_message: "会话验证通过",
+  });
+  assert.equal(r.success, true);
+  assert.equal(r.verified, true);
+  assert.equal(r.status, "connected");
+  assert.equal(r.sync_stage, "verification");
+  const o = mapSyncResultToOutcome(PLATFORM, r);
+  assert.equal(o.kind, "verified");
+});
+
+test("verifyResponseToSyncResult：不虚构同步专有字段（Cookie 计数一律 null）", () => {
+  const r = verifyResponseToSyncResult({ success: true, verified: true, status: "connected" });
+  assert.equal(r.received_cookie_count, null);
+  assert.equal(r.accepted_cookie_count, null);
+  assert.equal(r.skipped_cookie_count, null);
+  assert.equal(r.required_cookie_present, null);
+  assert.equal(r.login_marker_presence, null);
+});
+
+test("verifyResponseToSyncResult：unavailable 不冒充成功也不冒充未登录", () => {
+  const o = mapSyncResultToOutcome(PLATFORM, verifyResponseToSyncResult({
+    success: true, verified: false, status: "unavailable",
+    safe_error_code: "login_verification_unavailable",
+    safe_message: "当前无法验证登录状态，仍可尝试搜索或稍后重新验证",
+  }));
+  assert.equal(o.kind, "unavailable");
+  assert.equal(o.verified, false);
+});
+
+test("verifyResponseToSyncResult：风控受限仍是 unavailable（不是未登录）", () => {
+  const o = mapSyncResultToOutcome(PLATFORM, verifyResponseToSyncResult({
+    success: true, verified: false, status: "unavailable",
+    safe_error_code: "login_verification_rate_limited",
+  }));
+  assert.equal(o.kind, "unavailable");
+  assert.notEqual(o.safeErrorCode, "login_required");
+});
+
+test("verifyResponseToSyncResult：明确未登录 → imported（会话在但没确认）", () => {
+  const o = mapSyncResultToOutcome(PLATFORM, verifyResponseToSyncResult({
+    success: true, verified: false, status: "unverified",
+    safe_error_code: "login_not_verified",
+  }));
+  assert.equal(o.kind, "imported");
+  assert.equal(o.verified, false);
+});
+
+test("verifyResponseToSyncResult：响应残缺/空值不抛错且不冒充成功", () => {
+  for (const input of [null, undefined, {}, { status: 123, verified: "yes" }]) {
+    const r = verifyResponseToSyncResult(input as never);
+    assert.equal(typeof r.status, "string");
+    assert.equal(r.verified, false);
+    assert.equal(mapSyncResultToOutcome(PLATFORM, r).kind, "imported");
+  }
 });

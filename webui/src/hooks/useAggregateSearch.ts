@@ -7,6 +7,7 @@ import type {
   PlatformSlug,
 } from "@/types/search";
 import { waitForAccountOpsIdle } from "@/lib/accountGate";
+import { isAnyScanLoginActive } from "@/lib/scanLogin";
 
 const API_BASE = "/api/search";
 const STORAGE_KEY = "aggregate_search_job_id";
@@ -112,11 +113,14 @@ export function useAggregateSearch() {
       // 打开程序时可能正在自动同步登录状态 —— 这里等它结束再提交，而不是
       // 让用户撞上 409"账号操作进行中"。等待期间按钮的 pending 状态即是反馈。
       // 超时后照常提交，后端 409 仍是兜底。
+      // 方案 A：应用自带扫码登录同样占用排他租约（但不写账号状态），
+      // 通过 extraBusy 一起等待 —— 否则用户刚点完扫码登录再搜索就会 409。
       await waitForAccountOpsIdle({
         fetchAccounts: async () => {
           const { data } = await axios.get("/api/search/accounts");
           return data.accounts as readonly { platform: string; status: string }[];
         },
+        extraBusy: isAnyScanLoginActive,
       });
       return createJob(req);
     },

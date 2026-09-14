@@ -32,6 +32,7 @@ def _request(url: str) -> tuple[int, str]:
 def _clean_env(package: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    env.pop("SIYE_PORT", None)
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
     env["PATH"] = os.pathsep.join([
         str(package),

@@ -14,7 +14,7 @@ export function HelpPage({ onShowDisclaimer }: HelpPageProps) {
         <div>
           <p className="eyebrow">HELP &amp; ABOUT</p>
           <h1>从第一次搜索开始</h1>
-          <p className="description">连接本机服务和浏览器扩展，把四个平台放进同一个搜索流程。</p>
+          <p className="description">连接本机服务，登录四个平台账号，把它们放进同一个搜索流程。</p>
         </div>
       </div>
 
@@ -23,20 +23,32 @@ export function HelpPage({ onShowDisclaimer }: HelpPageProps) {
           <h2>使用流程</h2>
           <ol className="steps">
             <li><strong>启动本机服务</strong>保持 MediaCrawler 后端运行，网页会自动检查连接状态。</li>
-            <li><strong>连接平台账号</strong>在常用浏览器登录平台，再通过扩展同步登录状态。</li>
+            <li><strong>登录平台账号</strong>到「设置 · 账号与登录」，点任意平台的「扫码登录」，用手机 App 扫一下即可。</li>
             <li><strong>开始聚合搜索</strong>输入关键词、选择平台，已返回的内容可以边搜边看。</li>
             <li><strong>收藏与整理</strong>保存到本地收藏，添加备注，或导出一份备份。</li>
           </ol>
         </section>
 
         <section className="help-section">
-          <h2>安装浏览器扩展</h2>
+          <h2>扫码登录（推荐）</h2>
+          <ol>
+            <li>打开「设置 · 账号与登录」，找到要登录的平台卡片。</li>
+            <li>点卡片上的<strong>「扫码登录」</strong>；四野会在你电脑上打开一个浏览器窗口。</li>
+            <li>用对应平台的手机 App 扫码，登录成功后窗口会自动关闭。</li>
+            <li>四野会立刻验证这次会话，卡片状态变成「登录已确认」即完成。四个平台各扫一次。</li>
+          </ol>
+        </section>
+
+        <section className="help-section">
+          <h2>用浏览器扩展同步（可选）</h2>
+          <p>如果你已经在 Chrome / Edge 里登录过这些平台，装一次扩展就能把登录状态直接同步过来。</p>
           <ol>
             <li>打开 <code>chrome://extensions</code>，Edge 使用 <code>edge://extensions</code>。</li>
             <li>开启“开发者模式”，点击“加载已解压的扩展程序”。</li>
             <li>选择项目中的 <code>browser_extension</code> 文件夹。</li>
-            <li>刷新四野页面，然后到“设置 · 账号与登录”检查连接。</li>
+            <li>刷新四野页面，然后到「设置 · 账号与登录」点「从浏览器同步」。</li>
           </ol>
+          <p className="mt-3">这是可选加速方式：不装扩展也能用扫码登录，两者可以混用。</p>
         </section>
 
         <section className="help-section">

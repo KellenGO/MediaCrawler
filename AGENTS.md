@@ -51,11 +51,11 @@
   git 操作走 PowerShell，分支名用连字符。
 - Python 用 `.venv/Scripts/python.exe`（该 venv 由 uv 建，原本没有 pip）。
 
-## 当前分工（截至 2026-09-14，会过期）
+## 工作区与合并（2026-09-14）
 
 | 位置 | 分支 | 负责 | 内容 |
 |---|---|---|---|
-| `MediaCrawler-main/` | `master` | 一个 agent | 本地收藏夹 / 跨平台同步持久化 / 托盘启动 |
-| `MediaCrawler-scanlogin/`（git worktree） | `feat-scan-login` | 另一个 agent | 方案 A：扫码登录升为主路径，扩展降级 |
+| `MediaCrawler-main/` | `master` | 主工作区 | 收藏、托盘与扫码登录在此集成；日常运行统一使用 dist |
+| `MediaCrawler-scanlogin/`（git worktree） | `feat-scan-login` | 保留的历史工作区 | 扫码登录分支已纳入 master；不是另一份日常运行入口 |
 
-两个目录**共用一个 `.git`**，不需要 push/pull；合并前各自先提交，合并时只需处理 `docs/` 与 `site/` 的文档冲突。
+两个目录**共用一个 `.git`**，可以分别提交，不需要 push/pull。合并前核对未提交改动，代码也可能冲突，不能只看文档。并行开发用 `SIYE_PORT` 显式分配端口；产品默认 8080，扩展目前只支持该端口。

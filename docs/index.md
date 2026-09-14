@@ -14,7 +14,8 @@
 
 - [`使用说明.md`](使用说明.md) —— 面向普通用户的操作步骤（网页版 `site/guide.html`）
 - [`favorite-metrics.md`](favorite-metrics.md) —— 收藏指标补全的来源与字段
-- [`三项功能审查与修复.md`](三项功能审查与修复.md) —— 2026-09-14 一轮修复的变更记录
+- [`history/2026-09-14-三项功能审查与修复.md`](history/2026-09-14-三项功能审查与修复.md) —— 历史修复记录，当前行为以功能 wiki 为准
+- [`repository-map.md`](repository-map.md) —— 目录用途、唯一启动入口与整理边界
 - [`decisions/`](decisions/) —— 决策记录：为什么这么选
 
 ## 发布链路（与功能无关但常要用）

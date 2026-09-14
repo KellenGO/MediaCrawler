@@ -80,7 +80,7 @@ def test_upstream_only_docs_are_not_tracked():
     tracked = _git("ls-files", "docs").splitlines()
     assert tracked, "docs/ 应至少保留本产品自己的文档"
     banned_fragments = (
-        "index.md", "hit_stopwords", "\u4f5c\u8005\u4ecb\u7ecd", "\u5fae\u4fe1\u4ea4\u6d41\u7fa4",
+        "hit_stopwords", "\u4f5c\u8005\u4ecb\u7ecd", "\u5fae\u4fe1\u4ea4\u6d41\u7fa4",
         "\u5e38\u89c1\u95ee\u9898", "\u77e5\u8bc6\u4ed8\u8d39", "\u6350\u8d60\u540d\u5355",
         "\u4ee3\u7406\u4f7f\u7528", "\u5feb\u4ee3\u7406", "\u8c4c\u8c46HTTP",
         "\u624b\u673a\u53f7\u767b\u5f55", "CDP", "mediacrawlerpro",

@@ -52,6 +52,7 @@ def main():
         errors = []
         writes = []
         failures = {"note": False, "sync": True, "cancel": True}
+        login_polls = []
 
         def route_request(route):
             req = route.request
@@ -93,6 +94,13 @@ def main():
                         "account_state": "unverified", "snippet_available": True, "hydration_available": True,
                         "fallback_active": True, "limitation_code": "account_unverified", "user_message": None,
                         "recommended_action": None, "checked_at": None}}]})
+            elif url.path == "/api/search/login" and req.method == "POST":
+                route.fulfill(json={"job_id": "scan-test", "platform": "xhs", "status": "running", "message": "测试等待扫码"})
+            elif url.path == "/api/search/login/scan-test":
+                login_polls.append(1)
+                route.fulfill(json={"job_id": "scan-test", "platform": "xhs", "status": "succeeded", "message": "测试扫码已完成"})
+            elif url.path == "/api/search/accounts/xhs/verify":
+                route.fulfill(json={"success": True, "verified": True, "platform": "xhs"})
             elif url.path.startswith("/api/"):
                 route.fulfill(status=404, json={"detail": "测试环境无此数据"})
             else:
@@ -172,6 +180,14 @@ def main():
                 expect(page.get_by_text("登录待确认", exact=True)).to_be_visible()
                 expect(page.get_by_text("可以先尝试搜索公开内容，但尚未确认账号登录。同步个人收藏前请先确认登录；若平台要求登录，再重新登录。", exact=True)).to_be_visible()
                 page.screenshot(path=str(ROOT / "build" / "review-account-wording.png"), full_page=True)
+                page.get_by_role("button", name="扫码登录", exact=True).click()
+                expect(page.get_by_text("测试等待扫码", exact=True)).to_be_visible()
+                page.evaluate("location.hash = '#/'")
+                # Playwright keeps servicing the intercepted local task polling.
+                page.wait_for_timeout(2200)
+                assert login_polls, "scan login polling stopped when leaving accounts"
+                page.evaluate("location.hash = '#/settings/accounts'")
+                expect(page.get_by_text("测试扫码已完成", exact=True)).to_be_visible()
                 assert not errors, errors
                 browser.close()
         finally:
