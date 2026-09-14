@@ -14,6 +14,7 @@ import {
   diagnosticSearchModeLabel,
   diagnosticTone,
   diagnosticToneLabel,
+  accountUsageHint,
   type AccountTone,
   type DiagnosticTone,
 } from "@/lib/accounts";
@@ -704,10 +705,11 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
               <p>{acc.verified ? `${acc.display_name || "账号已连接"} · 最近验证于 ${acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString("zh-CN") : "本次会话"}` : acc.safe_message || "先在浏览器登录平台，再同步登录状态。"}</p>
               <div className="sr-only">后台会话：{acc.profile_exists ? "已存在" : "不存在"}；浏览器后端：{acc.browser_backend ? (BACKEND_TEXT[acc.browser_backend] || acc.browser_backend) : "未知"}</div>
 
+              <p>{accountUsageHint(acc)}</p>
               {diagnostic && (
                 <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-brand-soft/35 px-2.5 py-2">
                   <DoctorCapabilityChip
-                    label={diagnostic.search_available ? "搜索可用" : "搜索不可用"}
+                    label={diagnostic.search_available ? "可尝试搜索" : "暂时无法搜索"}
                     tone={diagnostic.search_available ? "ok" : "limited"}
                   />
                   <DoctorCapabilityChip
@@ -715,7 +717,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                     tone={diagnostic.snippet_available === false ? "limited" : "ok"}
                   />
                   {diagnostic.fallback_active && (
-                    <DoctorCapabilityChip label="Browser fallback" tone="ok" />
+                    <DoctorCapabilityChip label="已启用备用搜索方式" tone="ok" />
                   )}
                 </div>
               )}

@@ -27,6 +27,7 @@ profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
   后端导入应用自己的 profile（它不搜索、不抓取、不常驻）。
 - 扩展走**一次性同步票据**（128bit、60s、单次），后端只接受 `chrome-extension://` 来源。
 - **扫码登录写入的 profile 就是搜索读取的那一个**，登录后 `_verify_login_success` 会真验证一次。
+- 账号卡片把「登录是否确认」与「是否可以尝试搜索」分开说明；未确认登录也可能搜索公开内容，不能因此承诺个人收藏同步可用。使用备用搜索方式不等于账号故障，平台限流也不等于退出登录。
 - 为什么不能「应用直接读浏览器 cookie」：**Chrome 127+ 的 App-Bound Encryption**
   让外部程序即使拿到 cookie 数据库也解不开，只有跑在浏览器进程内的扩展能合法读取。
 

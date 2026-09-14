@@ -5,6 +5,7 @@ Run after npm run build with the existing Playwright/Edge installation.
 """
 
 import json
+import argparse
 import sys
 import threading
 from functools import partial
@@ -30,6 +31,9 @@ class QuietHandler(SimpleHTTPRequestHandler):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--web-root", type=Path, default=ROOT / "webui" / "dist")
+    args = parser.parse_args()
     with TemporaryDirectory(prefix="siye-review-") as temporary:
         store = LibraryStore(Path(temporary) / "library.db")
         app = FastAPI()
@@ -42,7 +46,7 @@ def main():
         ]
         legacy = {"version": 1, "items": [{"result": r, "note": "旧备注", "savedAt": "2026-09-01T00:00:00Z"} for r in results]}
         snapshot = {"job_id": "saved", "overall": "completed", "created_at": "2026-09-01T00:00:00Z", "completed_at": "2026-09-01T00:00:00Z", "results": results, "platforms": {"xhs": {"status": "succeeded", "result_count": 1}, "bilibili": {"status": "succeeded", "result_count": 1}}}
-        server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(ROOT / "webui" / "dist")))
+        server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(args.web_root.resolve())))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         origin = f"http://127.0.0.1:{server.server_port}"
         errors = []
@@ -82,7 +86,13 @@ def main():
             elif url.path == "/api/health":
                 route.fulfill(json={"status": "ok", "environment_status": "ok", "backend_available": True})
             elif url.path == "/api/search/accounts":
-                route.fulfill(json={"accounts": []})
+                route.fulfill(json={"accounts": [{"platform": "xhs", "status": "unverified", "verified": False,
+                    "profile_exists": True, "display_name": None, "last_verified_at": None,
+                    "safe_error_code": None, "safe_message": None, "browser_backend": "edge",
+                    "diagnostic": {"platform": "xhs", "search_available": True, "search_mode": "browser_fallback",
+                        "account_state": "unverified", "snippet_available": True, "hydration_available": True,
+                        "fallback_active": True, "limitation_code": "account_unverified", "user_message": None,
+                        "recommended_action": None, "checked_at": None}}]})
             elif url.path.startswith("/api/"):
                 route.fulfill(status=404, json={"detail": "测试环境无此数据"})
             else:
@@ -146,6 +156,8 @@ def main():
                 expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
                 failures["sync"] = False
                 page.get_by_role("button", name="重新同步", exact=True).click()
+                expect(page.get_by_role("button", name="取消同步", exact=True)).to_be_enabled()
+                page.screenshot(path=str(ROOT / "build" / "review-cancel-button.png"), full_page=True)
                 page.get_by_role("button", name="取消同步", exact=True).click()
                 expect(page.get_by_role("alert")).to_contain_text("测试取消失败")
                 failures["cancel"] = False
@@ -156,6 +168,10 @@ def main():
                 page.set_viewport_size({"width": 390, "height": 844})
                 page.screenshot(path=str(ROOT / "build" / "review-favorites-mobile.png"), full_page=True)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                page.goto(origin + "/#/settings/accounts")
+                expect(page.get_by_text("登录待确认", exact=True)).to_be_visible()
+                expect(page.get_by_text("可以先尝试搜索公开内容，但尚未确认账号登录。同步个人收藏前请先确认登录；若平台要求登录，再重新登录。", exact=True)).to_be_visible()
+                page.screenshot(path=str(ROOT / "build" / "review-account-wording.png"), full_page=True)
                 assert not errors, errors
                 browser.close()
         finally:

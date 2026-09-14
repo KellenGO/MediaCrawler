@@ -1,17 +1,11 @@
 @echo off
+chcp 65001 >nul
 setlocal
-
-set "REPO_ROOT=%~dp0"
-set "START_SCRIPT=%REPO_ROOT%scripts\start.ps1"
-
-if not exist "%START_SCRIPT%" (
-    echo [X] Startup script not found: %START_SCRIPT%
+cd /d "%~dp0"
+if not exist "%~dp0dist\MediaCrawler\四野.exe" (
+    echo [ERROR] dist\MediaCrawler\四野.exe not found. Build the desktop package first.
     pause
     exit /b 1
 )
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%START_SCRIPT%" %*
-set "EXIT_CODE=%ERRORLEVEL%"
-
-if not "%EXIT_CODE%"=="0" pause
-exit /b %EXIT_CODE%
+start "" "%~dp0dist\MediaCrawler\四野.exe"
+exit /b 0

@@ -64,10 +64,22 @@ export function diagnosticTone(
 }
 
 export function diagnosticToneLabel(tone: DiagnosticTone): string {
-  if (tone === "normal") return "正常";
-  if (tone === "available") return "搜索可用";
-  if (tone === "limited") return "部分能力受限";
-  return "不可用";
+  if (tone === "normal" || tone === "available") return "可尝试搜索";
+  if (tone === "limited") return "可搜索 · 简介可能缺失";
+  return "暂时无法搜索";
+}
+
+export function accountUsageHint(acc: AccountStatusInfo): string {
+  const diagnostic = acc.diagnostic;
+  if (!diagnostic) return "暂未获取搜索状态；可以重新检查登录状态。";
+  if (!diagnostic.search_available) {
+    if (diagnostic.limitation_code === "login_required") return "上次搜索要求登录，请重新登录后再试。";
+    if (diagnostic.limitation_code === "rate_limited") return "平台暂时限制了请求，请稍后再试；不代表账号已退出登录。";
+    return "上次搜索未成功，请稍后重试；不一定是登录失效。";
+  }
+  if (!isAccountVerified(acc)) return "可以先尝试搜索公开内容，但尚未确认账号登录。同步个人收藏前请先确认登录；若平台要求登录，再重新登录。";
+  if (diagnostic.snippet_available === false) return "登录已确认，可以尝试搜索；部分结果可能没有简介，可打开原文查看。";
+  return "登录已确认，可以尝试搜索和同步收藏。实际结果仍取决于平台响应。";
 }
 
 export function diagnosticSearchModeLabel(mode: PlatformDiagnostic["search_mode"]): string {
@@ -89,9 +101,9 @@ export function diagnosticSearchModeLabel(mode: PlatformDiagnostic["search_mode"
 const ACCOUNT_STATUS_LABELS: Record<string, string> = {
   connected: "已验证",
   unverified: "未验证",
-  expired: "会话失效",
+  expired: "登录已失效",
   failed: "同步失败",
-  unavailable: "验证暂不可用",
+  unavailable: "暂未确认登录",
   verifying: "验证中",
   syncing: "同步中",
   disconnected: "未同步",
@@ -118,9 +130,9 @@ export function accountCardStatusLabel(acc: {
     return "验证请求受限";
   }
   const cardOverrides: Record<string, string> = {
-    connected: "已连接",
-    unverified: "已导入，未确认登录",
-    failed: "失败",
+    connected: "登录已确认",
+    unverified: "登录待确认",
+    failed: "登录同步失败",
   };
   return cardOverrides[acc.status] || ACCOUNT_STATUS_LABELS[acc.status] || acc.status;
 }
@@ -183,13 +195,13 @@ export function accountSummaryLabel(
   if (acc.status === "connected" && acc.verified) return "已连接";
   if (acc.status === "unverified" && acc.profile_exists) return "可公开搜索";
   if (acc.status === "unverified") return "尚未验证";
-  if (acc.status === "expired") return "会话失效";
+  if (acc.status === "expired") return "登录已失效";
   if (acc.status === "failed") return "同步失败";
   if (acc.status === "unavailable") {
     if (acc.safe_error_code === "login_verification_rate_limited") {
       return "验证受限";
     }
-    return "验证暂不可用";
+    return "暂未确认登录";
   }
   if (acc.status === "syncing") return "同步中…";
   if (acc.status === "verifying") return "验证中…";

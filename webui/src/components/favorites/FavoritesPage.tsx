@@ -169,14 +169,10 @@ export function FavoritesPage({ activeTab, onTabChange, onNavigateAccounts }: Fa
           <>
             <div className="page-heading remote-heading">
               <div><h2>跨平台收藏</h2><p className="description">从已登录的平台读取收藏，可再保存到本地。</p></div>
-              <div className="button-row">
-              {remote.canCancel && <button type="button" className="btn" disabled={remote.cancelling} onClick={() => void remote.cancel()}>
-                {remote.cancelling ? <Loader2 className="spinner" /> : <X />}{remote.cancelling ? "正在取消" : "取消同步"}
-              </button>}
-              <button type="button" className="btn primary" disabled={remote.busy || !selected.size} onClick={() => void remote.sync([...selected])}>
-                {remote.busy ? <Loader2 className="spinner" /> : <RefreshCw />}{remote.busy ? "正在同步" : data ? "重新同步" : "同步收藏"}
+              <button type="button" className="btn primary" disabled={remote.cancelling || (!remote.canCancel && (remote.busy || !selected.size))} onClick={() => remote.canCancel ? void remote.cancel() : void remote.sync([...selected])}>
+                {remote.cancelling || (remote.busy && !remote.canCancel) ? <Loader2 className="spinner" /> : remote.canCancel ? <X /> : <RefreshCw />}
+                {remote.cancelling ? "正在取消" : remote.canCancel ? "取消同步" : remote.busy ? "正在启动同步" : data ? "重新同步" : "同步收藏"}
               </button>
-              </div>
             </div>
             <div className="scope collection-scope" aria-label="收藏同步平台">
               <span className="scope-label">同步范围</span>

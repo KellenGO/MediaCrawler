@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 
 import {
   accountCardStatusLabel,
+  accountUsageHint,
   accountSummaryLabel,
   accountTone,
   consumeUnverifiedWarning,
@@ -72,7 +73,7 @@ function diagnostic(overrides: Partial<PlatformDiagnostic>): PlatformDiagnostic 
 test("Platform Doctor: XHS 未验证但 fallback 可用仍显示搜索可用", () => {
   const value = diagnostic({});
   assert.equal(diagnosticTone(value), "available");
-  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "搜索可用");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "可尝试搜索");
   assert.equal(diagnosticSearchModeLabel(value.search_mode), "浏览器备用路径");
   assert.equal(diagnosticAccountStateLabel(value.account_state), "未验证");
 });
@@ -88,7 +89,7 @@ test("Platform Doctor: 抖音搜索结果自带简介，不因没有 hydrator �
     limitation_code: null,
   });
   assert.equal(diagnosticTone(value), "normal");
-  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "正常");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "可尝试搜索");
   assert.equal(diagnosticSearchModeLabel(value.search_mode), "页面路径");
   assert.equal(diagnosticAccountStateLabel(value.account_state), "已验证");
 });
@@ -103,7 +104,7 @@ test("Platform Doctor: 搜索失败显示不可用", () => {
     limitation_code: "platform_unavailable",
   });
   assert.equal(diagnosticTone(value), "unavailable");
-  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "不可用");
+  assert.equal(diagnosticToneLabel(diagnosticTone(value)), "暂时无法搜索");
   assert.equal(diagnosticSearchModeLabel(value.search_mode), "当前不可用");
 });
 
@@ -321,9 +322,9 @@ test("accountSummaryLabel: 浮层文案（可公开搜索保留，但不计入�
   assert.equal(accountSummaryLabel({ status: "connected", verified: true, profile_exists: true, safe_error_code: null }), "已连接");
   assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: true, safe_error_code: null }), "可公开搜索");
   assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: false, safe_error_code: null }), "尚未验证");
-  assert.equal(accountSummaryLabel({ status: "expired", verified: false, profile_exists: true, safe_error_code: null }), "会话失效");
+  assert.equal(accountSummaryLabel({ status: "expired", verified: false, profile_exists: true, safe_error_code: null }), "登录已失效");
   assert.equal(accountSummaryLabel({ status: "failed", verified: false, profile_exists: true, safe_error_code: null }), "同步失败");
-  assert.equal(accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: false, safe_error_code: null }), "验证暂不可用");
+  assert.equal(accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: false, safe_error_code: null }), "暂未确认登录");
   assert.equal(accountSummaryLabel({ status: "disconnected", verified: false, profile_exists: false, safe_error_code: null }), "未同步");
 });
 
@@ -336,7 +337,7 @@ test("accountSummaryLabel: 风控 unavailable → 验证受限；普通 unavaila
   );
   assert.equal(
     accountSummaryLabel({ status: "unavailable", verified: false, profile_exists: true, safe_error_code: "login_verification_unavailable" }),
-    "验证暂不可用",
+    "暂未确认登录",
   );
 });
 
@@ -369,17 +370,24 @@ test("accountTone: 风控 unavailable 不返回 ok（不显示绿色）", () => 
 // ── 状态文案单一来源（卡片 / 诊断行 / 浮层共用同一状态枚举）──────────────
 
 test("accountCardStatusLabel: 卡片语境措辞（与浮层/诊断行语境区分）", () => {
-  assert.equal(accountCardStatusLabel({ status: "connected" }), "已连接");
-  assert.equal(accountCardStatusLabel({ status: "unverified" }), "已导入，未确认登录");
-  assert.equal(accountCardStatusLabel({ status: "failed" }), "失败");
+  assert.equal(accountCardStatusLabel({ status: "connected" }), "登录已确认");
+  assert.equal(accountCardStatusLabel({ status: "unverified" }), "登录待确认");
+  assert.equal(accountCardStatusLabel({ status: "failed" }), "登录同步失败");
 });
 
 test("accountCardStatusLabel: 与诊断行一致的状态沿用基础文案", () => {
   assert.equal(accountCardStatusLabel({ status: "disconnected" }), "未同步");
   assert.equal(accountCardStatusLabel({ status: "syncing" }), "同步中");
   assert.equal(accountCardStatusLabel({ status: "verifying" }), "验证中");
-  assert.equal(accountCardStatusLabel({ status: "expired" }), "会话失效");
-  assert.equal(accountCardStatusLabel({ status: "unavailable" }), "验证暂不可用");
+  assert.equal(accountCardStatusLabel({ status: "expired" }), "登录已失效");
+  assert.equal(accountCardStatusLabel({ status: "unavailable" }), "暂未确认登录");
+});
+
+test("账号使用提示区分公开搜索、个人收藏和平台限流", () => {
+  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({}) })).includes("尚未确认账号登录"));
+  assert.ok(accountUsageHint(acc({ status: "connected", verified: true, diagnostic: diagnostic({}) })).includes("登录已确认"));
+  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "rate_limited" }) })).includes("不代表账号已退出登录"));
+  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "login_required" }) })).includes("请重新登录"));
 });
 
 test("accountCardStatusLabel: 小红书风控特例 → 验证请求受限", () => {
