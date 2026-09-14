@@ -105,7 +105,7 @@ export function BookmarkControl({ result, library, fetchedAt }: {
   </div>;
 }
 
-export function BookmarkNote({ bookmark, onSave }: { bookmark: Bookmark; onSave: (key: string, note: string) => boolean }) {
+export function BookmarkNote({ bookmark, onSave }: { bookmark: Bookmark; onSave: (key: string, note: string) => boolean | Promise<boolean> }) {
   const [draft, setDraft] = useState(bookmark.note);
   const [editing, setEditing] = useState(false);
   const id = useId();
@@ -130,7 +130,10 @@ export function BookmarkNote({ bookmark, onSave }: { bookmark: Bookmark; onSave:
         <div className="flex gap-2">
           <button type="button" className={TOOL_BUTTON} onClick={() => { setDraft(bookmark.note); setEditing(false); }}>取消编辑</button>
           <button type="button" className={TOOL_BUTTON} disabled={draft === bookmark.note} onClick={() => {
-            if (onSave(resultKey(bookmark.result), draft)) { toast.success("备注已保存"); setEditing(false); }
+            void (async () => {
+              const saved = await onSave(resultKey(bookmark.result), draft);
+              if (saved) { toast.success("备注已保存"); setEditing(false); }
+            })();
           }}>保存备注</button>
         </div>
       </div>

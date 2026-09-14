@@ -420,7 +420,7 @@ async def _run_favorites(job_id: str, platform: str, limit: int) -> None:
             result_limit=limit, strict_errors=True, headless=True,
             reuse_http_client=True, light_page=True,
         )
-        await asyncio.wait_for(crawler.start(), timeout=180)
+        await asyncio.wait_for(crawler.start(), timeout=270)
         emit_status(job_id, platform, "succeeded" if pending else "empty")
     except asyncio.TimeoutError:
         emit_error(job_id, platform, "timed_out", "收藏夹同步超时")

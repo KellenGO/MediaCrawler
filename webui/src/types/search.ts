@@ -49,12 +49,14 @@ export interface UnifiedSearchResult {
 }
 
 export interface FavoritePlatformInfo {
+  synced_at?: string | null;
   status: PlatformStatus;
   result_count: number;
   error_summary: string | null;
 }
 
 export interface FavoritesJobResponse {
+  persistence_error?: string | null;
   job_id: string;
   overall: "running" | "completed" | "partial" | "failed";
   created_at: string;

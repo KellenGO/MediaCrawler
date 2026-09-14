@@ -12,3 +12,4 @@ pyexecjs==1.5.1
 cryptography>=45.0.7
 xhshow>=0.2.0
 websockets>=15.0.1
+pystray>=0.19.5; sys_platform == 'win32'

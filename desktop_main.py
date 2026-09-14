@@ -81,7 +81,7 @@ def _run_existing_backend() -> int:
     return 0
 
 
-def _run_server(open_browser: bool = True) -> int:
+def _run_server(open_browser: bool = True, stop_event: threading.Event | None = None) -> int:
     import uvicorn
     from api.main import app
 
@@ -103,6 +103,8 @@ def _run_server(open_browser: bool = True) -> int:
             webbrowser.open(BASE_URL)
             print(f"已打开 {BASE_URL}")
         while thread.is_alive():
+            if stop_event is not None and stop_event.is_set():
+                server.should_exit = True
             thread.join(timeout=0.5)
         return 0 if server.should_exit else 1
     except KeyboardInterrupt:

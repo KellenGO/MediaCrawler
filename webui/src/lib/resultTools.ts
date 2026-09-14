@@ -23,6 +23,23 @@ export function groupKey(result: UnifiedSearchResult): string {
   return JSON.stringify(resultSources(result).map(resultKey).sort());
 }
 
+/**
+ * 把 groupKey 还原成 resultKey 列表（与 groupKey 对称）。
+ *
+ * 结果列表按「分组」勾选，但收藏库的接口认的是单条 `platform|content_id`
+ * （见 libraryApi.splitKey），所以批量加入/移出收藏夹前必须做一次转换。
+ * 无法解析时返回空数组，由调用方决定是否提示。
+ */
+export function parseGroupKey(key: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(key);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.includes("|"));
+  } catch {
+    return [];
+  }
+}
+
 export function safeContentUrl(url: string): string | null {
   const domains = ["xiaohongshu.com", "xhslink.com", "rednote.com", "douyin.com", "bilibili.com", "zhihu.com"];
   try {

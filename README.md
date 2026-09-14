@@ -94,11 +94,12 @@
 ### 普通用户：Windows 可执行包
 
 1. 下载 `MediaCrawler-Windows-x64.zip` 并**整个解压**（不要把 EXE 单独复制出来）；
-2. 双击解压出的 `MediaCrawler.exe`，等控制台出现 backend ready；
+2. 双击解压出的 **`四野.exe`**（托盘启动器，不会弹控制台窗口）；
 3. 浏览器会自动打开，输入关键词即可搜索。
 
-包里已含 Python runtime、后端和 Web UI，不需要额外安装依赖。默认监听 `127.0.0.1:8080`，  
-使用系统 Chrome / Edge；运行期间不要删除 EXE 旁边的 `_internal`、`webui`。
+关掉页面后程序仍在后台运行；右键右下角托盘图标可「打开四野 / 打开日志目录 / 退出四野」。
+想看控制台输出时，也可以直接双击同目录的 `MediaCrawler.exe`（同一份程序，带控制台，也是后端与平台 worker 的实际入口）。
+包里已含 Python runtime、后端和 Web UI，默认监听 `127.0.0.1:8080`，使用系统 Chrome / Edge。
 
 ### 从源码运行
 

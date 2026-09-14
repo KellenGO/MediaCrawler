@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -103,6 +104,7 @@ class PlatformWorkerSupervisor:
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
             limit=2 * 1024 * 1024,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         worker = _ResidentWorker(platform=platform, proc=proc)
         worker.stderr_task = asyncio.create_task(
@@ -692,6 +694,7 @@ class SearchJobManager:
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
                 limit=2 * 1024 * 1024,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             job.mark_spawn_end(platform)
             job.procs.append(proc)

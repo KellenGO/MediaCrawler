@@ -1,8 +1,17 @@
-import type { PlatformSlug, UnifiedSearchResult } from "../types/search.js";
-import { resultKey, resultSources, safeContentUrl } from "./resultTools.js";
+/**
+ * 收藏相关的共享常量与校验。
+ *
+ * 历史说明：收藏最早存浏览器 localStorage（本文件曾有读写/备份/合并等函数），
+ * 收藏库改造（后端 /api/library + SQLite）后这些逻辑移到了后端与 libraryApi.ts，
+ * 这里只保留仍然被前端使用的部分：
+ * - ``publicResult``：把一条结果裁剪成可持久化的公开字段（入库白名单）；
+ * - ``MAX_NOTE_LENGTH`` / ``MAX_BACKUP_BYTES``：备注与备份文件的前端校验上限；
+ * - ``Bookmark``：收藏条目的前端形状。
+ */
 
-export const BOOKMARKS_KEY = "aggregate_search_bookmarks_v1";
-export const MAX_BOOKMARKS = 500;
+import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
+import { safeContentUrl } from "./resultTools.js";
+
 export const MAX_NOTE_LENGTH = 1000;
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
 
@@ -12,18 +21,15 @@ export interface Bookmark {
   fetchedAt: string | null;
   note: string;
 }
-export interface BookmarkStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const optionalText = (value: unknown): string | null => typeof value === "string" ? value : null;
 const validTime = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
 
-/** Store public DTO fields only; never persist arbitrary extra data from a response. */
-function publicResult(value: unknown): UnifiedSearchResult {
+/** Store public DTO fields only; never persist arbitrary extra data from a response.
+ *  收藏库（后端 SQLite）也复用这个白名单，保证入库内容与本地收藏一致。 */
+export function publicResult(value: unknown): UnifiedSearchResult {
   if (!isRecord(value) || !["xhs", "douyin", "bilibili", "zhihu"].includes(String(value.platform))
       || typeof value.content_id !== "string" || !value.content_id || typeof value.title !== "string"
       || typeof value.url !== "string" || !safeContentUrl(value.url)) throw new Error("收藏内容格式或原文链接无效");
@@ -46,73 +52,10 @@ function publicResult(value: unknown): UnifiedSearchResult {
     rank: typeof value.rank === "number" && Number.isFinite(value.rank) ? value.rank : 0,
     grouped_sources: null,
     collection_names: collectionNames,
+    metrics_status: ["pending", "complete", "partial", "unavailable", "failed"].includes(String(value.metrics_status))
+      ? value.metrics_status as UnifiedSearchResult["metrics_status"] : null,
+    metrics_updated_at: typeof value.metrics_updated_at === "number" && Number.isFinite(value.metrics_updated_at) ? value.metrics_updated_at : null,
+    metrics_approximate: Array.isArray(value.metrics_approximate)
+      ? value.metrics_approximate.filter((key): key is string => typeof key === "string" && key in metrics) : [],
   };
-}
-
-export function readBookmarks(storage: BookmarkStorage): Bookmark[] {
-  const raw = storage.getItem(BOOKMARKS_KEY);
-  if (raw === null) return [];
-  return parseBookmarkBackup(raw);
-}
-
-export function parseBookmarkBackup(raw: string): Bookmark[] {
-  if (new TextEncoder().encode(raw).length > MAX_BACKUP_BYTES) throw new Error("收藏备份不能超过 10 MB");
-  const data: unknown = JSON.parse(raw);
-  if (!isRecord(data) || data.version !== 1 || !Array.isArray(data.items) || data.items.length > MAX_BOOKMARKS) {
-    throw new Error("收藏数据无法读取，未覆盖原数据");
-  }
-  const seen = new Set<string>();
-  return data.items.map((item: unknown) => {
-    if (!isRecord(item) || !validTime(item.savedAt) || typeof item.note !== "string"
-        || item.note.length > MAX_NOTE_LENGTH || (item.fetchedAt !== null && !validTime(item.fetchedAt))) {
-      throw new Error("收藏数据无法读取，未覆盖原数据");
-    }
-    const result = publicResult(item.result);
-    if (seen.has(resultKey(result))) throw new Error("收藏数据包含重复条目，未覆盖原数据");
-    seen.add(resultKey(result));
-    return { result, savedAt: item.savedAt, fetchedAt: item.fetchedAt as string | null, note: item.note };
-  });
-}
-
-export function bookmarkBackup(items: Bookmark[]): string {
-  const raw = JSON.stringify({ version: 1, items });
-  return JSON.stringify({ version: 1, items: parseBookmarkBackup(raw) });
-}
-
-export function mergeBookmarkBackup(items: Bookmark[], incoming: Bookmark[]): Bookmark[] {
-  const keys = new Set(items.map((item) => resultKey(item.result)));
-  const additions = incoming.filter((item) => !keys.has(resultKey(item.result)));
-  if (items.length + additions.length > MAX_BOOKMARKS) throw new Error(`导入后超过 ${MAX_BOOKMARKS} 条，未修改现有收藏`);
-  return [...additions, ...items];
-}
-
-export function writeBookmarks(storage: BookmarkStorage, items: Bookmark[]): void {
-  if (items.length > MAX_BOOKMARKS) throw new Error(`本地收藏最多 ${MAX_BOOKMARKS} 条，请先导出并整理`);
-  storage.setItem(BOOKMARKS_KEY, JSON.stringify({ version: 1, items }));
-}
-
-export function addBookmarks(
-  items: readonly Bookmark[], results: readonly UnifiedSearchResult[], nowIso: string,
-  fetchedAt: Partial<Record<PlatformSlug, string | null>> = {}
-): Bookmark[] {
-  const byKey = new Map(items.map((item) => [resultKey(item.result), item]));
-  const additions: Bookmark[] = [];
-  for (const source of results.flatMap(resultSources)) {
-    const key = resultKey(source);
-    if (byKey.has(key)) continue; // Preserve the user's saved snapshot and note.
-    const item = {
-      result: publicResult(source), savedAt: nowIso, note: "",
-      fetchedAt: validTime(fetchedAt[source.platform]) ? fetchedAt[source.platform]! : null,
-    };
-    byKey.set(key, item);
-    additions.push(item);
-  }
-  if (byKey.size > MAX_BOOKMARKS) throw new Error(`本地收藏最多 ${MAX_BOOKMARKS} 条，请先导出并整理`);
-  return [...additions, ...items];
-}
-
-export function setBookmarkNote(items: readonly Bookmark[], key: string, note: string): Bookmark[] {
-  if (note.length > MAX_NOTE_LENGTH) throw new Error(`备注最多 ${MAX_NOTE_LENGTH} 字`);
-  if (!items.some((item) => resultKey(item.result) === key)) throw new Error("这条收藏已在其他页面移除");
-  return items.map((item) => resultKey(item.result) === key ? { ...item, note } : item);
 }

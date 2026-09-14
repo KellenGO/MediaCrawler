@@ -1,62 +1,319 @@
-import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
-import { addBookmarks, BOOKMARKS_KEY, mergeBookmarkBackup, parseBookmarkBackup, readBookmarks, setBookmarkNote, writeBookmarks, type Bookmark } from "@/lib/bookmarks";
-import { resultKey, resultSources } from "@/lib/resultTools";
+/**
+ * 收藏库 hook（后端 /api/library）。
+ *
+ * 与旧实现的区别：收藏存本机 SQLite 而不是 localStorage，因此
+ * 清缓存/换浏览器不会丢，并且支持收藏夹（一条内容可属于多个收藏夹）。
+ *
+ * 交互原则：
+ * - 写操作先乐观更新界面，失败回滚并提示，避免"点了没反应"；
+ * - 涉及 id/归属关系的操作（收藏、建夹）完成后重新拉取，保证界面与库里一致；
+ * - 旧 localStorage 收藏只提示迁移、不自动删除，迁移成功后写标记不再打扰。
+ */
 
-function load(): { items: Bookmark[]; error: string | null } {
-  try { return { items: readBookmarks(window.localStorage), error: null }; }
-  catch { return { items: [], error: "本地收藏无法读取，原数据未被修改。请检查浏览器存储权限。" }; }
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import type { PlatformSlug, UnifiedSearchResult } from "@/types/search";
+import {
+  addItems,
+  addItemsToCollection as apiAddToCollection,
+  createCollection as apiCreateCollection,
+  decideMigration,
+  deleteCollection as apiDeleteCollection,
+  describeImport,
+  exportPayload,
+  fetchCollections,
+  fetchItems,
+  importPayload,
+  LEGACY_BOOKMARKS_KEY,
+  MIGRATION_DISMISS_KEY,
+  MIGRATION_MARKER_KEY,
+  parseBackupFile,
+  removeItems,
+  removeItemsFromCollection as apiRemoveFromCollection,
+  renameCollection as apiRenameCollection,
+  toAddPayload,
+  updateNote,
+  type LibraryCollection,
+  type LibraryItem,
+} from "@/lib/libraryApi";
+import { resultKey } from "@/lib/resultTools";
+
+export interface MigrationPrompt {
+  /** 旧浏览器收藏里的条目数。 */
+  count: number;
+}
+
+interface LibraryState {
+  items: LibraryItem[];
+  collections: LibraryCollection[];
+  loading: boolean;
+  error: string | null;
+}
+
+function errorText(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+const LIBRARY_QUERY_KEY = ["local-library"];
+const EMPTY: LibraryState = { items: [], collections: [], loading: true, error: null };
+
+async function loadLibrary(): Promise<LibraryState> {
+  const [items, collections] = await Promise.all([fetchItems(), fetchCollections()]);
+  return { items, collections, loading: false, error: null };
 }
 
 export function useBookmarks() {
-  const [state, setState] = useState(load);
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: LIBRARY_QUERY_KEY, queryFn: loadLibrary, retry: false });
+  const state = query.data ?? EMPTY;
+  const pending = useRef(new Set<string>());
+  const [migration, setMigration] = useState<MigrationPrompt | null>(null);
+
+  const refresh = useCallback(async () => {
+    await client.invalidateQueries({ queryKey: LIBRARY_QUERY_KEY });
+  }, [client]);
+
+  // 旧浏览器收藏：迁移成功后永久标记；「以后再说」只在本次会话内隐藏，
+  // 下次打开还会提示——否则旧数据就再也没有迁移入口了。
   useEffect(() => {
-    const sync = (event: StorageEvent) => {
-      if (event.key === BOOKMARKS_KEY || event.key === null) setState(load());
-    };
-    window.addEventListener("storage", sync);
-    return () => window.removeEventListener("storage", sync);
+    let alreadyMigrated = false;
+    let dismissedThisSession = false;
+    let legacyRaw: string | null = null;
+    try {
+      alreadyMigrated = window.localStorage.getItem(MIGRATION_MARKER_KEY) === "1";
+      dismissedThisSession = window.sessionStorage.getItem(MIGRATION_DISMISS_KEY) === "1";
+      legacyRaw = window.localStorage.getItem(LEGACY_BOOKMARKS_KEY);
+    } catch {
+      return;
+    }
+    if (alreadyMigrated || dismissedThisSession) return;
+    const decision = decideMigration({ legacyRaw, alreadyMigrated: false });
+    if (decision.shouldOffer) setMigration({ count: decision.count });
   }, []);
 
-  const update = useCallback((change: (items: Bookmark[]) => Bookmark[]): boolean => {
+  const toggle = useCallback(
+    async (result: UnifiedSearchResult, fetchedAt: Partial<Record<PlatformSlug, string | null>> = {}) => {
+      const entries = toAddPayload([result], fetchedAt);
+      if (!entries.length) {
+        toast.error("这条内容的格式无法收藏");
+        return;
+      }
+      const keys = entries.map((entry) => resultKey(entry.result));
+      if (query.isPending || query.isError || keys.some((key) => pending.current.has(key))) return;
+      keys.forEach((key) => pending.current.add(key));
+      const existing = new Set(state.items.map((item) => item.key));
+      const allSaved = keys.every((key) => existing.has(key));
+
+      // 服务端是唯一真源：不 optimistic 更新。这样快速连点只会产生幂等的
+      // 重复请求（后端按 platform|content_id 去重），不会出现"想取消却变成收藏"。
+      try {
+        if (allSaved) await removeItems(keys);
+        else {
+          const stats = await addItems(entries);
+          if (stats.skipped) toast.warning(describeImport(stats));
+        }
+        await refresh();
+      } catch (error) {
+        toast.error(errorText(error, allSaved ? "取消收藏失败" : "收藏失败，请稍后重试"));
+      } finally {
+        keys.forEach((key) => pending.current.delete(key));
+      }
+    },
+    [refresh, state.items, query.isPending, query.isError],
+  );
+
+  const saveNote = useCallback(
+    async (key: string, note: string) => {
+      if (pending.current.has(key)) return false;
+      pending.current.add(key);
+      try {
+        await updateNote(key, note);
+        await refresh();
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "备注未保存，请重试"));
+        return false;
+      } finally {
+        pending.current.delete(key);
+      }
+    },
+    [refresh],
+  );
+
+  const importBackup = useCallback(
+    async (raw: string) => {
+      let payload: unknown;
+      try {
+        payload = parseBackupFile(raw);
+      } catch (error) {
+        toast.error(errorText(error, "备份文件无法读取"));
+        return false;
+      }
+      try {
+        const stats = await importPayload(payload);
+        await refresh();
+        toast.success(describeImport(stats));
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "导入失败，现有收藏未被修改"));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
+  const exportBackup = useCallback(async (): Promise<string | null> => {
     try {
-      // Read before each edit so sequential edits from another tab are preserved.
-      const storage = window.localStorage;
-      const next = change(readBookmarks(storage));
-      writeBookmarks(storage, next);
-      setState({ items: next, error: null });
-      return true;
+      const payload = await exportPayload();
+      return JSON.stringify(payload, null, 2);
     } catch (error) {
-      const message = error instanceof Error && error.name === "Error" ? error.message
-        : "收藏未保存：浏览器存储不可用或空间不足。请先导出已有收藏。";
-      toast.error(message);
-      return false;
+      toast.error(errorText(error, "导出失败，请稍后重试"));
+      return null;
     }
   }, []);
 
-  const toggle = useCallback((result: UnifiedSearchResult, fetchedAt: Partial<Record<PlatformSlug, string | null>> = {}) => {
-    update((items) => {
-      const keys = new Set(resultSources(result).map(resultKey));
-      const existing = new Set(items.map((item) => resultKey(item.result)));
-      return [...keys].every((key) => existing.has(key))
-        ? items.filter((item) => !keys.has(resultKey(item.result)))
-        : addBookmarks(items, [result], new Date().toISOString(), fetchedAt);
-    });
-  }, [update]);
+  const createCollection = useCallback(
+    async (name: string) => {
+      try {
+        await apiCreateCollection(name);
+        await refresh();
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "新建收藏夹失败"));
+        return false;
+      }
+    },
+    [refresh],
+  );
 
-  const saveNote = useCallback((key: string, note: string) => update((items) => setBookmarkNote(items, key, note)), [update]);
-  const importBackup = useCallback((raw: string) => {
-    let added = 0;
-    const saved = update((items) => {
-      const next = mergeBookmarkBackup(items, parseBookmarkBackup(raw));
-      added = next.length - items.length;
-      return next;
-    });
-    if (saved) toast.success(`已导入 ${added} 条收藏，重复内容保留现有快照和备注`);
-    return saved;
-  }, [update]);
-  return { ...state, toggle, saveNote, importBackup };
+  const renameCollection = useCallback(
+    async (id: number, name: string) => {
+      try {
+        await apiRenameCollection(id, name);
+        await refresh();
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "重命名失败"));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
+  const deleteCollection = useCallback(
+    async (id: number) => {
+      try {
+        await apiDeleteCollection(id);
+        await refresh();
+        toast.success("收藏夹已删除，其中的内容已保留");
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "删除收藏夹失败"));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
+  const addToCollection = useCallback(
+    async (keys: string[], collectionId: number) => {
+      try {
+        await apiAddToCollection(keys, collectionId);
+        await refresh();
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "加入收藏夹失败"));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
+  const removeFromCollection = useCallback(
+    async (keys: string[], collectionId: number) => {
+      try {
+        await apiRemoveFromCollection(keys, collectionId);
+        await refresh();
+        return true;
+      } catch (error) {
+        toast.error(errorText(error, "移出收藏夹失败"));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
+  const runMigration = useCallback(async () => {
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(LEGACY_BOOKMARKS_KEY);
+    } catch {
+      raw = null;
+    }
+    if (!raw) {
+      setMigration(null);
+      return;
+    }
+    let payload: unknown;
+    try {
+      payload = parseBackupFile(raw);
+    } catch (error) {
+      toast.error(errorText(error, "旧收藏无法读取，未做任何修改"));
+      return;
+    }
+    try {
+      const stats = await importPayload(payload);
+      await refresh();
+      try {
+        if (stats.skipped === 0) window.localStorage.setItem(MIGRATION_MARKER_KEY, "1");
+      } catch {
+        /* 标记写不进去也不影响已导入的数据 */
+      }
+      if (stats.skipped === 0) {
+        setMigration(null);
+        toast.success(`旧收藏迁移完成：${describeImport(stats)}`);
+      } else {
+        toast.warning(`旧收藏尚未全部迁移：${describeImport(stats)}。旧数据与迁移入口已保留。`);
+      }
+    } catch (error) {
+      toast.error(errorText(error, "迁移失败，旧收藏仍然保留"));
+    }
+  }, [refresh]);
+
+  const dismissMigration = useCallback(() => {
+    try {
+      // 只在本次会话内隐藏：下次打开程序仍会提示，保证旧数据始终有迁移入口。
+      window.sessionStorage.setItem(MIGRATION_DISMISS_KEY, "1");
+    } catch {
+      /* 忽略存储权限问题 */
+    }
+    setMigration(null);
+  }, []);
+
+  return {
+    items: state.items,
+    collections: state.collections,
+    loading: query.isPending,
+    error: query.error ? errorText(query.error, "收藏库暂时不可用，请重试") : null,
+    migration,
+    refresh,
+    toggle,
+    saveNote,
+    importBackup,
+    exportBackup,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    addToCollection,
+    removeFromCollection,
+    runMigration,
+    dismissMigration,
+  };
 }
 
 export type BookmarkLibrary = ReturnType<typeof useBookmarks>;

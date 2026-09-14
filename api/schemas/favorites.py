@@ -10,7 +10,9 @@ from aggregate_search.models import PLATFORM_SLUGS, PlatformSlug, PlatformStatus
 
 class FavoritesJobRequest(BaseModel):
     platforms: List[PlatformSlug] = Field(default_factory=lambda: PLATFORM_SLUGS.copy(), min_length=1)
-    limit_per_platform: int = Field(default=20, ge=1, le=40)
+    # 每个平台的目标总量（不是单次请求量）：worker 会按平台允许的分页方式逐页读取。
+    # 默认保持 20 保守取值，前端「同步收藏」显式传 100。
+    limit_per_platform: int = Field(default=20, ge=1, le=100)
 
     @field_validator("platforms")
     @classmethod
@@ -24,6 +26,7 @@ class FavoritePlatformInfo(BaseModel):
     status: PlatformStatus = "pending"
     result_count: int = 0
     error_summary: Optional[str] = None
+    synced_at: Optional[datetime] = None
 
 
 class FavoritesJobResponse(BaseModel):
@@ -33,3 +36,4 @@ class FavoritesJobResponse(BaseModel):
     completed_at: Optional[datetime] = None
     platforms: Dict[str, FavoritePlatformInfo]
     results: List[UnifiedSearchResult]
+    persistence_error: Optional[str] = None

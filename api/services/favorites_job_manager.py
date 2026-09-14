@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -12,10 +13,12 @@ from aggregate_search.protocol import WorkerRequest, parse_event_line
 from base.runtime_paths import application_root
 from ..schemas.favorites import FavoritePlatformInfo, FavoritesJobRequest, FavoritesJobResponse
 from .accounts import mark_login_required_from_search
+from .remote_favorites_store import get_remote_favorites_store
 
 _ROOT = application_root()
 _WORKER = str(_ROOT / "aggregate_search" / "worker.py")
-_TIMEOUT = 190
+# 每个平台最多取 100 条时，分页请求会明显变多，超时相应放宽。
+_TIMEOUT = 300
 
 
 def _command() -> List[str]:
@@ -35,6 +38,7 @@ class _Job:
         self.items: Dict[str, List[UnifiedSearchResult]] = {p: [] for p in self.order}
         self.task: Optional[asyncio.Task] = None
         self.procs: List[asyncio.subprocess.Process] = []
+        self.persistence_error: Optional[str] = None
 
     def terminal(self) -> bool:
         return self.completed_at is not None
@@ -61,7 +65,8 @@ class _Job:
             "completed" if success == len(statuses) else "partial" if success or merged else "failed")
         return FavoritesJobResponse(
             job_id=self.job_id, overall=overall, created_at=self.created_at,
-            completed_at=self.completed_at, platforms=self.platforms, results=merged)
+            completed_at=self.completed_at, platforms=self.platforms, results=merged,
+            persistence_error=self.persistence_error)
 
 
 class FavoritesJobManager:
@@ -81,28 +86,73 @@ class FavoritesJobManager:
         job = _Job(request)
         self._active = self._recent = job
         job.task = asyncio.create_task(self._run(job), name=f"favorites-{job.job_id}")
-        return job.response()
+        return await self._snapshot(job)
 
     async def get(self, job_id: str) -> Optional[FavoritesJobResponse]:
         job = self._active if self._active and self._active.job_id == job_id else self._recent
-        return job.response() if job and job.job_id == job_id else None
+        return await self._snapshot(job) if job and job.job_id == job_id else None
+
+    async def _snapshot(self, job: Optional[_Job] = None) -> Optional[FavoritesJobResponse]:
+        # 始终合并持久化内容；局部同步/失败不能让其他平台或旧条目消失。
+        try:
+            saved = await asyncio.to_thread(lambda: get_remote_favorites_store().load())
+        except Exception:
+            if job is None:
+                raise RuntimeError("本机同步收藏读取失败，请检查磁盘与数据库") from None
+            saved = None
+            job.persistence_error = "本机收藏读取失败，当前仅显示本次同步结果"
+        if job is None:
+            return FavoritesJobResponse(**saved) if saved else None
+        response = job.response()
+        if saved:
+            previous = FavoritesJobResponse(**saved)
+            rows = {(r.platform, r.content_id): r for r in previous.results}
+            rows.update({(r.platform, r.content_id): r for r in response.results})
+            response.results = list(rows.values())
+            response.platforms = {**previous.platforms, **response.platforms}
+        return response
 
     async def latest(self) -> Optional[FavoritesJobResponse]:
-        """Return the most recent favourites job so the page can restore it.
+        """Return the most recent favourites snapshot for the page to restore.
 
-        The snapshot (including per-platform status, results and the original
-        ``completed_at``) lives in process memory only, so the favourites page
-        can render immediately after navigation or a browser refresh without
-        re-reading every platform. It is dropped when the backend restarts,
-        which is also when the cached copy would be gone anyway.
+        Prefers the in-memory job (freshest), and falls back to the copy persisted
+        in the local SQLite library so a backend restart does not force the user to
+        re-sync every platform. Both paths are local reads: they never contact a
+        platform. ``completed_at`` is the original sync time, which the page shows
+        as the snapshot's age.
         """
-        return self._recent.response() if self._recent else None
+        return await self._snapshot(self._recent)
 
     async def _run(self, job: _Job) -> None:
+        tasks = [asyncio.create_task(self._run_platform(job, platform)) for platform in job.order]
         try:
-            await asyncio.gather(*(self._run_platform(job, platform) for platform in job.order))
+            await asyncio.gather(*tasks)
         finally:
+            # Cancellation is complete only after every platform has saved its partial results.
+            await asyncio.gather(*tasks, return_exceptions=True)
             job.completed_at = datetime.now(timezone.utc)
+
+    async def cancel(self, job_id: str) -> Optional[FavoritesJobResponse]:
+        job = self._active if self._active and self._active.job_id == job_id else self._recent
+        if not job or job.job_id != job_id:
+            return None
+        if job.task and not job.task.done():
+            if not job.task.cancelling():
+                job.task.cancel()
+            await asyncio.shield(asyncio.gather(job.task, return_exceptions=True))
+        # A task cancelled before its first turn has no platform cleanup to run.
+        for platform, info in job.platforms.items():
+            if info.status in ("pending", "running"):
+                info.status, info.error_summary = "cancelled", "同步已取消"
+                info.synced_at = datetime.now(timezone.utc)
+                try:
+                    await asyncio.to_thread(lambda p=platform: get_remote_favorites_store().save_platform(
+                        p, [item.model_dump(mode="json") for item in job.items[p]],
+                        status="cancelled", error_summary="同步已取消", requested_limit=job.limit))
+                except Exception:
+                    job.persistence_error = "同步结果未能保存到本机，请检查磁盘空间后重试"
+        job.completed_at = job.completed_at or datetime.now(timezone.utc)
+        return await self._snapshot(job)
 
     async def _run_platform(self, job: _Job, platform: str) -> None:
         info = job.platforms[platform]
@@ -114,7 +164,8 @@ class FavoritesJobManager:
             proc = await asyncio.create_subprocess_exec(
                 *_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=str(_ROOT), env=env,
-                limit=2 * 1024 * 1024)
+                limit=2 * 1024 * 1024,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             job.procs.append(proc)
             payload = WorkerRequest(job_id=job.job_id, mode="favorites", platform=platform,
                                     limit=job.limit).model_dump_json().encode("utf-8") + b"\n"
@@ -153,7 +204,18 @@ class FavoritesJobManager:
                         break
                 return done
 
-            done = await asyncio.wait_for(read(), timeout=_TIMEOUT)
+            # 持续排空 stderr，避免大量日志填满管道后 worker 卡死。
+            async def drain_errors() -> None:
+                if proc.stderr:
+                    while await proc.stderr.read(65536):
+                        pass
+
+            stderr_task = asyncio.create_task(drain_errors())
+            try:
+                done = await asyncio.wait_for(read(), timeout=_TIMEOUT)
+            finally:
+                stderr_task.cancel()
+                await asyncio.gather(stderr_task, return_exceptions=True)
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5)
             except asyncio.TimeoutError:
@@ -176,6 +238,29 @@ class FavoritesJobManager:
                     pass
             if proc in job.procs:
                 job.procs.remove(proc)
+            # 逐平台落库：本平台失败也保留其他平台已保存的数据，
+            # 且不删除"这次没取到"的旧条目（见 remote_favorites_store 的说明）。
+            # 任务被取消（后端关闭）时不能落库成 running——否则前端会一直转圈。
+            current_task = asyncio.current_task()
+            was_cancelled = current_task is not None and current_task.cancelling() > 0
+            effective_status = info.status
+            effective_error = info.error_summary
+            if was_cancelled and effective_status in ("running", "pending"):
+                effective_status = "cancelled"
+                effective_error = "同步已取消"
+            info.status = effective_status
+            info.error_summary = effective_error
+            info.synced_at = datetime.now(timezone.utc)
+            try:
+                await asyncio.to_thread(lambda: get_remote_favorites_store().save_platform(
+                    platform,
+                    [item.model_dump(mode="json") for item in job.items[platform]],
+                    status=effective_status,
+                    error_summary=effective_error,
+                    requested_limit=job.limit,
+                ))
+            except Exception:
+                job.persistence_error = "同步结果未能保存到本机，关闭程序后可能丢失，请检查磁盘空间后重试"
 
     async def cleanup(self) -> None:
         job = self._active

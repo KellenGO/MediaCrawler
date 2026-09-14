@@ -447,6 +447,7 @@ dependencies = [
     { name = "playwright" },
     { name = "pydantic" },
     { name = "pyexecjs" },
+    { name = "pystray", marker = "sys_platform == 'win32'" },
     { name = "redis" },
     { name = "tenacity" },
     { name = "uvicorn" },
@@ -473,6 +474,7 @@ requires-dist = [
     { name = "playwright", specifier = ">=1.61.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyexecjs", specifier = "==1.5.1" },
+    { name = "pystray", marker = "sys_platform == 'win32'", specifier = ">=0.19.5" },
     { name = "redis", specifier = "~=4.6.0" },
     { name = "tenacity", specifier = "==8.2.2" },
     { name = "uvicorn", specifier = "==0.29.0" },
@@ -968,6 +970,18 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/26/60/d881fa1ba8c160c18d8e6f782bb16ec4640c08bc08fc50f704c368ad4f9e/pyinstaller_hooks_contrib-2026.7.tar.gz", hash = "sha256:5fbcaacb22c4f4aac869a127dce283f67a4b4cfcc37d496f2446603e6d68aefa", size = 175992, upload-time = "2026-08-24T21:26:58.713Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/0a/67/350377af7b50416344ab8792756d414eef7629c618a73e9a0b13bb1552d9/pyinstaller_hooks_contrib-2026.7-py3-none-any.whl", hash = "sha256:24257a04c7a5a7a034cf28e39dcee20fbeeb9f043076729480f2e1b69904408a", size = 459445, upload-time = "2026-08-24T21:26:57.274Z" },
+]
+
+[[package]]
+name = "pystray"
+version = "0.19.5"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "pillow" },
+    { name = "six" },
+]
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5c/64/927a4b9024196a4799eba0180e0ca31568426f258a4a5c90f87a97f51d28/pystray-0.19.5-py2.py3-none-any.whl", hash = "sha256:a0c2229d02cf87207297c22d86ffc57c86c227517b038c0d3c59df79295ac617" },
 ]
 
 [[package]]

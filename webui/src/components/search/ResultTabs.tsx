@@ -22,6 +22,11 @@ interface ResultTabsProps {
   library?: BookmarkLibrary;
   savedView?: boolean;
   fetchedAt?: Partial<Record<PlatformSlug, string | null>>;
+  /** 勾选状态变化时回调（收藏夹页用同一套勾选做批量加入 / 移出）。 */
+  onSelectionChange?: (keys: string[]) => void;
+  /** 勾选工具按钮在收起状态的文案，默认“导出 / 复制”。 */
+  selectionToolLabel?: string;
+  selectionResetKey?: number;
 }
 
 type TabKey = "all" | PlatformSlug;
@@ -52,12 +57,20 @@ export function ResultTabs({
   library,
   savedView = false,
   fetchedAt = {},
+  onSelectionChange,
+  selectionToolLabel,
+  selectionResetKey,
 }: ResultTabsProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("all");
   const [filters, setFilters] = useState<ResultFilters>({ ...DEFAULT_FILTERS });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportOpen, setExportOpen] = useState(false);
   const nowMs = useMemo(() => Date.now(), [results, filters]);
+
+  // 把勾选结果同步给外部（收藏夹页据此做批量加入 / 移出）
+  useEffect(() => {
+    onSelectionChange?.([...selected]);
+  }, [selected, onSelectionChange]);
 
   // 五个固定标签始终可见；合法性判断仍走生产纯函数 resolveActiveTab，
   // 当激活标签不在可见集合时回退到"全部"（lib 内已直接测试）。
@@ -78,7 +91,7 @@ export function ResultTabs({
   }, [activeTab, effectiveTab]);
 
   const hydrationOrderRef = useRef<{ signature: string; keys: string[] } | null>(null);
-  useEffect(() => setSelected(new Set()), [jobId, effectiveTab, filters]);
+  useEffect(() => setSelected(new Set()), [jobId, effectiveTab, filters, selectionResetKey]);
   useEffect(() => setExportOpen(false), [jobId]);
 
   // 先按当前标签筛选，再按所选模式排序（纯前端计算，不发任何请求）。
@@ -159,7 +172,7 @@ export function ResultTabs({
           <input aria-label="结果内关键词" className="field filter-input" maxLength={200} placeholder={`在${savedView ? "收藏" : "结果"}中查找…`} value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} />
           {filters.query && <button type="button" className="text-link" onClick={() => setFilters({ ...filters, query: "" })}>清除筛选</button>}
         </div>
-        <button type="button" className="text-link" aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); setSelected(new Set()); }}>{exportOpen ? "收起导出" : "导出 / 复制"}</button>
+        <button type="button" className="text-link" aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); setSelected(new Set()); }}>{exportOpen ? (selectionToolLabel ? "收起" : "收起导出") : (selectionToolLabel ?? "导出 / 复制")}</button>
       </div>
 
       {/* 结果卡片 */}

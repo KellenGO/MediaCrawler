@@ -15,11 +15,13 @@ from media_platform.zhihu.core import ZhihuCrawler
 
 def test_favorites_request_contract_is_bounded_and_unique():
     assert FavoritesJobRequest().limit_per_platform == 20
+    # 每个平台的目标总量可以到 100（分页逐页读取，不是单次请求 100 条）
+    assert FavoritesJobRequest(limit_per_platform=100).limit_per_platform == 100
     assert WorkerRequest(job_id="j", mode="favorites", platform="xhs").mode == "favorites"
     with pytest.raises(ValidationError):
         FavoritesJobRequest(platforms=["xhs", "xhs"])
     with pytest.raises(ValidationError):
-        FavoritesJobRequest(limit_per_platform=41)
+        FavoritesJobRequest(limit_per_platform=101)
 
 
 def test_folder_metadata_survives_bilibili_and_zhihu_adaptation():
@@ -156,9 +158,13 @@ def test_xhs_count_parsing_covers_chinese_units(raw, expected):
 
 
 @pytest.mark.asyncio
-async def test_latest_favorites_snapshot_can_be_restored():
+async def test_latest_favorites_snapshot_can_be_restored(tmp_path, monkeypatch):
     """页面重新进入时应能取回上一次结果，不必重新同步。"""
     from api.services.favorites_job_manager import FavoritesJobManager
+    from api.services.remote_favorites_store import RemoteFavoritesStore
+
+    store = RemoteFavoritesStore(tmp_path / "library.db")
+    monkeypatch.setattr("api.services.favorites_job_manager.get_remote_favorites_store", lambda: store)
 
     manager = FavoritesJobManager()
     assert await manager.latest() is None
@@ -209,3 +215,33 @@ async def test_folder_fetchers_flatten_and_report_duplicate_membership(monkeypat
                          _result_sink_call=zh_batches.append)
     await ZhihuCrawler.fetch_favorites(zh)
     assert zh_batches[0][0]["_collection_name"] == "精选"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["xhs", "douyin"])
+async def test_hundred_favorites_use_bounded_pages(platform, monkeypatch):
+    from unittest.mock import AsyncMock
+    import config
+    monkeypatch.setattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)
+    monkeypatch.setattr("aggregate_search.favorite_metrics.enrich_favorites", AsyncMock())
+    counts = []
+    received = []
+    async def fetch(cursor, count, *_):
+        offset = int(cursor or 0)
+        counts.append(count)
+        rows = [{"note_id": str(n), "aweme_id": str(n)} for n in range(offset, offset + count)]
+        return {"notes": rows, "aweme_list": rows, "has_more": True,
+                "cursor": str(offset + count) if platform == "xhs" else offset + count}
+    crawler = SimpleNamespace(
+        _result_limit=lambda: 100, _result_sink_call=received.extend,
+        context_page=SimpleNamespace(evaluate=AsyncMock(return_value="self-user")),
+        xhs_client=SimpleNamespace(get_collected_notes=fetch),
+        dy_client=SimpleNamespace(get_collected_awemes=fetch),
+    )
+    if platform == "xhs":
+        await XiaoHongShuCrawler.fetch_favorites(crawler)
+    else:
+        await DouYinCrawler.fetch_favorites(crawler)
+    assert len(received) == 100
+    assert len({row["note_id"] for row in received}) == 100
+    assert max(counts) <= (30 if platform == "xhs" else 20)

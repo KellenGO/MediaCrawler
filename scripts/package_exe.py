@@ -17,6 +17,7 @@ FORBIDDEN_PARTS = {
 def validate(distribution: Path) -> None:
     required = (
         distribution / "MediaCrawler.exe",
+        distribution / "四野.exe",
         distribution / "browser_extension",
         distribution / "LICENSE",
         distribution / "README.md",
@@ -26,6 +27,10 @@ def validate(distribution: Path) -> None:
                if not path.exists()]
     if missing:
         raise AssertionError(f"missing executable entries: {', '.join(missing)}")
+    # 运行过的目录可能含本机收藏数据库；禁止随发行包上传。
+    for name in ("data", ".cache"):
+        if (distribution / name).exists():
+            raise AssertionError(f"user data must not be packaged: {name}")
 
     bad = []
     for path in distribution.rglob("*"):

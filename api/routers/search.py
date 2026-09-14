@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -91,6 +92,7 @@ async def _run_login_worker(platform: str, job_id: str):
             *_worker_command(),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, cwd=str(_PROJECT_ROOT), env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         _login_procs[job_id] = proc
 
@@ -394,9 +396,20 @@ async def get_latest_favorites_job():
     Declared before ``/favorites/jobs/{job_id}`` so ``latest`` is not captured
     as a job id.
     """
-    response = await favorites_job_manager.latest()
+    try:
+        response = await favorites_job_manager.latest()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="本机同步收藏读取失败，请检查磁盘与数据库") from None
     if response is None:
         raise HTTPException(status_code=404, detail="暂无可恢复的收藏夹结果。")
+    return response
+
+
+@search_router.post("/favorites/jobs/{job_id}/cancel", response_model=FavoritesJobResponse)
+async def cancel_favorites_job(job_id: str):
+    response = await favorites_job_manager.cancel(job_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="收藏同步任务不存在")
     return response
 
 

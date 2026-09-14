@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import type { FavoritesJobResponse, PlatformSlug } from "@/types/search";
 
@@ -8,6 +8,7 @@ function isNotFound(error: unknown): boolean {
 }
 
 export function useFavorites() {
+  const queryClient = useQueryClient();
   const [jobId, setJobId] = useState<string | null>(null);
   const adopted = useRef(false);
 
@@ -33,12 +34,18 @@ export function useFavorites() {
 
   const create = useMutation({
     mutationFn: async (platforms: PlatformSlug[]) => {
+      // 100 是每个平台的目标总量，worker 会按平台分页逐页读取；
+      // 实际能取多少取决于平台的分页接口、账号状态与限流情况。
       const { data } = await axios.post<FavoritesJobResponse>("/api/search/favorites/jobs", {
-        platforms, limit_per_platform: 20,
+        platforms, limit_per_platform: 100,
       });
       return data;
     },
-    onSuccess: (data) => setJobId(data.job_id),
+    onSuccess: (data) => {
+      adopted.current = true;
+      queryClient.setQueryData(["favorites-job", data.job_id], data);
+      setJobId(data.job_id);
+    },
   });
 
   const poll = useQuery({
@@ -61,18 +68,39 @@ export function useFavorites() {
     if (restored.overall === "running") setJobId(restored.job_id);
   }, [latest.data]);
 
+  const cancel = useMutation({
+    mutationFn: async (id: string) => (await axios.post<FavoritesJobResponse>(
+      `/api/search/favorites/jobs/${id}/cancel`)).data,
+    onSuccess: async (snapshot) => {
+      await queryClient.cancelQueries({ queryKey: ["favorites-job", snapshot.job_id] });
+      queryClient.setQueryData(["favorites-job", snapshot.job_id], snapshot);
+      queryClient.setQueryData(["favorites-latest"], snapshot);
+    },
+  });
+
   const refresh = useCallback(async (platforms: PlatformSlug[]) => {
-    setJobId(null);
+    cancel.reset();
     create.reset();
-    return create.mutateAsync(platforms);
-  }, [create]);
+    // 创建失败时保留上一批内容；错误由页面展示，避免未处理 Promise rejection。
+    try {
+      return await create.mutateAsync(platforms);
+    } catch {
+      return null;
+    }
+  }, [create, cancel]);
 
   const data = poll.data ?? create.data ?? latest.data ?? null;
 
   return {
     sync: refresh,
+    cancel: async () => {
+      if (!data || cancel.isPending) return;
+      try { await cancel.mutateAsync(data.job_id); } catch { /* Show the error and allow retry. */ }
+    },
+    canCancel: data?.overall === "running" && !create.isPending,
+    cancelling: cancel.isPending,
     data,
-    busy: create.isPending || data?.overall === "running",
-    error: create.error || (jobId ? poll.error : null),
+    busy: create.isPending || cancel.isPending || (data?.overall === "running" && !poll.error),
+    error: cancel.error || create.error || (jobId ? poll.error : null) || latest.error,
   };
 }

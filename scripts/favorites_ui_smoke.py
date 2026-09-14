@@ -1,0 +1,168 @@
+"""Exercise the built favorites UI against an isolated SQLite library.
+
+No real accounts, user library, or platform requests are accessed.
+Run after npm run build with the existing Playwright/Edge installation.
+"""
+
+import json
+import sys
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from playwright.sync_api import expect, sync_playwright
+
+from api.routers.library import library_router
+from api.services.library_store import LibraryStore, get_library_store
+
+
+class QuietHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+def main():
+    with TemporaryDirectory(prefix="siye-review-") as temporary:
+        store = LibraryStore(Path(temporary) / "library.db")
+        app = FastAPI()
+        app.include_router(library_router)
+        app.dependency_overrides[get_library_store] = lambda: store
+        client = TestClient(app)
+        results = [
+            {"platform": "xhs", "content_id": "a", "title": "图文收藏测试", "url": "https://www.xiaohongshu.com/explore/a"},
+            {"platform": "bilibili", "content_id": "b", "title": "视频收藏测试", "url": "https://www.bilibili.com/video/BVtest", "content_type": "video"},
+        ]
+        legacy = {"version": 1, "items": [{"result": r, "note": "旧备注", "savedAt": "2026-09-01T00:00:00Z"} for r in results]}
+        snapshot = {"job_id": "saved", "overall": "completed", "created_at": "2026-09-01T00:00:00Z", "completed_at": "2026-09-01T00:00:00Z", "results": results, "platforms": {"xhs": {"status": "succeeded", "result_count": 1}, "bilibili": {"status": "succeeded", "result_count": 1}}}
+        server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(ROOT / "webui" / "dist")))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        origin = f"http://127.0.0.1:{server.server_port}"
+        errors = []
+        writes = []
+        failures = {"note": False, "sync": True, "cancel": True}
+
+        def route_request(route):
+            req = route.request
+            url = urlsplit(req.url)
+            if not req.url.startswith(origin + "/"):
+                route.abort()
+            elif url.path.startswith("/api/library/"):
+                if failures["note"] and req.method == "PATCH" and "/items/" in url.path:
+                    route.fulfill(status=503, json={"detail": "测试磁盘写入失败"})
+                    return
+                if req.method != "GET":
+                    writes.append((req.method, url.path))
+                response = client.request(req.method, url.path + ("?" + url.query if url.query else ""), content=req.post_data, headers={"content-type": "application/json"})
+                route.fulfill(status=response.status_code, body=response.content, content_type="application/json")
+            elif url.path == "/api/search/favorites/jobs/latest":
+                route.fulfill(json=snapshot)
+            elif url.path == "/api/search/favorites/jobs" and req.method == "POST":
+                if failures["sync"]:
+                    route.fulfill(status=503, json={"detail": "测试同步失败"})
+                else:
+                    snapshot.update(job_id="active", overall="running", completed_at=None)
+                    route.fulfill(status=201, json=snapshot)
+            elif url.path == "/api/search/favorites/jobs/active/cancel":
+                if failures["cancel"]:
+                    route.fulfill(status=503, json={"detail": "测试取消失败"})
+                else:
+                    snapshot.update(overall="partial", completed_at="2026-09-14T00:00:00Z")
+                    snapshot["platforms"]["xhs"].update(status="cancelled", error_summary="同步已取消")
+                    route.fulfill(json=snapshot)
+            elif url.path == "/api/search/favorites/jobs/active":
+                route.fulfill(json=snapshot)
+            elif url.path == "/api/health":
+                route.fulfill(json={"status": "ok", "environment_status": "ok", "backend_available": True})
+            elif url.path == "/api/search/accounts":
+                route.fulfill(json={"accounts": []})
+            elif url.path.startswith("/api/"):
+                route.fulfill(status=404, json={"detail": "测试环境无此数据"})
+            else:
+                route.continue_()
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(channel="msedge", headless=True)
+                context = browser.new_context(viewport={"width": 1440, "height": 1000})
+                context.add_init_script("localStorage.setItem('mediacrawler_license_accepted','true'); localStorage.setItem('aggregate_search_bookmarks_v1'," + json.dumps(json.dumps(legacy)) + ");")
+                context.route("**/*", route_request)
+                page = context.new_page()
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.goto(origin + "/#/favorites/local")
+                page.get_by_role("button", name="迁移到本机收藏库", exact=True).click()
+                expect(page.get_by_text("图文收藏测试", exact=True)).to_be_visible()
+                assert store.stats()["total"] == 2
+                page.get_by_role("button", name="新建收藏夹", exact=True).click()
+                page.get_by_role("textbox", name="新收藏夹名称").fill("跨平台学习")
+                page.get_by_role("button", name="创建收藏夹", exact=True).click()
+                expect(page.get_by_role("button", name="跨平台学习 0", exact=True)).to_be_visible()
+                page.get_by_role("button", name="批量管理", exact=True).click()
+                page.get_by_role("checkbox", name="选择当前全部结果").check()
+                page.get_by_label("加入收藏夹", exact=True).select_option(label="跨平台学习")
+                expect(page.get_by_role("checkbox", name="选择当前全部结果")).not_to_be_checked()
+                assert store.list_collections()[0]["item_count"] == 2
+                page.get_by_role("button", name="跨平台学习 2", exact=True).click()
+                expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
+                page.get_by_role("button", name="编辑备注 图文收藏测试", exact=True).click()
+                field = page.get_by_role("textbox", name="备注 图文收藏测试", exact=True)
+                field.fill("新的学习备注")
+                failures["note"] = True
+                page.get_by_role("button", name="保存备注", exact=True).click()
+                expect(page.get_by_text("测试磁盘写入失败", exact=True)).to_be_visible()
+                expect(field).to_have_value("新的学习备注")
+                assert store.get_item("xhs", "a")["note"] == "旧备注"
+                failures["note"] = False
+                page.get_by_role("button", name="保存备注", exact=True).click()
+                expect(page.get_by_text("新的学习备注", exact=True)).to_be_visible()
+                assert store.get_item("xhs", "a")["note"] == "新的学习备注"
+                (ROOT / "build").mkdir(exist_ok=True)
+                page.screenshot(path=str(ROOT / "build" / "review-favorites-desktop.png"), full_page=True)
+                for width in (1024, 390):
+                    page.set_viewport_size({"width": width, "height": 844})
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"local layout overflow at {width}"
+                page.get_by_role("combobox", name="切换主题", exact=True).click()
+                page.get_by_role("option", name="Dark", exact=True).click()
+                page.wait_for_function("getComputedStyle(document.body).backgroundColor === 'rgb(16, 18, 24)'")
+                page.screenshot(path=str(ROOT / "build" / "review-favorites-local-mobile-dark.png"), full_page=True)
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.reload()
+                expect(page.get_by_text("新的学习备注", exact=True)).to_be_visible()
+                expect(page.get_by_role("button", name="迁移到本机收藏库", exact=True)).to_have_count(0)
+                page.get_by_role("button", name="删除收藏夹 跨平台学习", exact=True).click()
+                expect(page.get_by_role("button", name="跨平台学习 2", exact=True)).to_have_count(0)
+                assert store.stats()["total"] == 2
+                page.get_by_role("button", name="跨平台收藏", exact=True).click()
+                expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
+                page.get_by_role("button", name="重新同步", exact=True).click()
+                expect(page.get_by_role("alert")).to_contain_text("测试同步失败")
+                expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
+                failures["sync"] = False
+                page.get_by_role("button", name="重新同步", exact=True).click()
+                page.get_by_role("button", name="取消同步", exact=True).click()
+                expect(page.get_by_role("alert")).to_contain_text("测试取消失败")
+                failures["cancel"] = False
+                page.get_by_role("button", name="取消同步", exact=True).click()
+                expect(page.get_by_role("button", name="取消同步", exact=True)).to_have_count(0)
+                expect(page.get_by_role("button", name="重新同步", exact=True)).to_be_enabled()
+                expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.screenshot(path=str(ROOT / "build" / "review-favorites-mobile.png"), full_page=True)
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                assert not errors, errors
+                browser.close()
+        finally:
+            server.shutdown()
+            client.close()
+        print("favorites UI: migration, folders, note writes, reload, failed sync, cancel retry, mobile layout PASS")
+
+
+if __name__ == "__main__":
+    main()

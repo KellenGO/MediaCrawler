@@ -1,9 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addBookmarks, BOOKMARKS_KEY, MAX_BOOKMARKS, readBookmarks, setBookmarkNote, writeBookmarks, type BookmarkStorage } from "../src/lib/bookmarks.js";
-import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, highlightSegments, matchesFilters, resultKey, resultLinks, resultsCsv, resultsMarkdown, safeContentUrl } from "../src/lib/resultTools.js";
+import { DEFAULT_FILTERS, exportRows, filterResultGroups, groupKey, highlightSegments, matchesFilters, resultKey, resultsCsv, resultsMarkdown } from "../src/lib/resultTools.js";
 import type { UnifiedSearchResult } from "../src/types/search.js";
-import { bookmarkBackup, mergeBookmarkBackup, parseBookmarkBackup, MAX_BACKUP_BYTES } from "../src/lib/bookmarks.js";
 
 const NOW = "2026-09-06T12:00:00Z";
 const nowMs = Date.parse(NOW);
@@ -17,40 +15,7 @@ function group(): UnifiedSearchResult {
   const video = result("video", { platform: "bilibili", content_type: "video", url: "https://www.bilibili.com/video/BVtest" });
   return { ...note, grouped_sources: [note, video] };
 }
-class Storage implements BookmarkStorage {
-  value: string | null = null;
-  getItem(key: string): string | null { assert.equal(key, BOOKMARKS_KEY); return this.value; }
-  setItem(key: string, value: string): void { assert.equal(key, BOOKMARKS_KEY); this.value = value; }
-}
 const metadata = () => ({ fetchedAt: NOW, savedAt: null, note: "" });
-
-test("JSON 备份可恢复快照、备注和时间，重复导入不覆盖本地修改", () => {
-  const saved = setBookmarkNote(addBookmarks([], [group()], NOW), "xhs|note", "原备注");
-  const incoming = parseBookmarkBackup(bookmarkBackup(saved));
-  assert.deepEqual(incoming, saved);
-  const local = setBookmarkNote([saved[0]], "xhs|note", "本地新备注");
-  const merged = mergeBookmarkBackup(local, incoming);
-  assert.equal(merged.length, 2);
-  assert.equal(merged.find((item) => resultKey(item.result) === "xhs|note")!.note, "本地新备注");
-  assert.deepEqual(mergeBookmarkBackup(merged, incoming), merged);
-  assert.deepEqual(parseBookmarkBackup(bookmarkBackup([])), []);
-});
-
-test("备份拒绝损坏、未知版本、危险链接、重复条目和超大文件", () => {
-  const items = addBookmarks([], [result("a")], NOW);
-  for (const raw of ["{broken", '{"version":2,"items":[]}',
-    JSON.stringify({ version: 1, items: [...items, ...items] }),
-    JSON.stringify({ version: 1, items: [{ ...items[0], result: result("a", { url: "javascript:alert(1)" }) }] }),
-    " ".repeat(MAX_BACKUP_BYTES + 1)]) assert.throws(() => parseBookmarkBackup(raw));
-});
-
-test("合并超出容量整批失败，现有收藏保持原样", () => {
-  const items = addBookmarks([], Array.from({ length: MAX_BOOKMARKS }, (_, i) => result(String(i))), NOW);
-  const before = JSON.stringify(items);
-  assert.throws(() => mergeBookmarkBackup(items, addBookmarks([], [result("new")], NOW)));
-  assert.equal(JSON.stringify(items), before);
-  assert.deepEqual(mergeBookmarkBackup(items, [items[0]]), items);
-});
 
 test("时间筛选包含边界，排除范围外、未来和未知日期", () => {
   const filters = { ...DEFAULT_FILTERS, days: 7 as const };
@@ -98,51 +63,6 @@ test("高亮把正则字符当普通文字处理，文本原样保留", () => {
   assert.deepEqual(highlightSegments("plain", ""), [{ text: "plain", matched: false }]);
 });
 
-test("收藏保存所有来源，重载后保留时间与备注", () => {
-  const storage = new Storage();
-  let items = addBookmarks([], [group()], NOW, { xhs: "2026-09-06T11:00:00Z", bilibili: NOW });
-  assert.equal(items.length, 2);
-  items = setBookmarkNote(items, "bilibili|video", "需要复习");
-  writeBookmarks(storage, items);
-  const restored = readBookmarks(storage);
-  assert.deepEqual(restored, items);
-  assert.equal(restored[1].note, "需要复习");
-  assert.equal(restored[0].fetchedAt, "2026-09-06T11:00:00Z");
-  assert.equal(restored[0].result.grouped_sources, null);
-});
-
-test("重复收藏和单平台收藏不会覆盖已有快照与备注", () => {
-  const initial = setBookmarkNote(addBookmarks([], [group()], NOW), "xhs|note", "原备注");
-  const again = addBookmarks(initial, [result("note", { title: "已变化的标题" })], "2026-09-07T12:00:00Z");
-  assert.deepEqual(again, initial);
-  assert.throws(() => setBookmarkNote(initial, "xhs|missing", "备注"));
-});
-
-test("收藏只存公开字段，移除额外响应字段和嵌套分组", () => {
-  const extra = { ...result("a"), cookies: "private", headers: { token: "private" } };
-  const storage = new Storage();
-  writeBookmarks(storage, addBookmarks([], [extra], NOW));
-  assert.ok(!storage.value!.includes("private"));
-});
-
-test("损坏数据不被读取流程覆盖，浏览器拒绝存储会抛错", () => {
-  const storage = new Storage();
-  storage.value = "{broken";
-  assert.throws(() => readBookmarks(storage));
-  assert.equal(storage.value, "{broken");
-  storage.value = '{"version":99,"items":[]}';
-  assert.throws(() => readBookmarks(storage));
-  const denied: BookmarkStorage = { getItem: () => null, setItem: () => { throw new Error("quota"); } };
-  assert.throws(() => writeBookmarks(denied, addBookmarks([], [result("a")], NOW)));
-});
-
-test("容量限制不会静默丢弃旧收藏或只保存半个分组", () => {
-  const initial = addBookmarks([], Array.from({ length: MAX_BOOKMARKS - 1 }, (_, index) => result(String(index))), NOW);
-  assert.throws(() => addBookmarks(initial, [group()], NOW));
-  assert.equal(initial.length, MAX_BOOKMARKS - 1);
-  assert.throws(() => setBookmarkNote(initial, "xhs|0", "字".repeat(1001)));
-});
-
 test("导出展开分组并按平台和内容 ID 去重，只包含给定范围", () => {
   const rows = exportRows([group(), group()], metadata);
   assert.equal(rows.length, 2);
@@ -166,26 +86,3 @@ test("Markdown 保留来源与备注，转义标题中的标记和 HTML", () => 
   assert.ok(markdown.includes("[打开原文](<https://www.xiaohongshu.com/explore/a>)"));
 });
 
-test("复制与导出拒绝脚本、仿冒域名和带凭据的链接", () => {
-  for (const url of ["javascript:alert(1)", "https://bilibili.com.evil.test/video", "https://user:password@zhihu.com/question/1"]) {
-    assert.equal(safeContentUrl(url), null);
-    assert.equal(resultLinks(exportRows([result("a", { url })], metadata)), "");
-    assert.throws(() => addBookmarks([], [result("a", { url })], NOW));
-  }
-  assert.equal(safeContentUrl("https://zhuanlan.zhihu.com/p/1"), "https://zhuanlan.zhihu.com/p/1");
-});
-
-test("收藏→刷新读取→筛选→导出，备注和采集时间保持一致", () => {
-  const storage = new Storage();
-  const saved = setBookmarkNote(addBookmarks([], [group()], NOW, { bilibili: NOW }), "bilibili|video", "下周学习");
-  writeBookmarks(storage, saved);
-  const restored = readBookmarks(storage);
-  const filtered = filterResultGroups(restored.map((item) => item.result), { ...DEFAULT_FILTERS, contentType: "video" }, nowMs);
-  const rows = exportRows(filtered, (source) => {
-    const item = restored.find((candidate) => resultKey(candidate.result) === resultKey(source))!;
-    return { fetchedAt: item.fetchedAt, savedAt: item.savedAt, note: item.note };
-  });
-  assert.equal(rows.length, 1);
-  assert.ok(resultsCsv(rows).includes("下周学习"));
-  assert.ok(resultsMarkdown(rows).includes(NOW));
-});

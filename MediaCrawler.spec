@@ -19,12 +19,14 @@ if not node_exe:
 datas = [
     (str(ROOT / "webui" / "dist"), "webui/dist"),
     (str(ROOT / "webui" / "package.json"), "webui"),
+    # 托盘运行时加载的品牌图标；EXE 的 ICO 图标在构建时单独使用。
+    (str(ROOT / "assets" / "siye-icon.png"), "assets"),
 ]
 datas.extend((str(path), "libs") for path in (ROOT / "libs").glob("*.js"))
 binaries = [(node_exe, ".")]
 hiddenimports = []
 
-for package in ("playwright", "cv2", "PIL", "xhshow"):
+for package in ("playwright", "cv2", "PIL", "xhshow", "pystray"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas.extend(package_datas)
     binaries.extend(package_binaries)
@@ -47,6 +49,7 @@ for package in (
 
 hiddenimports.extend([
     "desktop_main",
+    "tray_main",
     "base.frozen_runtime_smoke",
     "execjs",
     "fastapi",
@@ -57,7 +60,7 @@ hiddenimports.extend([
 ])
 
 a = Analysis(
-    [str(ROOT / "desktop_main.py")],
+    [str(ROOT / "tray_main.py")],
     pathex=[str(ROOT)],
     binaries=binaries,
     datas=datas,
@@ -72,20 +75,43 @@ pyz = PYZ(a.pure)
 python_options = [
     ("X utf8", None, "OPTION"),
 ]
-exe = EXE(
+
+# 两个 EXE 共用同一份入口脚本（tray_main.py），靠参数区分角色：
+# - MediaCrawler.exe（console=True）：后端服务 + 平台 worker。
+#   worker 子进程经由 sys.executable 拉起并靠 stdin/stdout 管道通信，
+#   所以**必须保留控制台**（windowed 模式下 stdout 不可用）。
+# - 四野.exe（console=False）：托盘启动器。它把上面那个 EXE 以隐藏窗口方式拉起，
+#   自身不跑后端，因此没有控制台也不会影响子进程通信。
+exe_backend = EXE(
     pyz,
     a.scripts,
     python_options,
     exclude_binaries=True,
     name="MediaCrawler",
+    icon=str(ROOT / "assets" / "siye-icon.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=True,
 )
+exe_launcher = EXE(
+    pyz,
+    a.scripts,
+    python_options,
+    exclude_binaries=True,
+    name="四野",
+    icon=str(ROOT / "assets" / "siye-icon.ico"),
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+)
 coll = COLLECT(
-    exe,
+    exe_backend,
+    exe_launcher,
     a.binaries,
     a.datas,
     a.zipfiles,

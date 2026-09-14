@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -24,7 +25,7 @@ def _request(url: str) -> tuple[int, str]:
             return response.status, response.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")
-    except URLError:
+    except (URLError, TimeoutError, ConnectionError):
         return 0, ""
 
 
@@ -57,7 +58,12 @@ def _run(command: list[str], cwd: Path, env: dict[str, str], timeout: int = 60) 
 
 
 def validate_distribution(package: Path) -> None:
-    required = (package / "MediaCrawler.exe", package / "browser_extension")
+    # MediaCrawler.exe 是后端 + worker 入口；四野.exe 是无窗口托盘启动器（用户实际双击的那个）。
+    required = (
+        package / "MediaCrawler.exe",
+        package / "四野.exe",
+        package / "browser_extension",
+    )
     missing = [str(path.relative_to(package)) for path in required if not path.exists()]
     if missing:
         raise AssertionError(f"missing executable entries: {', '.join(missing)}")
@@ -153,6 +159,37 @@ def run_web_smoke(exe: Path, package: Path, env: dict[str, str]) -> None:
                 process.wait(timeout=10)
 
 
+def run_managed_shutdown_smoke(exe: Path, package: Path, env: dict[str, str]) -> None:
+    """The hidden backend must exit normally when its launcher control pipe closes."""
+    output = tempfile.TemporaryFile()
+    process = subprocess.Popen(
+        [str(exe), "--no-browser", "--managed-backend"], cwd=package, env=env,
+        stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise AssertionError("managed backend exited during startup")
+            status, _ = _request("http://127.0.0.1:8080/api/health")
+            if status == 200:
+                break
+            time.sleep(.25)
+        else:
+            output.seek(0)
+            raise AssertionError(f"managed backend startup timed out: {output.read().decode('utf-8', errors='replace')[-4000:]}")
+        process.stdin.close()
+        assert process.wait(timeout=30) == 0, "managed backend did not shut down normally"
+        status, _ = _request("http://127.0.0.1:8080/api/health")
+        assert status == 0, "backend remained listening after launcher exit"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+        output.close()
+
+
 def main() -> int:
     if sys.platform != "win32":
         raise SystemExit("EXE clean-room smoke must run on Windows")
@@ -162,14 +199,18 @@ def main() -> int:
     package = args.package.resolve()
     exe = package / "MediaCrawler.exe"
     validate_distribution(package)
+    if _request("http://127.0.0.1:8080/api/health")[0] != 0:
+        raise AssertionError("port 8080 is already in use; leave the existing application untouched")
     env = _clean_env(package)
     run_runtime_smoke(exe, package, env)
     run_worker_protocol_smoke(exe, package, env)
     run_web_smoke(exe, package, env)
+    run_managed_shutdown_smoke(exe, package, env)
     print("executable clean-room validation: PASS")
     print("node/python-free runtime: PASS")
     print("worker protocol: PASS")
     print("web serving: PASS")
+    print("managed backend graceful shutdown: PASS")
     return 0
 
 

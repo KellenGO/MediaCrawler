@@ -180,6 +180,8 @@ webui/dist/
 # 本地运行/构建产物（都可重新生成，绝不提交）
 # release/ 由 scripts/package_windows.py 生成；dist/、build/ 由 PyInstaller 生成
 /release/
+/dist/
+/build_pyi/
 .exe-venv/
 .uv-cache/
 .uv-python/
@@ -195,3 +197,7 @@ database/*.db
 .omx/
 .workbuddy/
 /cache/_*.png
+
+# pytest 临时目录（本机沙箱下系统 Temp 不可写，改用项目内目录）
+.pytest_tmp/
+.tmp_pytest_*/
