@@ -36,6 +36,11 @@
 - [ ] 在本机流水账 `.workbuddy/memory/YYYY-MM-DD.md` 追加当天记录（按日期，只追加）。
       **注意：`.workbuddy/` 被 `.gitignore` 忽略，所以这只对本机有意义、评审时看不到**；
       要让别人（或下一个 agent）看到的东西，必须写进 `docs/`。
+- [ ] **改动已经提交**（见「硬规则」里那条"不许跨会话留未提交"）。
+- [ ] **施工过程没有写进代码注释**：不要往代码里加 `Round 12`、`第 3 轮`、`Phase 4.2`
+      这类"我是第几轮做的"标记 —— 那是 **commit message 的内容，不是代码的内容**。
+      它对新读者零信息量，却在 67 个文件里累积了 200+ 处噪音。
+      （存量不专门清理，**改到哪清到哪**；新写的代码一律不加。）
 
 `tests/test_docs_wiki.py` 会守住**结构**（索引链接、必备小节、地图与文件一一对应），
 以及**「代码入口」里写的文件是否真的存在**（2026-09-14 起）——
@@ -47,24 +52,69 @@
 - **绝不提交 `data/`、`browser_data/`**：`data/` 是本机收藏库与日志，`browser_data/` 是各平台登录
   profile（**含 cookie**）。发布包必须排除，`scripts/package_exe.py` 会校验并拒绝。
 - 需要写库的测试一律用临时目录，别碰真实用户数据。
+- **不许跨会话留下未提交的改动**：收工前要么提交，要么在交付说明里写清"为什么不能提交、下一手该拿它怎么办"。
+  长期挂着的未提交改动是**多 agent 协作里最贵的债** —— 下一个 agent（或下一次会话的自己）
+  读到的是一份"半成品事实"，而它看起来和已完成的工作一模一样。
+- **结构化重构与行为改动分船**：把"搬函数边界 / 抽公共层 / 改名"单独做成一个分支或至少一个独立提交，
+  不要和行为改动混在一起。分开之后，与别人并行改动撞车时冲突会停在**文本级**；
+  混在一起就变成**语义级**冲突 —— git 只会说"这两个 hunk 撞了"，帮不上忙。
+
+## 文件所有权（并行开发时的互斥表）
+
+**同一时刻只允许一个 agent 在一个路径范围内有未提交改动。** 开工前先看这张表，收工后更新它。
+
+| 范围 | 归谁 | 说明 |
+|---|---|---|
+| 主目录 `MediaCrawler-main/` 的**全部**改动 | 主工作区负责人 | master 上不要出现两个来源的未提交改动 |
+| 支线目录 `MediaCrawler-side-tasks/` | 支线负责人 | 开工前 `git status` 必须干净 |
+
+**历史上最容易撞车的文件**（改它们之前先确认对方没有在改）：
+`api/routers/search.py`、`api/services/accounts.py`、`api/services/search_job_manager.py`、
+`api/services/favorites_job_manager.py`、`media_platform/xhs/client.py`、`webui/src/components/accounts/AccountsPage.tsx`。
+
+**并发改同一批文件时，约定"结构按重构方、行为按改动方"来解冲突**，
+并且合并方向固定为：**在功能分支上 `git merge master`，解完跑全量测试，绿了再快进合回 master**。
+这样 master 全程可发布。
 
 ## 在这台机器上干活（环境坑，都踩过了）
 
 - **npm 被安全策略拦**（会拉起 wsl.exe）。前端改用 node 绝对路径：
   `node_modules/typescript/bin/tsc`、`node_modules/vite/bin/vite.js`、`node run-compiled-tests.mjs`。
 - **pytest 写不进系统 Temp**，必须带项目内临时目录：`--basetemp=.tmp_pytest_xxx`。
+  **而且每次都要换新的子目录**（`--basetemp=.tmp_pytest_run/r<时间戳>`，父目录先建好）——
+  复用同一目录会触发沙箱的 safe-delete 批量保护，报成上百个 setup ERROR 的**假回归**。
 - **shell 会 mangle 带斜杠的参数**：`git branch feat/x` 会静默失败并报 `fatal: invalid reference`。
-  git 操作走 PowerShell，分支名用连字符。
+  **可靠做法：用 Python `subprocess.run(['git', ...])` 调 git**（这一轮全程这么做，稳定），
+  分支名用连字符。
+- **Bash 工具的双引号里不要出现反引号**：bash 会当命令替换执行、静默吃掉内容。
+  复杂脚本一律用 Write 落盘再跑。
 - Python 用 `.venv/Scripts/python.exe`（该 venv 由 uv 建，原本没有 pip）。
+- **前端 `src/lib` 之间的 import 必须带 `.js` 后缀**（编译产物是原生 ESM）：
+  `tsc` 不会报错，只有 `run-compiled-tests.mjs` 会以 `ERR_MODULE_NOT_FOUND` 暴露。
+- **`git pull/push` 需要本机代理 `127.0.0.1:7890` 在跑**（git 里配了 `http.proxy`）；
+  代理没起时会报 "Failed to connect to github.com port 443"。离线时用
+  `git bundle create <项目外的路径>.bundle <branch>` 做本地备份。
 
 ## 工作区与合并（2026-09-14）
 
 | 位置 | 分支 | 负责 | 内容 |
 |---|---|---|---|
 | `MediaCrawler-main/` | `master` | 主工作区 | 收藏、托盘与扫码登录在此集成；日常运行统一使用 dist |
-| `MediaCrawler-scanlogin/`（git worktree） | `side-tasks` | 支线任务工作区 | 独立目录、独立端口（8090）；**第一个支线任务是「应用自带扫码登录」，已合入 master**；下一个支线从这里开分支 |
+| `MediaCrawler-side-tasks/`（git worktree） | `side-tasks` | 支线任务工作区 | 独立目录、独立端口（8090）；**第一个支线任务是「应用自带扫码登录」，已合入 master**；下一个支线从这里开分支 |
 
-两个目录**共用一个 `.git`**，可以分别提交，不需要 push/pull。合并前核对未提交改动，代码也可能冲突，不能只看文档。并行开发用 `SIYE_PORT` 显式分配端口；产品默认 8080，扩展目前只支持该端口。
+两个目录**共用一个 `.git`**（`MediaCrawler-main/.git`），可以分别提交，不需要 push/pull。
+并行开发用 `SIYE_PORT` 显式分配端口；产品默认 8080，扩展目前只支持该端口。
+
+⚠️ **共用 `.git` 的三条注意事项**（踩过）：
+
+1. **切目录 ≠ 切分支**：每个 worktree 有自己的 HEAD，在一边 `checkout` 不会影响另一边 ——
+   但**同一个分支不能在两个 worktree 同时检出**。要动 master 就去主目录动。
+2. **一边的操作会改共用元数据**：例如 `git worktree prune`、`git gc`、改 `.git/config`
+   影响的是两个目录。**在该目录存在未提交改动时，别在任何一个目录里跑 prune / reset --hard。**
+3. **`git worktree list` 里的记录目录名可能是旧的**（当前记录仍叫 `MediaCrawler-scanlogin`，
+   是本 worktree 旧名）。那只影响内部命名，**不要手动删它**：
+   删了就丢掉 worktree 身份。目录改名后若看到 `prunable`，用
+   `git worktree repair "<新目录路径>"` 修（它只重写一行 `gitdir` 指针）。
 
 ### 支线任务 worktree 怎么启动
 
