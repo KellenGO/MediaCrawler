@@ -34,6 +34,12 @@ import json
 import pytest
 
 import api.services.accounts as acc
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
+
 
 COOKIE_FORMAT = "chrome-v1"
 
@@ -46,45 +52,9 @@ _XHS_COOKIES = [
 
 # ── Fakes（仅测试数据/生命周期记录，不含生产判断） ──────────────────────
 
-class _FakePage:
-    async def goto(self, *args, **kwargs):
-        pass
-
-
-class _FakeCtx:
-    def __init__(self):
-        self.added = []
-        self.cleared_domains = []
-        self.close_count = 0
-
-    async def cookies(self, urls):
-        return []
-
-    async def clear_cookies(self, *, domain=None, name=None, path=None):
-        if domain:
-            self.cleared_domains.append(domain)
-
-    async def add_cookies(self, cookies):
-        self.added.extend(cookies)
-
-    async def new_page(self):
-        return _FakePage()
-
-    async def close(self):
-        self.close_count += 1
-
-
-class _FakePW:
-    def __init__(self):
-        self.stop_count = 0
-
-    async def stop(self):
-        self.stop_count += 1
-
-
 def _patch_launch(monkeypatch, launch_calls=None, ctx=None, pw=None):
-    ctx = ctx or _FakeCtx()
-    pw = pw or _FakePW()
+    ctx = ctx or FakeBrowserContext()
+    pw = pw or FakePlaywright()
     calls = launch_calls if launch_calls is not None else {"n": 0}
 
     async def fake_launch(platform):

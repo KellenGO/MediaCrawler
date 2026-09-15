@@ -25,6 +25,12 @@ import pytest
 import aggregate_search.worker as worker
 from aggregate_search.models import WorkerRequest
 from aggregate_search.worker import _WorkerExit, _run_login, main
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
+
 
 # ── Recorders ───────────────────────────────────────────────────────────
 
@@ -38,27 +44,6 @@ class _Events:
     def counts(self):
         return {"status": len(self.status), "errors": len(self.errors),
                 "done": len(self.done)}
-
-
-class _FakeCtx:
-    """browser_context with real cookie semantics used by _verify_login_success.
-
-    ``closed=True`` reproduces what the real platforms do: ``start()`` wraps its
-    body in ``async with async_playwright()``, so after it returns the context is
-    closed and any cookie read raises.
-    """
-
-    def __init__(self, cookies=None):
-        self._cookies = cookies or []
-        self.closed = False
-
-    async def cookies(self, urls):
-        if self.closed:
-            raise RuntimeError("Target page, context or browser has been closed")
-        return list(self._cookies)
-
-    async def close(self):
-        pass
 
 
 class _FakeClient:
@@ -112,7 +97,7 @@ def _install(monkeypatch, evt: _Events, factory):
 def test_login_success_emits_one_done_and_verified(monkeypatch):
     """Real login path: pong-verified session → succeeded + exactly 1 done."""
     evt = _Events()
-    ctx = _FakeCtx([{"name": "d_c0", "value": "abc"}])
+    ctx = FakeBrowserContext(existing=[{"name": "d_c0", "value": "abc"}], strict_closed=True)
     client = _FakeClient(pong_result=True)
 
     async def start():
@@ -131,7 +116,7 @@ def test_login_success_emits_one_done_and_verified(monkeypatch):
 def test_login_verification_failure_one_done(monkeypatch):
     """pong fails → login_verification_failed + exactly 1 done, no success."""
     evt = _Events()
-    ctx = _FakeCtx([{"name": "d_c0", "value": "abc"}])
+    ctx = FakeBrowserContext(existing=[{"name": "d_c0", "value": "abc"}], strict_closed=True)
     client = _FakeClient(pong_result=False)
 
     async def start():
@@ -195,7 +180,7 @@ def test_login_generic_exception_one_done(monkeypatch):
 def test_login_without_cookies_never_succeeds(monkeypatch):
     """No cookies after login → cannot be verified → not succeeded."""
     evt = _Events()
-    ctx = _FakeCtx([])  # empty cookie jar
+    ctx = FakeBrowserContext(existing=[], strict_closed=True)  # empty cookie jar
     client = _FakeClient(pong_result=True)
 
     async def start():
@@ -219,7 +204,7 @@ def test_login_without_cookies_never_succeeds(monkeypatch):
 def test_login_verified_inside_session_survives_closed_context(monkeypatch):
     """start() 内部调用 search() 时验证通过；返回后 context 已关闭仍算成功。"""
     evt = _Events()
-    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    ctx = FakeBrowserContext(existing=[{"name": "web_session", "value": "abc"}], strict_closed=True)
     client = _FakeClient(pong_result=True)
 
     async def start():
@@ -247,7 +232,7 @@ def test_login_verified_inside_session_survives_closed_context(monkeypatch):
 def test_login_not_verified_inside_session_reports_failure_without_retry_outside(monkeypatch):
     """会话内 pong 失败 → 重试一次后报失败，且不再用已关闭的 context 复验。"""
     evt = _Events()
-    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    ctx = FakeBrowserContext(existing=[{"name": "web_session", "value": "abc"}], strict_closed=True)
     client = _FakeClient(pong_result=False)
 
     async def start():
@@ -277,7 +262,7 @@ def test_login_not_verified_inside_session_reports_failure_without_retry_outside
 def test_login_flow_not_reaching_search_does_not_claim_success(monkeypatch):
     """没走到 search() 且会话已关闭 → 绝不说 succeeded，也不用"未登录"糊弄。"""
     evt = _Events()
-    ctx = _FakeCtx([{"name": "web_session", "value": "abc"}])
+    ctx = FakeBrowserContext(existing=[{"name": "web_session", "value": "abc"}], strict_closed=True)
     client = _FakeClient(pong_result=True)
 
     async def start():

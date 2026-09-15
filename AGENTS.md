@@ -47,6 +47,17 @@
 后者能自动抓住改名/移动后的文档漂移。它**不检查内容是否写对**、
 也不检查"某个功能是不是压根没文档"，所以上面这份清单是**收尾动作，不是建议**。
 
+## 写测试时的约定
+
+- **假浏览器对象只有一处**：`tests/fixtures/browser.py` 里的
+  `FakeBrowserContext` / `FakePage` / `FakePlaywright` 是超集替身，各测试原先的差异
+  都做成了构造参数（预设 page、`navigated` 后换 cookie、`strict_closed` 关闭后读 cookie 抛错、
+  `evaluate_result` 指定 evaluate 返回值、`goto_urls`/`goto_args` 记录导航）。
+  **新写测试不要再抄一份 `_FakeCtx`/`_FakePW`** —— 2026-09-15 之前 9 个文件各有一份。
+  带业务行为的假件（`_FakeDouYinClient`、`_FakeCrawler` 等）留在各自测试里，那些是被测逻辑本身。
+- 拼错 i18n 键不会有运行时错误（i18next 直接把键名渲染出去），所以
+  `tests/test_webui_ui_contract.py` 里有键存在性与多语言对齐的守卫。
+
 ## 硬规则
 
 - **绝不提交 `data/`、`browser_data/`**：`data/` 是本机收藏库与日志，`browser_data/` 是各平台登录

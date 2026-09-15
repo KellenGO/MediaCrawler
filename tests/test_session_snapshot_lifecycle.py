@@ -31,6 +31,12 @@ import asyncio
 
 import pytest
 from api.services import accounts as acc
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
+
 
 _XHS_COOKIES = [
     {"name": "web_session", "value": "fake-xhs-session",
@@ -42,39 +48,9 @@ _XHS_COOKIES = [
 ]
 
 
-class _FakeCtx:
-    def __init__(self, existing=None):
-        self.existing = existing or []
-        self.cleared_domains = []
-        self.added = []
-
-    async def cookies(self, urls=None):
-        return list(self.existing)
-
-    async def add_cookies(self, mapped):
-        self.added.extend(mapped)
-
-    async def clear_cookies(self, *, name=None, domain=None, path=None):
-        self.cleared_domains.append(domain)
-
-    async def new_page(self, *a, **k):
-        class _P:
-            async def goto(self, *a, **k):
-                pass
-        return _P()
-
-    async def close(self):
-        pass
-
-
-class _FakePW:
-    async def stop(self):
-        pass
-
-
 def _patch_launch(monkeypatch, ctx):
     async def fake_launch(platform):
-        return _FakePW(), ctx, "edge"
+        return FakePlaywright(), ctx, "edge"
     monkeypatch.setattr("api.services.accounts._launch_profile_context",
                         fake_launch)
 
@@ -132,7 +108,7 @@ class TestSnapshotLifecycle:
 
     def test_sync_entry_clears_old_snapshot_on_failed_verify(self, monkeypatch):
         """重新同步入口清除旧快照；验证未通过 → 快照保持清除。"""
-        ctx = _FakeCtx(existing=list(_XHS_COOKIES))
+        ctx = FakeBrowserContext(existing=list(_XHS_COOKIES))
         _patch_launch(monkeypatch, ctx)
         monkeypatch.setattr(
             "api.services.accounts._pong_with_profile",
@@ -157,7 +133,7 @@ class TestSnapshotLifecycle:
              "domain": ".xiaohongshu.com"},
             {"name": "a1", "value": "FRESH-A1", "domain": ".xiaohongshu.com"},
         ]
-        ctx = _FakeCtx(existing=fresh)
+        ctx = FakeBrowserContext(existing=fresh)
         _patch_launch(monkeypatch, ctx)
         monkeypatch.setattr(
             "api.services.accounts._pong_with_profile",

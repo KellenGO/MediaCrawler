@@ -39,6 +39,12 @@ from tenacity import RetryError
 
 from media_platform.xhs.client import XiaoHongShuClient
 from media_platform.xhs.exception import XhsRateLimitError
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
+
 
 _SAFE_MESSAGE = "小红书触发验证码或访问限制，请稍后再试"
 
@@ -285,23 +291,6 @@ def test_query_self_other_non_200_keeps_unverifiable(monkeypatch):
 
 # ── 8. accounts 生产路径 ────────────────────────────────────────────────
 
-class _FakeCtx:
-    def __init__(self):
-        self.cookies_list = [
-            {"name": "web_session", "value": "x", "domain": ".xiaohongshu.com"},
-            {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
-        ]
-
-    async def cookies(self, urls=None):
-        return list(self.cookies_list)
-
-    async def route(self, pattern, handler):
-        pass
-
-    async def close(self):
-        pass
-
-
 def test_pong_with_profile_rate_limited_verdict(monkeypatch):
     """_pong_with_profile 的 xhs 分支捕获 XhsRateLimitError → verdict
     =rate_limited（不是 unavailable，更不是 not_logged_in）。"""
@@ -316,7 +305,10 @@ def test_pong_with_profile_rate_limited_verdict(monkeypatch):
 
     monkeypatch.setattr(
         "media_platform.xhs.client.XiaoHongShuClient", _RateLimitedClient)
-    verdict = asyncio.run(acc._pong_with_profile("xhs", _FakeCtx()))
+    verdict = asyncio.run(acc._pong_with_profile("xhs", FakeBrowserContext(existing=[
+    {"name": "web_session", "value": "x", "domain": ".xiaohongshu.com"},
+    {"name": "a1", "value": "fake-a1", "domain": ".xiaohongshu.com"},
+])))
     assert verdict == "rate_limited"
 
 

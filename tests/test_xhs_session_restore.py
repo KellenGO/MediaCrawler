@@ -4,49 +4,11 @@ import pytest
 
 from api.services import accounts as acc
 
-
-class _FakePage:
-    def __init__(self, context):
-        self.context = context
-        self.goto_args = None
-
-    async def goto(self, *args, **kwargs):
-        self.goto_args = (args, kwargs)
-        self.context.navigated = True
-
-    async def wait_for_timeout(self, _milliseconds):
-        await asyncio.sleep(0)
-
-    async def close(self):
-        pass
-
-
-class _FakeContext:
-    def __init__(self, initial_cookies, initialized_cookies=None):
-        self.initial_cookies = list(initial_cookies)
-        self.initialized_cookies = list(initialized_cookies or initial_cookies)
-        self.navigated = False
-        self.pages = []
-        self.closed = False
-
-    async def cookies(self, _urls=None):
-        return list(self.initialized_cookies if self.navigated else self.initial_cookies)
-
-    async def new_page(self):
-        page = _FakePage(self)
-        self.pages.append(page)
-        return page
-
-    async def close(self):
-        self.closed = True
-
-
-class _FakePlaywright:
-    def __init__(self):
-        self.stopped = False
-
-    async def stop(self):
-        self.stopped = True
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
 
 
 def _prepare(monkeypatch, tmp_path):
@@ -74,13 +36,13 @@ async def test_existing_memory_snapshot_does_not_open_profile(monkeypatch, tmp_p
 @pytest.mark.asyncio
 async def test_profile_snapshot_with_a1_is_restored_without_navigation(monkeypatch, tmp_path):
     _prepare(monkeypatch, tmp_path)
-    context = _FakeContext([{"name": "a1", "value": "profile-a1"}])
+    context = FakeBrowserContext(existing=[{"name": "a1", "value": "profile-a1"}])
     calls = 0
 
     async def launch(_platform):
         nonlocal calls
         calls += 1
-        return _FakePlaywright(), context, "test"
+        return FakePlaywright(), context, "test"
 
     monkeypatch.setattr(acc, "_launch_profile_context", launch)
     assert await acc.ensure_session_snapshot("xhs") == {"a1": "profile-a1"}
@@ -94,14 +56,14 @@ async def test_profile_without_a1_gets_one_official_page_initialization(
     monkeypatch, tmp_path
 ):
     _prepare(monkeypatch, tmp_path)
-    context = _FakeContext(
-        [{"name": "web_session", "value": "session"}],
-        [{"name": "web_session", "value": "session"},
-         {"name": "a1", "value": "browser-created-a1"}],
+    context = FakeBrowserContext(
+        existing=[{"name": "web_session", "value": "session"}],
+        initialized_cookies=[{"name": "web_session", "value": "session"},
+                             {"name": "a1", "value": "browser-created-a1"}],
     )
 
     async def launch(_platform):
-        return _FakePlaywright(), context, "test"
+        return FakePlaywright(), context, "test"
 
     monkeypatch.setattr(acc, "_launch_profile_context", launch)
     assert await acc.ensure_session_snapshot("xhs") == {
@@ -114,10 +76,10 @@ async def test_profile_without_a1_gets_one_official_page_initialization(
 @pytest.mark.asyncio
 async def test_profile_without_a1_is_a_safe_miss(monkeypatch, tmp_path):
     _prepare(monkeypatch, tmp_path)
-    context = _FakeContext([{"name": "web_session", "value": "session"}])
+    context = FakeBrowserContext(existing=[{"name": "web_session", "value": "session"}])
 
     async def launch(_platform):
-        return _FakePlaywright(), context, "test"
+        return FakePlaywright(), context, "test"
 
     monkeypatch.setattr(acc, "_launch_profile_context", launch)
     assert await acc.ensure_session_snapshot("xhs") is None
@@ -127,14 +89,14 @@ async def test_profile_without_a1_is_a_safe_miss(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_concurrent_restore_opens_profile_once(monkeypatch, tmp_path):
     _prepare(monkeypatch, tmp_path)
-    context = _FakeContext([{"name": "a1", "value": "profile-a1"}])
+    context = FakeBrowserContext(existing=[{"name": "a1", "value": "profile-a1"}])
     calls = 0
 
     async def launch(_platform):
         nonlocal calls
         calls += 1
         await asyncio.sleep(0)
-        return _FakePlaywright(), context, "test"
+        return FakePlaywright(), context, "test"
 
     monkeypatch.setattr(acc, "_launch_profile_context", launch)
     results = await asyncio.gather(*(

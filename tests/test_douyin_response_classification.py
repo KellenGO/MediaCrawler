@@ -26,40 +26,12 @@ from media_platform.douyin.core import DouYinCrawler  # noqa: E402
 from media_platform.douyin.exception import DataFetchError  # noqa: E402
 from aggregate_search.worker import _classify_error, _safe_error_message  # noqa: E402
 
-
-class _FakeCtx:
-    def __init__(self):
-        self.page = _FakePage()
-
-    async def add_init_script(self, **kw):
-        pass
-
-    async def new_page(self, *a, **k):
-        return self.page
-
-    async def cookies(self, urls=None):
-        return []
-
-    async def close(self):
-        pass
-
-
-class _FakePage:
-    async def goto(self, url, **kw):
-        pass
-
-    async def evaluate(self, script):
-        return "Mozilla/5.0 (test UA)"
-
-
-class _FakePW:
-    chromium = object()
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
+from tests.fixtures.browser import (
+    douyin_test_context,
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
 
 
 class _FakeDouYinClient:
@@ -93,7 +65,7 @@ def _configure_config(monkeypatch):
 
 
 def _make_crawler(monkeypatch, client, sink_list, *, strict_errors=True):
-    ctx = _FakeCtx()
+    ctx = douyin_test_context()
 
     # 实例属性上的普通函数不会被绑定，签名必须与被调用处实参一一对应
     async def fake_launch_browser(chromium, playwright_proxy, user_agent,
@@ -117,7 +89,7 @@ def _make_crawler(monkeypatch, client, sink_list, *, strict_errors=True):
     )
     monkeypatch.setattr(
         "media_platform.douyin.core.async_playwright",
-        lambda: _FakePW())
+        lambda: FakePlaywright())
     return crawler, client
 
 

@@ -32,6 +32,12 @@ import asyncio
 import pytest
 from api.services import accounts as acc
 
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
+
 
 class _CountingPage:
     def __init__(self, ctx):
@@ -70,11 +76,6 @@ class _CountingCtx:
         return _CountingPage(self)
 
     async def close(self):
-        pass
-
-
-class _FakePW:
-    async def stop(self):
         pass
 
 
@@ -171,7 +172,7 @@ class TestSyncTimings:
 
         async def fake_launch(p):
             launch_calls["n"] += 1
-            return _FakePW(), ctx, "edge"
+            return FakePlaywright(), ctx, "edge"
 
         monkeypatch.setattr("api.services.accounts._launch_profile_context",
                             fake_launch)

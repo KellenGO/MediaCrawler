@@ -351,51 +351,15 @@ from api.services.accounts import (  # noqa: E402  (生产函数)
     create_sync_ticket,
 )
 
-class _FakeCtx:
-    def __init__(self, existing=None, page=None):
-        self.existing = existing or []
-        self.page = page
-
-    async def cookies(self, urls=None):
-        return list(self.existing)
-
-    async def add_cookies(self, mapped):
-        pass
-
-    async def clear_cookies(self, *, name=None, domain=None, path=None):
-        pass
-
-    async def new_page(self, *a, **k):
-        if self.page is not None:
-            return self.page
-        class _P:
-            async def goto(self, *a, **k):
-                pass
-        return _P()
-
-    async def close(self):
-        pass
-
-
-class _FakePW:
-    async def stop(self):
-        pass
-
-
-class _FakePage:
-    def __init__(self):
-        self.goto_urls = []
-
-    async def goto(self, url, **kw):
-        self.goto_urls.append(url)
-
-    async def close(self):
-        pass
-
+from tests.fixtures.browser import (
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
 
 def _patch_launch(monkeypatch, ctx):
     async def fake_launch(platform):
-        return _FakePW(), ctx, "edge"
+        return FakePlaywright(), ctx, "edge"
     monkeypatch.setattr("api.services.accounts._launch_profile_context",
                         fake_launch)
 
@@ -431,7 +395,7 @@ def _patch_client(monkeypatch, import_path, fake_class):
 
 
 def _probe_ctx(existing, page=None):
-    return _FakeCtx(existing=existing, page=page)
+    return FakeBrowserContext(existing=existing, page=page)
 
 
 # ── 问题一：probe 契约 —— 生产 probe 调用 fake client 并传 raise_on_error ─
@@ -547,7 +511,7 @@ def test_zhihu_probe_verdicts_through_production_pong(monkeypatch, pong_result, 
     FakeClient = _make_fake_client_class(pong_result=pong_result)
     _patch_client(monkeypatch,
                   "media_platform.zhihu.client.ZhiHuClient", FakeClient)
-    page = _FakePage()
+    page = FakePage()
     ctx = _probe_ctx([
         {"name": "z_c0", "value": "fake", "domain": ".zhihu.com"},
         {"name": "d_c0", "value": "fake-dc0", "domain": ".zhihu.com"},
@@ -566,7 +530,7 @@ def test_zhihu_probe_navigates_only_when_dc0_missing(monkeypatch):
     FakeClient = _make_fake_client_class(pong_result=True)
     _patch_client(monkeypatch,
                   "media_platform.zhihu.client.ZhiHuClient", FakeClient)
-    page = _FakePage()
+    page = FakePage()
     ctx = _probe_ctx([
         {"name": "z_c0", "value": "fake", "domain": ".zhihu.com"},  # 无 d_c0
     ], page=page)
@@ -586,7 +550,7 @@ def test_zhihu_probe_forbidden_error_is_unavailable(monkeypatch):
         pong_error=ForbiddenError("403 forbidden"))
     _patch_client(monkeypatch,
                   "media_platform.zhihu.client.ZhiHuClient", FakeClient)
-    page = _FakePage()
+    page = FakePage()
     ctx = _probe_ctx([
         {"name": "z_c0", "value": "fake", "domain": ".zhihu.com"},
         {"name": "d_c0", "value": "fake-dc0", "domain": ".zhihu.com"},
@@ -603,7 +567,7 @@ def test_zhihu_probe_datafetch_and_timeout_are_unavailable(monkeypatch):
         FakeClient = _make_fake_client_class(pong_error=err)
         _patch_client(monkeypatch,
                       "media_platform.zhihu.client.ZhiHuClient", FakeClient)
-        page = _FakePage()
+        page = FakePage()
         ctx = _probe_ctx([
             {"name": "z_c0", "value": "fake", "domain": ".zhihu.com"},
             {"name": "d_c0", "value": "fake-dc0", "domain": ".zhihu.com"},
@@ -619,7 +583,7 @@ def test_douyin_probe_client_error_is_unavailable(monkeypatch):
         pong_error=DyDataFetchError("douyin risk control"))
     _patch_client(monkeypatch,
                   "media_platform.douyin.client.DouYinClient", FakeClient)
-    page = _FakePage()
+    page = FakePage()
     ctx = _probe_ctx([
         {"name": "LOGIN_STATUS", "value": "1", "domain": ".douyin.com"},
     ], page=page)

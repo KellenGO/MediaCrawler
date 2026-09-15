@@ -22,42 +22,12 @@ from base.crawler_runtime import CrawlerRuntimeOptions  # noqa: E402
 from base.exceptions import LoginRequiredError  # noqa: E402
 from media_platform.douyin.core import DouYinCrawler  # noqa: E402
 
-
-class _FakeCtx:
-    def __init__(self):
-        self.page = _FakePage()
-
-    async def add_init_script(self, **kw):
-        pass
-
-    async def new_page(self, *a, **k):
-        return self.page
-
-    async def cookies(self, urls=None):
-        return []
-
-    async def close(self):
-        pass
-
-
-class _FakePage:
-    async def goto(self, url, **kw):
-        pass
-
-    async def evaluate(self, script):
-        return "Mozilla/5.0 (test UA)"
-
-
-class _FakePW:
-    # start() 非 CDP 分支会读 playwright.chromium（launch_browser 已替换，
-    # 值本身无意义）
-    chromium = object()
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
+from tests.fixtures.browser import (
+    douyin_test_context,
+    FakeBrowserContext,
+    FakePage,
+    FakePlaywright,
+)
 
 
 class _FakeDouYinClient:
@@ -107,7 +77,7 @@ def _configure_config(monkeypatch):
 
 def _make_crawler(monkeypatch, client, sink_list, *, allow_public_search,
                   login_policy="fail_fast", headless=True):
-    ctx = _FakeCtx()
+    ctx = douyin_test_context()
 
     # 实例属性上的普通函数不会被绑定，签名必须与被调用处实参一一对应
     async def fake_launch_browser(chromium, playwright_proxy, user_agent,
@@ -131,7 +101,7 @@ def _make_crawler(monkeypatch, client, sink_list, *, allow_public_search,
     # 浏览器启动由 fake 承担；async_playwright 换成 fake 上下文管理器。
     monkeypatch.setattr(
         "media_platform.douyin.core.async_playwright",
-        lambda: _FakePW())
+        lambda: FakePlaywright())
     return crawler, client
 
 
