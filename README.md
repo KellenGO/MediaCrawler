@@ -1,4 +1,6 @@
-# MediaCrawler
+# 四野（SiYe）
+
+> 仓库沿用 fork 时的旧工程名 `MediaCrawler`，产品名是**四野**，对外 ASCII 标识为 `SiYe`。
 
 ## 中文社交平台聚合搜索
 

@@ -2,7 +2,7 @@
 
 打包后会产生两个 EXE，共用这一份入口脚本：
 
-- ``MediaCrawler.exe``（console=True）：承担后端服务与平台 worker。
+- ``SiYe.exe``（console=True）：承担后端服务与平台 worker。
   worker 子进程是通过 ``sys.executable`` 拉起的，且父子进程用 stdin/stdout 管道通信，
   所以**这个 EXE 必须保留控制台**（PyInstaller 的 windowed 模式会让 stdout 失效）。
 - ``四野.exe``（console=False）：本文件里的"启动器"角色 = 无窗口 + 托盘图标。
@@ -41,7 +41,7 @@ HEALTH_URL = f"{BASE_URL}/api/health"
 BACKEND_READY_TIMEOUT_SECONDS = 60
 SHUTDOWN_TIMEOUT_SECONDS = 25
 APP_TITLE = "四野 · 聚合搜索"
-MAIN_EXE_NAME = "MediaCrawler.exe"
+MAIN_EXE_NAME = "SiYe.exe"
 LOCK_NAME = "launcher.lock"
 LOG_DIR_PARTS = ("data", "logs")
 
@@ -74,7 +74,7 @@ def main_exe_command(
     """构造"主程序（console 版）"的启动命令。
 
     启动器自身是无窗口 EXE，不能拿 ``sys.executable`` 去跑后端——那样后端也会没有控制台，
-    worker 子进程的 stdout 管道就废了。所以这里显式找同目录的 ``MediaCrawler.exe``；
+    worker 子进程的 stdout 管道就废了。所以这里显式找同目录的 ``SiYe.exe``；
     源码模式下则用当前解释器跑 ``tray_main.py``。
     """
     exe = executable if executable is not None else sys.executable

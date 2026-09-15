@@ -48,7 +48,7 @@ def test_detect_role_worker_wins_over_other_flags() -> None:
 
 
 def test_frozen_launcher_targets_sibling_console_exe(tmp_path: Path) -> None:
-    """打包后必须拉起同目录的 MediaCrawler.exe（console 版），而不是启动器自己。"""
+    """打包后必须拉起同目录的 SiYe.exe（console 版），而不是启动器自己。"""
     launcher = tmp_path / "四野.exe"
     launcher.write_bytes(b"stub")
     console_exe = tmp_path / MAIN_EXE_NAME

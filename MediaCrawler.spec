@@ -75,7 +75,7 @@ python_options = [
 ]
 
 # 两个 EXE 共用同一份入口脚本（tray_main.py），靠参数区分角色：
-# - MediaCrawler.exe（console=True）：后端服务 + 平台 worker。
+# - SiYe.exe（console=True）：后端服务 + 平台 worker。
 #   worker 子进程经由 sys.executable 拉起并靠 stdin/stdout 管道通信，
 #   所以**必须保留控制台**（windowed 模式下 stdout 不可用）。
 # - 四野.exe（console=False）：托盘启动器。它把上面那个 EXE 以隐藏窗口方式拉起，
@@ -85,7 +85,7 @@ exe_backend = EXE(
     a.scripts,
     python_options,
     exclude_binaries=True,
-    name="MediaCrawler",
+    name="SiYe",
     icon=str(ROOT / "assets" / "siye-icon.ico"),
     debug=False,
     bootloader_ignore_signals=False,

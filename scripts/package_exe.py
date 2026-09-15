@@ -16,7 +16,7 @@ FORBIDDEN_PARTS = {
 
 def validate(distribution: Path) -> None:
     required = (
-        distribution / "MediaCrawler.exe",
+        distribution / "SiYe.exe",
         distribution / "四野.exe",
         distribution / "browser_extension",
         distribution / "LICENSE",

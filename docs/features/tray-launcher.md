@@ -19,7 +19,7 @@
 ## 关键决定
 
 - **两个 EXE 分工，不能合并**：
-  - `MediaCrawler.exe`（`console=True`）：后端 + 平台 worker。**必须保留控制台** ——
+  - `SiYe.exe`（`console=True`）：后端 + 平台 worker。**必须保留控制台** ——
     worker 子进程经 `sys.executable` 拉起，靠 **stdin/stdout 管道**通信，改成无窗口会破坏通信。
   - `四野.exe`（`console=False`）：托盘启动器，用 `CREATE_NO_WINDOW` 隐藏拉起上面那个。
 - 单实例：`data/launcher.lock` 文件锁；第二次双击只打开已有页面。
@@ -39,7 +39,7 @@
 - 复用外部已有后端时，退出只关托盘、后端继续常驻（界面会提示「已有服务保持运行」）。
 - `taskkill /F` 兜底**不会**触发 FastAPI 的 shutdown 清理（优雅通道成立时无碍）。
 - 托盘菜单的真实鼠标操作与 Windows 窗口表现**仍需人工实机验收**；
-  自动化只验证进程行为与编译配置（PE subsystem：`MediaCrawler.exe=3` Console、`四野.exe=2` GUI）。
+  自动化只验证进程行为与编译配置（PE subsystem：`SiYe.exe=3` Console、`四野.exe=2` GUI）。
 - 发布前必须**全新打包**，不要复用被运行过的 `dist/`（里面会带上用户数据）。
 
 ## 测试怎么跑
