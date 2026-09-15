@@ -9,7 +9,7 @@ from aggregate_search.models import UnifiedSearchResult
 from aggregate_search.protocol import WorkerRequest, parse_event_line
 from base.runtime_paths import application_root
 from ..schemas.favorites import FavoritePlatformInfo, FavoritesJobRequest, FavoritesJobResponse
-from .accounts import mark_login_required_from_search
+from .accounts import mark_login_required_from_search, evidence_token, record_usage
 from .remote_favorites_store import get_remote_favorites_store
 from .worker_process import drain_stderr_to_eof, spawn_worker, terminate_worker
 
@@ -25,6 +25,7 @@ class _Job:
         self.completed_at: Optional[datetime] = None
         self.limit = request.limit_per_platform
         self.order = list(request.platforms)
+        self.evidence_tokens = {p: evidence_token(p) for p in self.order}
         self.platforms = {p: FavoritePlatformInfo() for p in self.order}
         self.items: Dict[str, List[UnifiedSearchResult]] = {p: [] for p in self.order}
         self.task: Optional[asyncio.Task] = None
@@ -182,7 +183,7 @@ class FavoritesJobManager:
                         error = event.data or {}
                         info.status = error.get("type", "failed")
                         info.error_summary = str(error.get("message") or "收藏夹同步失败")[:160]
-                        if info.status == "login_required":
+                        if info.status == "login_required" and record_usage(platform, "favorites", info.status, job.evidence_tokens[platform]):
                             mark_login_required_from_search(platform)
                     elif event.event == "done":
                         done = True
@@ -230,7 +231,9 @@ class FavoritesJobManager:
                     error_summary=effective_error,
                     requested_limit=job.limit,
                 ))
+                record_usage(platform, "favorites", effective_status, job.evidence_tokens[platform])
             except Exception:
+                record_usage(platform, "favorites", "failed", job.evidence_tokens[platform])
                 job.persistence_error = "同步结果未能保存到本机，关闭程序后可能丢失，请检查磁盘空间后重试"
 
     async def cleanup(self) -> None:

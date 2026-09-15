@@ -318,9 +318,9 @@ test("consumeUnverifiedWarning: 同一次页面生命周期只允许一次", () 
   assert.equal(consumeUnverifiedWarning(), false);
 });
 
-test("accountSummaryLabel: 浮层文案（可公开搜索保留，但不计入登录）", () => {
+test("accountSummaryLabel: 浮层文案（未验证不推断搜索能力）", () => {
   assert.equal(accountSummaryLabel({ status: "connected", verified: true, profile_exists: true, safe_error_code: null }), "已连接");
-  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: true, safe_error_code: null }), "可公开搜索");
+  assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: true, safe_error_code: null }), "登录待确认");
   assert.equal(accountSummaryLabel({ status: "unverified", verified: false, profile_exists: false, safe_error_code: null }), "尚未验证");
   assert.equal(accountSummaryLabel({ status: "expired", verified: false, profile_exists: true, safe_error_code: null }), "登录已失效");
   assert.equal(accountSummaryLabel({ status: "failed", verified: false, profile_exists: true, safe_error_code: null }), "同步失败");
@@ -383,11 +383,15 @@ test("accountCardStatusLabel: 与诊断行一致的状态沿用基础文案", ()
   assert.equal(accountCardStatusLabel({ status: "unavailable" }), "暂未确认登录");
 });
 
-test("账号使用提示区分公开搜索、个人收藏和平台限流", () => {
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({}) })).includes("尚未确认账号登录"));
-  assert.ok(accountUsageHint(acc({ status: "connected", verified: true, diagnostic: diagnostic({}) })).includes("登录已确认"));
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "rate_limited" }) })).includes("不代表账号已退出登录"));
-  assert.ok(accountUsageHint(acc({ diagnostic: diagnostic({ search_available: false, limitation_code: "login_required" }) })).includes("请重新登录"));
+test("重新确认登录后，旧搜索失败不能要求用户再次登录", () => {
+  const confirmed = acc({ status: "connected", verified: true });
+  const hint = accountUsageHint(confirmed);
+  for (const limitation_code of ["login_required", "rate_limited", "platform_unavailable"]) {
+    assert.equal(accountUsageHint({ ...confirmed, diagnostic: diagnostic({ search_available: false, limitation_code }) }), hint);
+  }
+  assert.ok(hint.includes("无需重复登录"));
+  assert.ok(accountUsageHint(acc({ profile_exists: true })).includes("尚未确认是否有效"));
+  assert.ok(accountUsageHint(acc({ status: "expired" })).includes("请重新扫码登录"));
 });
 
 test("accountCardStatusLabel: 小红书风控特例 → 验证请求受限", () => {
@@ -415,4 +419,11 @@ test("状态文案单一来源：卡片与诊断行对同一状态不再产生�
       `状态 ${status} 在两处语境应一致`,
     );
   }
+});
+
+import { accountOperationLabel } from "../src/lib/accounts.js";
+test("功能证据不把未检测变成可用，也保留观察时间", () => {
+  assert.equal(accountOperationLabel("search"), "搜索：尚未检测");
+  assert.ok(accountOperationLabel("favorites", {status: "succeeded", checked_at: "2026-09-14T10:00:00Z"}).startsWith("最近收藏同步成功 · "));
+  assert.ok(accountOperationLabel("search", {status: "rate_limited", checked_at: "2026-09-14T10:00:00Z"}).startsWith("最近搜索受到平台限制 · "));
 });

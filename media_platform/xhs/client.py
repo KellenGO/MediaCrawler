@@ -252,11 +252,23 @@ class XiaoHongShuClient(ReusableHttpClientMixin, AbstractApiClient):
             return response.json()
         return None
 
+    async def browser_login_confirmed(self) -> bool:
+        """Use the same personal-profile control as the interactive login flow."""
+        if self.playwright_page is None:
+            return False
+        try:
+            return await self.playwright_page.is_visible(
+                "xpath=//a[contains(@href, '/user/profile/')]//span[text()='我']",
+                timeout=500,
+            )
+        except Exception:
+            return False
     async def pong(
         self,
         raise_on_error: bool = False,
         browser_context: object = None,
     ) -> bool:
+
         """
         Check if login state is still valid by querying self user info
         Args:
@@ -277,15 +289,30 @@ class XiaoHongShuClient(ReusableHttpClientMixin, AbstractApiClient):
                 # query_self 仅在 HTTP 200 时返回响应 —— None 表示接口异常
                 # 响应（403/5xx 等），绝不能被误判为"明确未登录"。
                 raise DataFetchError("selfinfo 接口未返回有效响应")
-            if self_info and self_info.get("data", {}).get("result", {}).get("success"):
+            # A missing success flag is an unknown response, not logout.
+            result = (self_info or {}).get("data", {}).get("result", {})
+            success = result.get("success") if isinstance(result, dict) else None
+            if success is True:
                 ping_flag = True
+            elif success is False:
+                ping_flag = False
+            elif raise_on_error:
+                raise DataFetchError("selfinfo 响应无法确认登录状态")
         except Exception as e:
             utils.logger.error(
                 f"[XiaoHongShuClient.pong] Check login state failed: {e}, and try to login again..."
             )
+            if isinstance(e, XhsRateLimitError):
+                if raise_on_error:
+                    raise
+                return False
+            if await self.browser_login_confirmed():
+                return True
             if raise_on_error:
                 raise
             ping_flag = False
+        if not ping_flag and await self.browser_login_confirmed():
+            return True
         utils.logger.info(f"[XiaoHongShuClient.pong] Login state result: {ping_flag}")
         return ping_flag
 

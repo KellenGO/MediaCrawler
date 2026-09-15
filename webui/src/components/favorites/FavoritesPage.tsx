@@ -172,8 +172,8 @@ export function FavoritesPage({ activeTab, onTabChange, onNavigateAccounts }: Fa
             <div className="page-heading remote-heading">
               <div><h2>跨平台收藏</h2><p className="description">从已登录的平台读取收藏，可再保存到本地。</p></div>
               <button type="button" className="btn primary" disabled={remote.cancelling || (!remote.canCancel && (remote.busy || !selected.size))} onClick={() => remote.canCancel ? void remote.cancel() : void remote.sync([...selected])}>
-                {remote.cancelling || (remote.busy && !remote.canCancel) ? <Loader2 className="spinner" /> : remote.canCancel ? <X /> : <RefreshCw />}
-                {remote.cancelling ? "正在取消" : remote.canCancel ? "取消同步" : remote.busy ? "正在启动同步" : data ? "重新同步" : "同步收藏"}
+                {remote.busy || remote.cancelling ? <Loader2 className="spinner" aria-hidden="true" /> : <RefreshCw />}
+                {remote.cancelling ? "正在取消" : remote.canCancel ? "正在同步 · 取消" : remote.busy ? "正在启动同步" : data ? "重新同步" : "同步收藏"}
               </button>
             </div>
             <div className="scope collection-scope" aria-label="收藏同步平台">
@@ -247,7 +247,7 @@ export function FavoritesPage({ activeTab, onTabChange, onNavigateAccounts }: Fa
                       className={`library-side-item ${selection.kind === "collection" && selection.id === collection.id ? "active" : ""}`}
                       onClick={() => setSelection({ kind: "collection", id: collection.id })}
                     >
-                      <FolderHeart aria-hidden="true" />{collection.name}<span>{collection.item_count}</span>
+                      <FolderHeart aria-hidden="true" /><span className="library-folder-name" title={collection.name}>{collection.name}</span><span className="library-folder-count">{collection.item_count}</span>
                     </button>
                     <button
                       type="button"
@@ -347,7 +347,7 @@ export function FavoritesPage({ activeTab, onTabChange, onNavigateAccounts }: Fa
           <p className="collection-count">本机已保存 {data.results.length} 条 · 每次最多更新各平台最新 100 条，未取到的旧内容保留</p>
           <div className="progress-strip" aria-live="polite">
             {Object.entries(data.platforms).map(([platform, info]) => info && <span key={platform} className="progress-item">
-              {PLATFORM_LABELS[platform as PlatformSlug]}：{STATUS_LABELS[info.status]} · 本次 {info.result_count} 条
+              {PLATFORM_LABELS[platform as PlatformSlug]}：{info.status === "running" ? "同步中" : STATUS_LABELS[info.status]} · 本次 {info.result_count} 条
               {info.synced_at && <small>同步于 {new Date(info.synced_at).toLocaleString("zh-CN")}</small>}
             </span>)}
           </div>

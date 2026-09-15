@@ -421,6 +421,12 @@ def _state_of(platform: str) -> Dict[str, Any]:
 
 
 def _set_state(platform: str, **kw: Any) -> Dict[str, Any]:
+    if kw.get("status") in ("syncing", "verifying", "disconnected"):
+        _evidence_revision[platform] = _evidence_revision.get(platform, 0) + 1
+        _verification_checks.pop(platform, None)
+        if kw["status"] in ("syncing", "disconnected"):
+            _usage_evidence.pop(platform, None)
+            _last_search_outcomes.pop(platform, None)
     st = _state_of(platform)
     for k, v in kw.items():
         st[k] = v
@@ -444,6 +450,60 @@ _account_generation: Dict[str, int] = {}
 # 只保留最近一次搜索的安全状态与路径信息，绝不保存异常文本、请求体或
 # Cookie。Platform Doctor 读取它做本地状态汇总，不参与搜索决策。
 _last_search_outcomes: Dict[str, Dict[str, Any]] = {}
+_evidence_revision: Dict[str, int] = {}
+_evidence_sequence = 0
+_usage_evidence: Dict[str, Dict[str, Any]] = {}
+_verification_checks: Dict[str, Dict[str, Any]] = {}
+
+
+def evidence_token(platform: str):
+    global _evidence_sequence
+    _evidence_sequence += 1
+    return (_evidence_revision.get(platform, 0), _evidence_sequence)
+
+
+def record_usage(platform: str, operation: str, status: str, token) -> bool:
+    """Accept only current-session, live observations; never persist secrets."""
+    if token[0] != _evidence_revision.get(platform, 0):
+        return False
+    if status not in {"succeeded", "empty", "login_required", "rate_limited", "timed_out", "failed"}:
+        return False
+    records = _usage_evidence.setdefault(platform, {})
+    previous = max(records.values(), key=lambda item: item["started"], default=None)
+    if previous and previous["started"] > token[1]:
+        return False
+    if status in ("succeeded", "empty") and _state_of(platform)["status"] == "expired":
+        _set_state(platform, status="unverified", verified=False,
+                   safe_error_code=None, safe_message="最近操作已成功，登录身份等待重新确认。")
+        _verification_checks.pop(platform, None)
+    records[operation] = {"status": status, "checked_at": datetime.now(timezone.utc).isoformat(),
+                          "started": token[1]}
+    return True
+
+
+def usage_evidence(platform: str):
+    return {key: {"status": value["status"], "checked_at": value["checked_at"]}
+            for key, value in _usage_evidence.get(platform, {}).items()}
+
+
+async def begin_scan_login(platform: str) -> None:
+    _set_state(platform, status="syncing", verified=False, safe_error_code=None, safe_message=None)
+    await clear_session_snapshot(platform)
+
+
+def finish_scan_login(platform: str, succeeded: bool) -> None:
+    # The login worker emits success only after verification while its browser
+    # context is still open. Reopening a different context must not replace it.
+    _finalize_verdict(platform, "verified" if succeeded else "unavailable", None, False)
+    _verification_checks[platform]["evidence"]["source"] = "scan_login"
+
+
+def recent_verification(platform: str):
+    check = _verification_checks.get(platform)
+    if check and time.monotonic() - check["at"] < 60:
+        return check["result"]
+    return None
+
 
 
 def get_account_generation(platform: str) -> int:
@@ -657,6 +717,8 @@ def mark_login_required_from_search(platform: str) -> None:
         st["status"] = "disconnected"
     st["verified"] = False
     st["safe_error_code"] = "login_required"
+    # A live rejection invalidates a previously cached successful check.
+    _verification_checks.pop(platform, None)
     name = PLATFORM_DISPLAY_NAMES.get(platform, platform)
     st["safe_message"] = f"{name}登录状态已失效，请前往账号设置重新同步"
     # Clear the in-memory snapshot with the account state so stale cookies
@@ -1015,7 +1077,8 @@ def _platform_diagnostic(platform: str) -> PlatformDiagnostic:
         limitation_code=limitation_code,
         user_message=user_message,
         recommended_action=recommended_action,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=(outcome.get("checked_at") if outcome else
+                    _verification_checks.get(platform, {}).get("evidence", {}).get("checked_at")),
     )
 
 
@@ -1040,6 +1103,8 @@ def get_accounts() -> List[Dict[str, Any]]:
             "safe_message": st["safe_message"],
             "browser_backend": st["browser_backend"],
             "diagnostic": get_platform_diagnostic(platform),
+            "usage": usage_evidence(platform),
+            "verification": _verification_checks.get(platform, {}).get("evidence"),
         })
     return out
 
@@ -1419,10 +1484,10 @@ async def verify_platform(platform: str, previous_status: Optional[str] = None) 
                     await playwright.stop()
                 except Exception:
                     pass
-        # Keep a snapshot only after real verification succeeds.
+        # An inconclusive check must preserve a still-usable snapshot.
         if verdict is True or verdict == "verified":
             await set_session_snapshot(platform, snapshot_cookies or {})
-        else:
+        elif verdict is False or verdict == "not_logged_in":
             await clear_session_snapshot(platform)
         verify_t["total_ms"] = int((time.perf_counter() - _t0) * 1000)
         result = _finalize_verdict(platform, verdict, backend, was_connected)
@@ -1440,6 +1505,12 @@ def _finalize_verdict(
     - 明确未登录：之前 connected → expired；从未确认 → unverified。
     profile_exists 本身绝不被当作已登录。
     """
+    _verification_checks[platform] = {
+        "at": time.monotonic(),
+        "evidence": {"status": "verified" if verdict is True else "not_logged_in" if verdict is False else verdict,
+                     "checked_at": datetime.now(timezone.utc).isoformat(), "source": "platform_check"},
+        "result": {"success": True, "platform": platform, "verified": verdict is True or verdict == "verified", "cached": True},
+    }
     # 兼容旧式布尔（True/False monkeypatch 与内部调用点）
     if verdict is True or verdict == "verified":
         _set_state(platform, status="connected", verified=True,
@@ -1458,7 +1529,7 @@ def _finalize_verdict(
 
     # 三态：验证过程不可用（网络/超时/403 风控/导航失败/客户端技术
     # 错误）→ 无法得出登录结论 —— 不得声称"未登录"或"会话失效"。
-    if verdict == "unavailable":
+    if verdict not in (True, False, "verified", "not_logged_in", "rate_limited"):
         msg = "当前无法验证登录状态，仍可尝试搜索或稍后重新验证"
         _set_state(platform, status="unavailable", verified=False,
                    safe_error_code="login_verification_unavailable",
@@ -1470,7 +1541,7 @@ def _finalize_verdict(
             "safe_message": msg,
         }
 
-    # Round 17.2: 平台风控（461/471 验证码/访问限制）→ 独立"验证受限"语义：
+    # 平台风控（461/471 验证码/访问限制）→ 独立"验证受限"语义：
     # 账号 status 仍用现有 "unavailable"，绝不虚构已连接或登录失效；
     # profile 保留、不清 Cookie、不生成 login_required、不提示重新同步。
     if verdict == "rate_limited":
@@ -1522,19 +1593,20 @@ async def _pong_with_profile(
 ) -> str:
     """Verify the profile session with the platform's own client.
 
-    Three-state verdict (Round 10): "verified" = 真实确认登录；
+    Three-state verdict: "verified" = 真实确认登录；
     "not_logged_in" = 平台检查明确返回未登录；"unavailable" = 网络错误、
     超时、403 风控、导航失败或客户端技术错误 —— 无法得出登录结论，
     绝不能当作"明确未登录"。返回 False/True 的旧式布尔调用点由
     verify_platform 兼容处理。
 
-    Round 16.1（页面策略）：
-    - xhs / bilibili 纯 HTTP pong，零页面、零导航；
+    页面策略：
+    - xhs 优先 HTTP，无法确认时复核同一 profile 的个人入口；风控直接停止；
+    - bilibili 纯 HTTP pong，零页面、零导航；
     - douyin 需要页面读 localStorage：只创建并导航一次（同一页面）；
     - zhihu 已有非空 d_c0 → 零页面直接 HTTP pong；缺 d_c0 → 创建同一
       页面，官网 + 搜索页各导航一次刷新 Cookie。
-    - 页面导航统一使用轻量加载（domcontentloaded + image/media/font/
-      analytics 拦截）；同步全程最多一个验证页面。
+    - 验证页面使用轻量加载（domcontentloaded + image/media/font/
+      analytics 拦截）；小红书缺少签名 cookie 时可能先初始化官网。
     - metrics（可选）：记录 navigation_ms（导航阶段耗时，整数毫秒）。
     """
     urls = PLATFORM_COOKIE_URLS.get(platform)
@@ -1584,9 +1656,36 @@ async def _pong_with_profile(
             # 403 风控/接口异常会传播到这里被 except 归为 unavailable；
             # 只有 200 + 明确无登录（success=false）才返回 False →
             # not_logged_in。默认 False 的 console/login 行为保持不变。
-            # Round 17.2: 461/471 平台风控（验证码/访问限制）→ 独立 verdict
+            # 461/471 平台风控（验证码/访问限制）→ 独立 verdict
             # "rate_limited"，绝不是"明确未登录"也不是笼统的"无法验证"。
-            return "verified" if bool(await client.pong(raise_on_error=True)) else "not_logged_in"
+            try:
+                verdict = "verified" if bool(await client.pong(raise_on_error=True)) else "not_logged_in"
+            except XhsRateLimitError:
+                return "rate_limited"
+            except Exception:
+                verdict = "unavailable"
+            if verdict == "verified":
+                return verdict
+            # HTTP and the browser can disagree. Confirm using the same "Me"
+            # control used by scan login, in this exact profile, once only.
+            page = None
+            try:
+                await _install_light_routes()
+                page = await context.new_page()
+                await _goto_light(page, PLATFORM_HOME_URLS["xhs"])
+                await page.wait_for_timeout(1000)
+                client.playwright_page = page
+                if await client.browser_login_confirmed():
+                    return "verified"
+            except Exception:
+                pass
+            finally:
+                if page is not None:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
+            return verdict
         except XhsRateLimitError:
             return "rate_limited"
         except Exception:
@@ -1595,7 +1694,7 @@ async def _pong_with_profile(
         # DouYinClient.pong 依赖 playwright_page 读 localStorage（快路径），
         # 绝不能传 None —— 从该 profile context 创建真实页面并打开官网，
         # 让页面带上刚导入的 Cookie；导航失败 = 无法访问官方站点确认登录
-        # → unavailable（不是"明确未登录"）。Round 16.1：全程只创建/导航
+        # → unavailable（不是"明确未登录"）。全程只创建/导航
         # 这一个页面，使用轻量加载。
         page = None
         try:
@@ -1642,7 +1741,7 @@ async def _pong_with_profile(
         except Exception:
             return "unavailable"
     if platform == "zhihu":
-        # 分级验证（Round 16/16.1）：
+        # 分级验证（）：
         #   - 平台登录标记检查：profile Cookie 中已有非空 d_c0 → 纯 HTTP
         #     pong 直接验证，零页面、零导航；
         #   - 缺少 d_c0（往往只在真实访问知乎页面后由浏览器生成）→ 才创建

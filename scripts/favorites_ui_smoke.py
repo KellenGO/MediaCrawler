@@ -51,7 +51,7 @@ def main():
         origin = f"http://127.0.0.1:{server.server_port}"
         errors = []
         writes = []
-        failures = {"note": False, "sync": True, "cancel": True}
+        failures = {"note": False, "sync": True, "cancel": True, "verified": False}
         login_polls = []
 
         def route_request(route):
@@ -87,12 +87,12 @@ def main():
             elif url.path == "/api/health":
                 route.fulfill(json={"status": "ok", "environment_status": "ok", "backend_available": True})
             elif url.path == "/api/search/accounts":
-                route.fulfill(json={"accounts": [{"platform": "xhs", "status": "unverified", "verified": False,
+                route.fulfill(json={"accounts": [{"platform": "xhs", "status": "connected" if failures["verified"] else "unverified", "verified": failures["verified"],
                     "profile_exists": True, "display_name": None, "last_verified_at": None,
                     "safe_error_code": None, "safe_message": None, "browser_backend": "edge",
-                    "diagnostic": {"platform": "xhs", "search_available": True, "search_mode": "browser_fallback",
+                    "diagnostic": {"platform": "xhs", "search_available": False, "search_mode": "unavailable",
                         "account_state": "unverified", "snippet_available": True, "hydration_available": True,
-                        "fallback_active": True, "limitation_code": "account_unverified", "user_message": None,
+                        "fallback_active": True, "limitation_code": "login_required", "user_message": "历史搜索要求登录",
                         "recommended_action": None, "checked_at": None}}]})
             elif url.path == "/api/search/login" and req.method == "POST":
                 route.fulfill(json={"job_id": "scan-test", "platform": "xhs", "status": "running", "message": "测试等待扫码"})
@@ -142,6 +142,19 @@ def main():
                 expect(page.get_by_text("新的学习备注", exact=True)).to_be_visible()
                 assert store.get_item("xhs", "a")["note"] == "新的学习备注"
                 (ROOT / "build").mkdir(exist_ok=True)
+                page.get_by_role("button", name="新建收藏夹", exact=True).click()
+                long_name = "LongFolder" * 6
+                page.get_by_role("textbox", name="新收藏夹名称").fill(long_name)
+                page.get_by_role("button", name="创建收藏夹", exact=True).click()
+                for width in (1440, 1024, 390):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    expect(page.get_by_text(long_name, exact=True)).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    label = page.locator(".library-folder-name").filter(has_text=long_name)
+                    assert label.evaluate("el => el.scrollWidth > el.clientWidth")
+                    assert label.get_attribute("title") == long_name
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.get_by_role("button", name="重命名收藏夹 跨平台学习", exact=True).hover()
                 page.screenshot(path=str(ROOT / "build" / "review-favorites-desktop.png"), full_page=True)
                 for width in (1024, 390):
                     page.set_viewport_size({"width": width, "height": 844})
@@ -164,13 +177,14 @@ def main():
                 expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
                 failures["sync"] = False
                 page.get_by_role("button", name="重新同步", exact=True).click()
-                expect(page.get_by_role("button", name="取消同步", exact=True)).to_be_enabled()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True)).to_be_enabled()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True).locator(".spinner")).to_be_visible()
                 page.screenshot(path=str(ROOT / "build" / "review-cancel-button.png"), full_page=True)
-                page.get_by_role("button", name="取消同步", exact=True).click()
+                page.get_by_role("button", name="正在同步 · 取消", exact=True).click()
                 expect(page.get_by_role("alert")).to_contain_text("测试取消失败")
                 failures["cancel"] = False
-                page.get_by_role("button", name="取消同步", exact=True).click()
-                expect(page.get_by_role("button", name="取消同步", exact=True)).to_have_count(0)
+                page.get_by_role("button", name="正在同步 · 取消", exact=True).click()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True)).to_have_count(0)
                 expect(page.get_by_role("button", name="重新同步", exact=True)).to_be_enabled()
                 expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
                 page.set_viewport_size({"width": 390, "height": 844})
@@ -178,7 +192,12 @@ def main():
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 page.goto(origin + "/#/settings/accounts")
                 expect(page.get_by_text("登录待确认", exact=True)).to_be_visible()
-                expect(page.get_by_text("可以先尝试搜索公开内容，但尚未确认账号登录。同步个人收藏前请先确认登录；若平台要求登录，再重新登录。", exact=True)).to_be_visible()
+                expect(page.get_by_text("本机已保存登录信息，尚未确认是否有效；可点击重新验证，或重新扫码登录。", exact=True)).to_be_visible()
+                failures["verified"] = True
+                page.reload()
+                expect(page.get_by_text("登录信息已确认，无需重复登录。", exact=True)).to_be_visible()
+                expect(page.get_by_text("暂时无法搜索", exact=True)).to_have_count(0)
+                expect(page.get_by_text("历史搜索要求登录", exact=True)).to_have_count(0)
                 page.screenshot(path=str(ROOT / "build" / "review-account-wording.png"), full_page=True)
                 page.get_by_role("button", name="扫码登录", exact=True).click()
                 expect(page.get_by_text("测试等待扫码", exact=True)).to_be_visible()

@@ -130,6 +130,7 @@ async def _run_login_worker(platform: str, job_id: str):
     proc = None
     stdout_task = None
     stderr_task = None
+    await accounts_service.begin_scan_login(platform)
     done_received = False
     error_received = False
     final_status = "failed"
@@ -252,6 +253,7 @@ async def _run_login_worker(platform: str, job_id: str):
         await terminate_worker(proc)
         _login_procs.pop(job_id, None)
 
+    accounts_service.finish_scan_login(platform, final_status == "succeeded")
     _login_jobs[job_id].update(
         status=final_status, message=final_message,
         completed_at=datetime.now(timezone.utc).isoformat())
@@ -570,8 +572,14 @@ async def sync_account_cookies(
 
 
 @search_router.post("/accounts/{platform}/verify")
-async def verify_account(platform: str):
+async def verify_account(platform: str, reuse_recent: bool = False):
     """Re-open the headless profile and verify the session via pong."""
+    if reuse_recent:
+        if platform in accounts_service.PLATFORM_PROFILE_DIRS and not accounts_service.profile_dir_for(platform).is_dir():
+            return {"success": True, "platform": platform, "verified": False, "status": "disconnected", "skipped": True}
+        cached = accounts_service.recent_verification(platform)
+        if cached:
+            return cached
     async with _account_operation_gate(
         platform, "verify", "验证账号",
         "该平台正在后台验证登录状态，请稍等验证完成后再试",

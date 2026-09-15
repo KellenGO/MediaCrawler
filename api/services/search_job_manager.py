@@ -31,6 +31,7 @@ from .accounts import (
     get_session_snapshot,
     mark_login_required_from_search,
     record_search_outcome,
+    evidence_token, record_usage,
     search_login_block,
 )
 from . import result_cache
@@ -744,12 +745,12 @@ class SearchJobManager:
                 job.set_platform_status(
                     platform, error_type,
                     error_summary=_safe_error_summary(ed.get("message", "")))
-                # Round 14.2: worker 明确 login_required → 反向降级 accounts
+                # worker 明确 login_required → 反向降级 accounts
                 # 服务中的账号状态（accounts 是账号状态的唯一事实来源）。
                 # 账号同步失败绝不能让搜索任务崩溃：try/except 隔离，日志
                 # 只记录平台与异常类型，不记录 worker 原始 body。
                 # rate_limited / failed / timed_out 绝不修改账号状态。
-                if error_type == "login_required":
+                if error_type == "login_required" and record_usage(platform, "search", error_type, job.evidence_tokens[platform]):
                     try:
                         mark_login_required_from_search(platform)
                     except Exception as exc:
@@ -947,10 +948,11 @@ class _ActiveJob:
         self.keyword = keyword
         self.platforms = platforms
         self.account_generations = {p: get_account_generation(p) for p in platforms}
+        self.evidence_tokens = {p: evidence_token(p) for p in platforms}
         self.limit_per_platform = limit_per_platform
-        # Round 16: 用户主动"重新搜索"时绕过结果缓存。
+        # 用户主动"重新搜索"时绕过结果缓存。
         self.bypass_cache = bypass_cache
-        # Round 15: 按平台有效数量。platform_limits 已由 schema 校验（1–20
+        # 按平台有效数量。platform_limits 已由 schema 校验（1–20
         # 严格整数）；只保留本次 platforms 中的平台，缺失平台回退统一值。
         # 每个平台拿到自己的标量，绝不共享最后一个数字。
         if platform_limits is None:
@@ -977,7 +979,7 @@ class _ActiveJob:
         self.timings: Dict[str, PlatformTimingInfo] = {
             p: PlatformTimingInfo() for p in platforms}
         self.total_ms: Optional[int] = None
-        # ── Per-job cancel coordination (Round 13) ─────────────────────
+        # ── Per-job cancel coordination () ─────────────────────
         # cancel_lock: 同一 job 只允许一套并发清理。
         # cancel_done: 清理完成信号（重复取消等待它即可，幂等）。
         self.cancel_lock = asyncio.Lock()
@@ -1119,7 +1121,7 @@ class _ActiveJob:
     def finalize(self) -> None:
         self.completed_at = datetime.now(timezone.utc).isoformat()
         self.total_ms = self._ms_since(self._start_ts)
-        # Round 16.1: 平台结果按原始相关性（rank=source index）稳定重排。
+        # 平台结果按原始相关性（rank=source index）稳定重排。
         # 渐进展示期间保持到达顺序（首条尽早可见）；终态统一恢复源顺序。
         # 非 xhs 平台的 rank 即到达顺序，排序为空操作。stable sort 保证
         # 同 rank（理论不发生）不改变相对顺序。
@@ -1137,7 +1139,8 @@ class _ActiveJob:
                     info.fetched_at = self.completed_at
                 # Platform Doctor consumes safe local metadata only; this does
                 # not alter the search result or worker decision path.
-                record_search_outcome(p, info.status, self.timings.get(p))
+                if not info.cache_hit and record_usage(p, "search", info.status, self.evidence_tokens[p]):
+                    record_search_outcome(p, info.status, self.timings.get(p))
         self._final_results = interleave_results(
             self.platform_results, platform_order=self.platforms)
 

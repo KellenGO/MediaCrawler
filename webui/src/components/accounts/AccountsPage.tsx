@@ -12,12 +12,10 @@ import {
   accountTone,
   diagnosticAccountStateLabel,
   diagnosticSearchModeLabel,
-  diagnosticTone,
-  diagnosticToneLabel,
   accountUsageHint,
+  accountOperationLabel,
   summarizeAccounts,
   type AccountTone,
-  type DiagnosticTone,
 } from "@/lib/accounts";
 import { MAX_PLATFORM_LIMIT, MIN_PLATFORM_LIMIT, PLATFORM_ORDER, parsePlatformLimitInput } from "@/lib/platformLimits";
 import {
@@ -101,33 +99,6 @@ const TONE_BADGE: Record<AccountTone, string> = {
   bad: "bg-danger-soft text-danger border-danger/40",
   idle: "bg-cyber-bg-tertiary text-cyber-text-muted border-cyber-border-subtle",
 };
-
-const DOCTOR_TONE_BADGE: Record<DiagnosticTone, string> = {
-  normal: "bg-ok-soft text-[#3d7d60] border-ok/40",
-  available: "bg-brand-soft text-brand-strong border-brand/40",
-  limited: "bg-warn-soft text-warn border-warn/40",
-  unavailable: "bg-danger-soft text-danger border-danger/40",
-};
-
-function DoctorCapabilityChip({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: "ok" | "limited" | "muted";
-}) {
-  const styles = tone === "ok"
-    ? "bg-ok-soft border-ok/30 text-[#3d7d60]"
-    : tone === "limited"
-      ? "bg-warn-soft border-warn/30 text-warn"
-      : "bg-cyber-bg-tertiary border-cyber-border-subtle text-cyber-text-muted";
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-medium ${styles}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${tone === "ok" ? "bg-ok" : tone === "limited" ? "bg-warn" : "bg-cyber-text-muted"}`} />
-      {label}
-    </span>
-  );
-}
 
 /**
  * 单个平台的搜索数量设置行（Round 15）：
@@ -227,9 +198,26 @@ interface AccountsPageProps {
 
 export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch, onNavigateHelp }: AccountsPageProps) {
   const { accounts, apiRunning } = useAccounts();
-  // Phase 5.1: 账号 sync/verify/delete 完成后立即刷新共享缓存。
+  // 账号 sync/verify/delete 完成后立即刷新共享缓存。
   const queryClient = useQueryClient();
-  // Round 15: 每个平台独立搜索数量（localStorage 持久化，修改即保存）。
+  // One queue on page entry. The server deduplicates recent checks; GET polling
+  // only reads local evidence and never causes platform traffic.
+  useEffect(() => {
+    if (activeSection !== "accounts" || apiRunning !== true) return;
+    let disposed = false;
+    const queue = [...PLATFORM_ORDER];
+    const run = async () => {
+      while (!disposed && queue.length) {
+        const platform = queue.shift()!;
+        try { await axios.post(`${API_BASE}/${platform}/verify?reuse_recent=true`); }
+        catch { /* Busy/limited checks are not retried automatically. */ }
+        finally { invalidateAccounts(queryClient); }
+      }
+    };
+    void run(); void run();
+    return () => { disposed = true; };
+  }, [activeSection, apiRunning, queryClient]);
+  // 每个平台独立搜索数量（localStorage 持久化，修改即保存）。
   const { limits, setLimit, resetAll } = usePlatformLimits();
   const { theme, setTheme } = useThemeStore();
   const homePreferences = useHomePreferencesStore();
@@ -238,9 +226,9 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
   >("checking");
   const [busy, setBusy] = useState<Record<string, string>>({});
   const [lastDiag, setLastDiag] = useState<Record<string, SyncResult>>({});
-  /** 诊断信息默认折叠（Round 14），用户点击"查看诊断"再展开。 */
+  /** 诊断信息默认折叠，用户点击"查看诊断"再展开。 */
   const [openDiag, setOpenDiag] = useState<Record<string, boolean>>({});
-  // ── 应用自带扫码登录（方案 A：主路径）────────────────────────────────
+  // ── 应用自带扫码登录────────────────────────────────
   // 面板按平台独立展开：旧实现用单个布尔量，展开一个平台会串到所有卡片。
   const [loginOpen, setLoginOpen] = useState<Record<string, boolean>>({});
   /** 每个平台最近一次登录任务（不随折叠/切换卡片丢失，用户回头能看到结果）。 */
@@ -259,7 +247,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
       if (cancelled) return;
       setExtensionVersion(probe.version);
       // 协议版本 2 只是兼容门；实际扩展版本必须 ≥ 1.1.3 —— 否则可能仍是
-      // Round 8 旧脚本（协议同为 2，但 ready/pong 不带 extension_version，
+      // 旧脚本（协议同为 2，但 ready/pong 不带 extension_version，
       // 后端已引入的 login_marker_presence 等字段不会被正确转发）。
       setExtensionState(probe.state);
     });
@@ -296,7 +284,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
     window.open(PLATFORM_LOGIN_URLS[platform] || "https://www.xiaohongshu.com", "_blank");
   }, []);
 
-  // ── 同步当前浏览器登录状态（Round 14.3：返回结构化结果，支持静默） ──
+  // ── 同步当前浏览器登录状态（返回结构化结果，支持静默） ──
   // 单平台按钮调用 silent=false（保留现有 toast）；一键同步调用
   // silent=true（避免连续四组单平台 toast，最终只出一条汇总 toast）。
   const syncAccount = useCallback(
@@ -368,7 +356,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
             ...(isSearchConflict ? { blockQueue: "search_in_progress" as const } : {}),
           };
         }
-        // Round 11：success toast 只允许在真实验证通过时显示 ——
+        // success toast 只允许在真实验证通过时显示 ——
         // status==="connected" && verified===true && 无安全错误码。
         // （unavailable 等场景绝不显示"同步成功且登录验证通过"。）
         if (result.verified && result.status === "connected" && !result.safe_error_code) {
@@ -388,7 +376,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
           if (!silent) toast.info(msg);
           return { platform, kind: "verifying", success: true, verified: false, safeMessage: msg };
         }
-        // Round 11：验证暂不可用（网络/超时/403 风控/导航失败）必须优先
+        // 验证暂不可用（网络/超时/403 风控/导航失败）必须优先
         // 显示后端 safe_message，绝不落入下方"尚未确认账号登录"的提示
         // （那会错误地声称明确未登录）。
         if (result.status === "unavailable" || result.safe_error_code === "login_verification_unavailable") {
@@ -430,7 +418,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
             ? { blockQueue: "search_in_progress" as const } : {}),
         };
       } finally {
-        // Phase 5.1: 同步完成（成功/失败/后台验证中）后立即刷新账号缓存。
+        // 同步完成（成功/失败/后台验证中）后立即刷新账号缓存。
         invalidateAccounts(queryClient);
       }
     },
@@ -451,7 +439,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
         ? `验证请求失败：${msg}`
         : "验证请求失败，请确认本地 API 已启动后刷新页面重试。");
     } finally {
-      // Phase 5.1: 验证完成（含后台验证进行中）后立即刷新账号缓存。
+      // 验证完成（含后台验证进行中）后立即刷新账号缓存。
       invalidateAccounts(queryClient);
     }
   }, [queryClient]);
@@ -475,12 +463,12 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
       toast.error(msg ? `清除失败：${msg}` : "清除失败，请确认本地 API 已启动。");
     } finally {
       setBusyPlatform(platform, "");
-      // Phase 5.1: 删除完成后立即刷新账号缓存。
+      // 删除完成后立即刷新账号缓存。
       invalidateAccounts(queryClient);
     }
   }, [queryClient]);
 
-  // ── 一键同步四个平台（Round 14.3 / Phase 4.3）────────────────────────
+  // ── 一键同步四个平台（/ ）────────────────────────
   // 固定顺序 xhs → douyin → bilibili → zhihu，最大并发 2（生产模块
   // runBulkSync 编排）；复用 syncAccount（silent=true，不弹单平台 toast）。
   const [bulkSyncing, setBulkSyncing] = useState(false);
@@ -494,7 +482,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
 
   /**
    * 手动"一键同步四个平台"队列。
-   * 打开程序时的自动同步由应用根部的 useAutoAccountSync 负责（Round 18），
+   * 打开程序时的自动同步由应用根部的 useAutoAccountSync 负责（），
    * 本页只保留用户主动触发的这一条路径。
    */
   const runSyncQueue = useCallback(async (
@@ -559,7 +547,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
 
   const handleBulkSync = useCallback(() => runSyncQueue(undefined), [runSyncQueue]);
 
-  // ── 应用自带扫码登录（方案 A：主路径）────────────────────────────────
+  // ── 应用自带扫码登录────────────────────────────────
   // 后端 POST /api/search/login 会用用户自己的 Edge/Chrome 打开一个可见窗口，
   // 扫码成功后会话直接写进搜索实际读取的 profile，并做一次真实验证。
   // 这是不依赖任何浏览器扩展的登录方式。
@@ -593,12 +581,8 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
     const name = PLATFORM_LABELS[job.platform as keyof typeof PLATFORM_LABELS] || job.platform;
     if (job.status === "succeeded") {
       toast.success(`${name} 登录成功，会话已验证并保存。`);
-      // 登录 worker 刚结束，主动验证一次让卡片从"未确认"翻成"已连接"；
-      // 验证可能撞上尚未释放的排他租约，失败也无妨 —— 仍刷新账号缓存。
-      void axios
-        .post(`${API_BASE}/${job.platform}/verify`)
-        .catch(() => undefined)
-        .finally(() => invalidateAccounts(queryClient));
+      // The backend already accepted the worker's in-context verification.
+      invalidateAccounts(queryClient);
       return;
     }
     if (job.status === "timed_out") {
@@ -659,7 +643,7 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
 
         <div className="settings-content">
 
-      {/* ── 搜索设置（Round 15） ── */}
+      {/* ── 搜索设置（） ── */}
       {activeSection === "search" && <section>
         <div className="settings-title"><h2>搜索设置</h2><p>为不同平台，留出合适的搜索数量。</p></div>
         <div>
@@ -763,7 +747,6 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
           const color = PLATFORM_COLORS[acc.platform as keyof typeof PLATFORM_COLORS] || "#4ca4dc";
           const tone = accountTone(acc);
           const diagnostic = acc.diagnostic;
-          const doctorTone = diagnostic ? diagnosticTone(diagnostic) : null;
           const hasDiag = !!diagnostic || !!lastDiag[acc.platform];
           const snippetLabel = diagnostic?.snippet_available === true
             ? "简介可用"
@@ -791,11 +774,6 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                     </h3>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {doctorTone && (
-                    <span className={`px-2 py-0.5 rounded-full text-[10.5px] border ${DOCTOR_TONE_BADGE[doctorTone]}`}>
-                      {diagnosticToneLabel(doctorTone)}
-                    </span>
-                  )}
                   {busyLabel && (
                     <span className="flex items-center gap-1.5 text-xs text-brand-strong">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -812,21 +790,11 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
               <div className="sr-only">后台会话：{acc.profile_exists ? "已存在" : "不存在"}；浏览器后端：{acc.browser_backend ? (BACKEND_TEXT[acc.browser_backend] || acc.browser_backend) : "未知"}</div>
 
               <p>{accountUsageHint(acc)}</p>
-              {diagnostic && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-brand/15 bg-brand-soft/35 px-2.5 py-2">
-                  <DoctorCapabilityChip
-                    label={diagnostic.search_available ? "可尝试搜索" : "暂时无法搜索"}
-                    tone={diagnostic.search_available ? "ok" : "limited"}
-                  />
-                  <DoctorCapabilityChip
-                    label={snippetLabel}
-                    tone={diagnostic.snippet_available === false ? "limited" : "ok"}
-                  />
-                  {diagnostic.fallback_active && (
-                    <DoctorCapabilityChip label="已启用备用搜索方式" tone="ok" />
-                  )}
-                </div>
-              )}
+              {acc.verification && <p>最近检查：{new Date(acc.verification.checked_at).toLocaleString("zh-CN")} · 平台登录验证</p>}
+              <div className="account-evidence" aria-live="polite">
+                <span>{accountOperationLabel("search", acc.usage?.search)}</span>
+                <span>{accountOperationLabel("favorites", acc.usage?.favorites)}</span>
+              </div>
 
               {acc.safe_message && (
                 <div className="mb-3 px-3.5 py-2 rounded-lg bg-warn-soft border border-warn/30 text-xs text-warn">
@@ -849,13 +817,14 @@ export function AccountsPage({ activeSection, onSectionChange, onNavigateSearch,
                     <div className="mt-2 px-3.5 py-2.5 rounded-lg bg-cyber-bg-tertiary border border-cyber-border-subtle text-[11px] text-cyber-text-secondary">
                       {diagnostic && (
                         <>
-                          <div className="text-cyber-text-primary mb-1 font-semibold">平台诊断</div>
-                          <div>当前路径：{diagnosticSearchModeLabel(diagnostic.search_mode)}</div>
+                          <div className="text-cyber-text-primary mb-1 font-semibold">历史搜索与内部诊断（非实时检测）</div>
+                          <p>以下信息可能来自重新登录之前，不代表当前搜索是否可用。</p>
+                          <div>记录路径：{diagnosticSearchModeLabel(diagnostic.search_mode)}</div>
                           <div>账号状态：{diagnosticAccountStateLabel(diagnostic.account_state)}</div>
                           <div>备用路径：{diagnostic.fallback_active ? "正在使用" : "未启用"}</div>
                           <div>简介能力：{snippetLabel}</div>
-                          <div>最近问题：{diagnostic.user_message || "无致命错误"}</div>
-                          <div>建议：{diagnostic.recommended_action || "当前无需处理"}</div>
+                          <div>诊断记录：{diagnostic.user_message || "暂无记录"}</div>
+                          <div>记录中的建议：{diagnostic.recommended_action || "无"}</div>
                         </>
                       )}
                       {lastDiag[acc.platform] && (
