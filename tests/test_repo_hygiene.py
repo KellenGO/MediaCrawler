@@ -18,6 +18,7 @@
 """
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -147,6 +148,56 @@ def test_requirements_match_pyproject():
     }
     assert mismatched == {}, f"依赖版本声明不一致: {mismatched}"
 
+
+
+# ── 3.5 产品版本号单一来源 ──────────────────────────────────────────────
+
+def _product_versions() -> dict:
+    """收集「产品版本」的三处声明：后端常量、webui 包、python 包。"""
+    health = (_ROOT / "api" / "services" / "environment_health.py").read_text(encoding="utf-8")
+    api_version = re.search(r'API_VERSION\s*=\s*"([^"]+)"', health).group(1)
+    web_version = json.loads(
+        (_ROOT / "webui" / "package.json").read_text(encoding="utf-8"))["version"]
+    project = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project_version = re.search(r'^version\s*=\s*"([^"]+)"', project, re.M).group(1)
+    return {
+        "api/services/environment_health.py": api_version,
+        "webui/package.json": web_version,
+        "pyproject.toml": project_version,
+    }
+
+
+def test_product_version_is_declared_consistently():
+    """产品版本号必须三处一致。
+
+    为什么需要这条：``/api/health`` 拿 webui 的版本和后端 ``API_VERSION`` 比对，
+    不一致就报 degraded（前端读 ``version_match``）；而发行包里的 ``RELEASE_VERSION``
+    又由 ``.github/workflows/release-package.yml`` 从 **git tag** 写入（带
+    ``--verify-tag``）。三处不齐时，用户看到的版本、健康检查的结论、发行包里的版本
+    会互相矛盾（2026-09-15 之前 pyproject 写 0.1.0、另两处写 1.0.0）。
+
+    ``browser_extension/manifest.json`` 的版本**故意不在其中**：扩展走 Chrome 自己的
+    更新渠道、有独立发布节奏，改产品版本不该动它。
+    """
+    versions = _product_versions()
+    assert len(set(versions.values())) == 1, f"产品版本号不一致: {versions}"
+
+
+def test_tagged_commit_declares_the_tagged_version():
+    """HEAD 上打了 tag 时，声明的产品版本必须与该 tag 对得上。
+
+    tag 是发布版本的真正来源（CI 在 tag 上跑 release-package.yml 并带 --verify-tag）。
+    当前提交没打 tag 时直接返回 —— 大多数提交都如此。
+    """
+    tags = [line.strip() for line in _git("tag", "--points-at", "HEAD").splitlines()
+            if line.strip()]
+    if not tags:
+        return
+    versions = set(_product_versions().values())
+    mismatched = [tag for tag in tags if tag.lstrip("v") not in versions]
+    assert not mismatched, (
+        f"HEAD 上的 tag {mismatched} 与声明的产品版本 {sorted(versions)} 对不上；"
+        "发布前请把三处版本对齐到该 tag")
 
 # ── 4. 打包清单与死代码 ─────────────────────────────────────────────────
 

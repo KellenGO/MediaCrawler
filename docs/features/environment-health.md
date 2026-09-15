@@ -35,12 +35,15 @@
 
 ## 已知坑 / 边界
 
-- **前后端版本号目前对不上，健康检查会因此报 degraded** ——
-  `API_VERSION` 硬编码在 `environment_health.py`（`1.0.0`），
-  前端读的是 `webui/package.json:4`（也是 `1.0.0`，暂时一致），
-  但 `pyproject.toml:4` 写的是 `0.1.0`、扩展 `browser_extension/manifest.json:4` 是 `1.1.3`。
-  **四处四个版本**，其中两处被这个检查比对 —— 改任一处忘了改另一处就会误报。
-  单一版本来源与 CHANGELOG 已列入方案 §9-8。
+- **产品版本号已统一为三处一致，并有守卫**（2026-09-15）：
+  `api/services/environment_health.py` 的 `API_VERSION`、`webui/package.json`、
+  `pyproject.toml` 必须相同（此前 pyproject 写 `0.1.0`、另两处写 `1.0.0`，健康检查会因此误报 degraded）。
+  守着这条的是 `tests/test_repo_hygiene.py` 的 `test_product_version_is_declared_consistently`，
+  另有 `test_tagged_commit_declares_the_tagged_version` 在提交带 tag 时校验版本与 tag 一致。
+  **发布版本的真正来源是 git tag**（`.github/workflows/release-package.yml` 从 tag 写
+  `RELEASE_VERSION` 并带 `--verify-tag`），发版时把三处对齐到 tag 即可。
+- `browser_extension/manifest.json` 的版本是**独立**的（走 Chrome 自己的更新渠道、独立发布节奏），
+  刻意不与产品版本联动 —— 不要为了"整齐"把它改成跟产品一致。
 - `_platform_statuses()` 是**按字符串 key** 从 `get_accounts()` 的 dict 里二次取值，
   没有强类型保证；字段改名只会在运行时退化成默认值，不会报错。
 - `redis_required` 依赖 `getattr(config, "ENABLE_IP_PROXY", False)`（防御式写法），
