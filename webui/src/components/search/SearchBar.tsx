@@ -7,6 +7,7 @@ import { INITIAL_POPOVER_STATE, searchPopoverReducer } from "@/lib/searchPopover
 import type { PlatformLimitMap } from "@/lib/platformLimits";
 import { SearchPopover } from "./SearchPopover";
 import { PLATFORM_SLUGS } from "@/lib/platformMeta";
+import { useTranslation } from "react-i18next";
 
 const ALL_PLATFORMS = PLATFORM_SLUGS;
 
@@ -48,6 +49,7 @@ export function SearchBar({
   onHistoryClear,
   limits,
 }: SearchBarProps) {
+  const { t } = useTranslation();
   // 浮层开/关由生产 reducer 驱动（lib/searchPopover，node:test 已覆盖规则）。
   // 注意：reducer 状态是字符串 "open"/"closed"，两者都 truthy，
   // 因此 JSX 必须用 === "open" 判断，不能用 {popoverOpen && ...}。
@@ -148,7 +150,7 @@ export function SearchBar({
             <button
               type="button"
               onClick={() => onKeywordChange("")}
-              aria-label="清空关键词"
+              aria-label={t("search.clearKeyword")}
             >
               <X />
             </button>
@@ -161,7 +163,7 @@ export function SearchBar({
             type="text"
             value={keyword}
             onChange={(e) => onKeywordChange(e.target.value)}
-            placeholder={home ? "搜点什么？" : "搜索话题、人物或产品"}
+            placeholder={home ? t("search.placeholderHome") : t("search.placeholder")}
             maxLength={200}
             disabled={isSearching}
             // Round 14.1：只有输入框聚焦打开浮层；关闭由 document pointerdown
@@ -191,7 +193,7 @@ export function SearchBar({
             className="search-cancel h-[44px] min-w-[104px] self-center flex items-center justify-center gap-2 rounded-full border border-warn/40 bg-warn-soft text-warn font-semibold text-[13px] hover:bg-warn-soft/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isCancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
-            取消
+            {t("search.cancel")}
           </button>
         ) : (
           <button
@@ -200,14 +202,14 @@ export function SearchBar({
             className="search-submit h-[44px] w-[44px] self-center flex items-center justify-center rounded-full bg-brand text-white hover:bg-brand-strong hover:-translate-y-px transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
           >
             <ArrowRight className="w-[17px] h-[17px]" />
-            <span className="sr-only">开始搜索</span>
+            <span className="sr-only">{t("search.submit")}</span>
           </button>
         )}
       </div>
 
       {/* 平台选择：浅色胶囊 */}
       <div className="scope search-scope">
-        <span className="scope-label">搜索范围</span>
+        <span className="scope-label">{t("search.scope")}</span>
         {ALL_PLATFORMS.map((p) => {
           const isSelected = selectedPlatforms.has(p);
           const color = PLATFORM_COLORS[p];
@@ -229,7 +231,7 @@ export function SearchBar({
             </button>
           );
         })}
-        <span className="sr-only">每个平台本轮最多 {Math.max(...Object.values(limits))} 条</span>
+        <span className="sr-only">{t("search.perPlatformHint", { count: Math.max(...Object.values(limits)) })}</span>
       </div>
     </form>
   );

@@ -64,7 +64,12 @@
     "goAccounts": "前往账号设置",
     "goSettings": "前往设置",
     "noResults": "该平台暂无结果",
-    "retrying": "正在重试"
+    "retrying": "正在重试",
+    "placeholderHome": "搜点什么？",
+    "clearKeyword": "清空关键词",
+    "perPlatformHint": "每个平台本轮最多 {{count}} 条",
+    "historyItemTitle": "搜索「{{keyword}}」· {{platforms}}",
+    "deleteHistory": "删除历史「{{keyword}}」"
   },
   "footer": {
     "basedOn": "四野 · 基于 MediaCrawler 的本地聚合检索工作台",

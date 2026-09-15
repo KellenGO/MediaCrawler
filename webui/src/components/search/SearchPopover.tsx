@@ -2,6 +2,7 @@ import { Clock, History, X, Trash2, TrendingUp } from "lucide-react";
 import type { SearchHistoryItem } from "@/lib/searchExperience";
 import { RECOMMENDED_SEARCHES } from "@/lib/searchPopover";
 import { PLATFORM_LABELS } from "@/types/search";
+import { useTranslation } from "react-i18next";
 
 interface SearchPopoverProps {
   history: SearchHistoryItem[];
@@ -51,6 +52,7 @@ export function SearchPopover({
   onClear,
   onRecommend,
 }: SearchPopoverProps) {
+  const { t } = useTranslation();
   return (
     <div className="absolute left-[-11px] right-[-11px] top-[calc(100%+8px)] z-20 border border-cyber-border-subtle rounded-b-[20px] bg-cyber-bg-secondary shadow-[0_28px_58px_rgba(35,55,46,0.16)] p-5 animate-dsh-drop">
       {history.length > 0 && (
@@ -58,7 +60,7 @@ export function SearchPopover({
           <div className="flex items-center justify-between mb-1.5">
             <strong className="text-[12px] text-cyber-text-primary flex items-center gap-1.5">
               <History className="w-3.5 h-3.5 text-cyber-text-muted" />
-              最近搜索
+              {t("search.recent")}
             </strong>
             <button
               type="button"
@@ -66,7 +68,7 @@ export function SearchPopover({
               disabled={disabled}
               className="flex items-center gap-1 text-[11px] text-cyber-text-muted hover:text-warn transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Trash2 className="w-3 h-3" />清空
+              <Trash2 className="w-3 h-3" />{t("search.clear")}
             </button>
           </div>
           <ul className="max-h-[240px] overflow-y-auto">
@@ -78,7 +80,10 @@ export function SearchPopover({
                     type="button"
                     disabled={disabled}
                     onClick={() => onItemClick(item)}
-                    title={`搜索「${item.keyword}」· ${item.platforms.map((p) => PLATFORM_LABELS[p as keyof typeof PLATFORM_LABELS] || p).join("、")}`}
+                    title={t("search.historyItemTitle", {
+                      keyword: item.keyword,
+                      platforms: item.platforms.map((p) => PLATFORM_LABELS[p as keyof typeof PLATFORM_LABELS] || p).join("、"),
+                    })}
                     className="flex-1 flex items-center gap-3 rounded-[10px] px-2 py-2.5 text-left hover:bg-brand-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Clock className="w-[14px] h-[14px] text-cyber-text-muted flex-shrink-0" />
@@ -90,7 +95,7 @@ export function SearchPopover({
                   </button>
                   <button
                     type="button"
-                    aria-label={`删除历史「${item.keyword}」`}
+                    aria-label={t("search.deleteHistory", { keyword: item.keyword })}
                     onClick={() => onRemove(index)}
                     disabled={disabled}
                     className="ml-0.5 flex items-center px-1.5 py-1 text-cyber-text-muted/60 hover:text-warn transition-colors disabled:opacity-30 disabled:cursor-not-allowed"

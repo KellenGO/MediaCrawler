@@ -42,9 +42,19 @@
   它的 **39 个导出里只有 11 个被生产代码用到**，其余纯粹是"为了测试而导出" ——
   把内部评分函数（如 `engagementScore`）提升成了公共 API，改算法就得同时改测试。
   拆分方案见 `docs/plans/2026-09-14-优化与精简方案.md` §4.4（尚未执行）。
-- i18n 只接了一半：`webui/src/i18n/locales/zh-CN/common.json` 里 `search.*` 那 24 个键**已经翻译好但没有被引用**，
-  `SearchPage.tsx` 里是硬编码中文（`common.json` 的 `search.enterKeyword` 与
-  `SearchPage.tsx` 的字符串逐字相同）。纯接线活，见方案 §9。
+- i18n 覆盖情况（2026-09-15 更新）：`search.*` 命名空间的键**已在搜索页、搜索框、搜索浮层接线**
+  （`webui/src/components/search/SearchPage.tsx`、`SearchBar.tsx`、`SearchPopover.tsx`），切英文能生效。
+  **仍未接线的是那些"还没有键"的文案**：首页两个面板的说明文字、探索轮次的全部文案、
+  `formatTime` 的相对时间（刚刚 / N 分钟前 —— 它是纯函数，接线得先把 `t` 传进去）、
+  以及错误摘要的安全文案。这些保持硬编码，需要时按批新增键。
+  接线原则是**中文界面文案逐字不变**（值本就与组件一致的直接接；只有「前往设置」
+  与既有键不同才新增键）。**唯一一处刻意的例外**：搜索框非首页态 placeholder
+  从「搜索话题、人物或产品」改用了 locale 里更完整的既有文案
+  「搜索一个话题、人物或产品…」—— 与其反过来把翻译改差，不如用这一版。
+- 拼错 i18n 键时 i18next **不报错**，而是把键名当文案渲染出去（用户看到 `search.xxx`）。
+  `tests/test_webui_ui_contract.py` 的 `test_i18n_keys_used_in_source_exist_in_every_locale`
+  专治这个（扫源码里的 `t("ns.key")` 回查 locale）；同文件的
+  `test_locales_define_the_same_keys` 保证两种语言的键集合一致。
 - 结果卡片的活动指标来自各平台不同字段，缺失时显示为空而不是 0；知乎不返回收藏数、
   B 站投币只在详情里 —— 这些缺口是平台侧的，不做额外请求补齐。
 - 并发上限：搜索时每个平台一个 worker 子进程，账号操作与搜索互斥（见
