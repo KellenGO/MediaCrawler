@@ -488,6 +488,7 @@ html.js .reveal.in{opacity:1;transform:none}
       <a href="#features">功能</a>
       <a href="#platforms">支持平台</a>
       <a href="#download">下载</a>
+      <a href="#mobile">移动端</a>
       <a href="guide.html">使用说明</a>
       <a href="#faq">常见问题</a>
       <a href="#license">许可</a>
@@ -851,6 +852,43 @@ html.js .reveal.in{opacity:1;transform:none}
 </section>
 
 
+<!-- ============ 移动端（OpenScope Android） ============ -->
+<section id="mobile" class="tint">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Mobile</p>
+      <h2 class="title">手机上也有一个版本</h2>
+      <p class="description">本仓库发布的是 Windows 桌面端。同一聚合搜索方向的 Android 客户端由朋友独立开发维护：
+        <strong>OpenScope</strong> —— Kotlin + Jetpack Compose + Material 3，在 App 内的官方页面登录，
+        不需要 PC、Termux 或 root。</p>
+    </div>
+
+    <div class="cards">
+      <article class="card reveal">
+        <h3>OpenScope Android</h3>
+        <p>面向 B站、知乎、小红书 的原生 Android 聚合搜索客户端。登录走各平台官方 WebView，
+          不移植私有签名，也不依赖电脑端中转。</p>
+        <p class="note">最新公开版本 v0.1.1（APK 0.3.0，arm64-v8a，约 10 MB，侧载测试包）。</p>
+      </article>
+
+      <article class="card reveal">
+        <h3>和桌面端的关系</h3>
+        <p>源自本项目的聚合搜索方向，现以 OpenScope 形式独立发布与迭代：两边的代码库、发布节奏与支持平台都各自独立，
+          上游的非商业学习许可同样适用。</p>
+        <p class="note">桌面端支持小红书 / 抖音 / B站 / 知乎；移动端当前为 B站 / 知乎 / 小红书 —— 以各自仓库说明为准。</p>
+      </article>
+    </div>
+
+    <div class="cta-row" style="justify-content:flex-start">
+      <a class="btn primary" href="https://github.com/metaMMY07/MediaCrawler/releases/latest" target="_blank" rel="noopener">下载 Android 版</a>
+      <a class="btn" href="https://github.com/metaMMY07/MediaCrawler" target="_blank" rel="noopener">OpenScope 仓库</a>
+    </div>
+    <p class="small-note">移动端由 <a href="https://github.com/metaMMY07" target="_blank" rel="noopener">metaMMY07</a> 独立维护，
+      验证进度与已知限制以其仓库 README 为准（小红书的真实账号端到端闭环仍在验证中）。</p>
+  </div>
+</section>
+
+
 <!-- ============ FAQ ============ -->
 <section id="faq" class="tint">
   <div class="wrap">
@@ -904,6 +942,7 @@ html.js .reveal.in{opacity:1;transform:none}
         <summary>能在 Mac 或 Linux 上用吗？</summary>
         <div class="a">
           <p>目前只提供 Windows x64 可执行包，Mac / Linux 暂时没有现成安装包。后端和前端都是跨平台的，源码方式可以自行构建，具体步骤见 GitHub 仓库的 README。</p>
+          <p>想在手机上用的话，可以看同源的 Android 客户端 <a href="#mobile">OpenScope</a>（独立仓库，由朋友维护）。</p>
         </div>
       </details>
 
