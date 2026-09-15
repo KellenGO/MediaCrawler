@@ -105,6 +105,17 @@
 - **`git pull/push` 需要本机代理 `127.0.0.1:7890` 在跑**（git 里配了 `http.proxy`）；
   代理没起时会报 "Failed to connect to github.com port 443"。离线时用
   `git bundle create <项目外的路径>.bundle <branch>` 做本地备份。
+- **代理起来了 push 仍可能失败**：`credential.helper` 里有 `manager`（Git Credential Manager），
+  它在无交互环境会尝试弹窗、然后 git **静默返回 128 且不打印任何错误**（`git ls-remote` 却正常，
+  因为读操作不要凭据 —— 很容易误判成网络问题）。可靠推法是绕开它、直接用 gh 的 token：
+
+  ```powershell
+  $t = (gh auth token).Trim()
+  git push "https://$t@github.com/<owner>/<repo>.git" <branch>
+  ```
+
+  另外 **PowerShell 下 git 的 stderr 会被转成 ErrorRecord**，`git ... 2>&1 | Out-File` 经常拿到空文件，
+  排查时先把结果存进变量（`$r = git ... 2>&1`）再写文件。`cmd /c` 在本工具里被禁，别指望它。
 - **agent 沙箱里 `refs/remotes/**` 可能写不进去**：`git fetch` 会报成功，
   但 `git branch -vv` 里上游仍显示 `[origin/xxx: gone]`、`git rev-parse origin/master` 报
   `fatal: Needed a single revision`。**这是沙箱的限制，不是仓库损坏**（对照实验：写到
