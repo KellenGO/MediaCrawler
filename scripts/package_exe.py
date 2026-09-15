@@ -11,12 +11,13 @@ from pathlib import Path
 FORBIDDEN_PARTS = {
     ".git", ".github", ".env", "browser_data", "logs", "node_modules",
     "webui/src", "tests", "__pycache__",
-    # 运行过的目录可能含本机收藏数据库与平台登录态。这里按路径分段匹配（见 validate 里的
-    # rglob），所以子目录里的 data 同样会被挡住 —— 顶层那次单独检查只挡得住 dist/<包名>/data。
-    # 若将来某个第三方依赖确实带有名为 data 的目录，打包时会在这里报出具体路径，届时再决定
-    # 加白名单还是换判据，不要直接删掉这条。
-    "data",
 }
+
+# 注意：**不要**把 "data" 加进上面那个集合。这里是按路径分段匹配的，加上去会把依赖自带的
+# 合法目录一起挡掉 —— 2026-09-15 实测：OpenCV 的 `_internal/cv2/data`（haarcascade 分类器）
+# 和 xhshow 的 `_internal/xhshow/data` 都会命中，构建直接失败。
+# 用户数据只会出现在**发布目录的顶层**（`data/`、`browser_data/`、`.cache`），
+# 那几个位置由 validate() 里的顶层检查和上面的 browser_data 覆盖，已经够用。
 
 
 def validate(distribution: Path) -> None:
