@@ -191,7 +191,7 @@ function Wait-ForUser {
 
 $exitCode = 0
 try {
-    Write-Host "MediaCrawler" -ForegroundColor Cyan
+    Write-Host "四野" -ForegroundColor Cyan
     Write-Host ""
 
     if (-not (Test-Path $webRoot -PathType Container)) {
@@ -242,7 +242,7 @@ try {
         Write-Check "Backend" $true "$backendUrl（已运行，复用）"
     } elseif (Test-TcpPort $SiyePort) {
         Write-Check "Backend" $false "$backendUrl 已被其他程序占用"
-        throw "$SiyePort 端口被占用，且不是当前 MediaCrawler backend；不会终止其他程序"
+        throw "$SiyePort 端口被占用，且不是当前 四野 backend；不会终止其他程序"
     } elseif (-not $DryRun) {
         $backendArgs = $python.Arguments + @("api.main:app", "--host", "127.0.0.1", "--port", "$SiyePort")
         $backendProcess = Start-OwnedProcess -FilePath $python.FilePath -Arguments $backendArgs -Name "backend"
@@ -263,7 +263,7 @@ try {
 
     if (-not $DryRun) {
         Write-Host ""
-        Write-Host "MediaCrawler 已启动。" -ForegroundColor Green
+        Write-Host "四野 已启动。" -ForegroundColor Green
         if ($backendHealth -and $backendHealth.environment_status -eq "degraded") {
             Write-WarningLine "服务已启动，但环境存在警告，请在页面中查看详细状态。"
         }

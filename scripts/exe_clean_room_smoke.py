@@ -59,9 +59,9 @@ def _run(command: list[str], cwd: Path, env: dict[str, str], timeout: int = 60) 
 
 
 def validate_distribution(package: Path) -> None:
-    # MediaCrawler.exe 是后端 + worker 入口；四野.exe 是无窗口托盘启动器（用户实际双击的那个）。
+    # SiYe.exe 是后端 + worker 入口；四野.exe 是无窗口托盘启动器（用户实际双击的那个）。
     required = (
-        package / "MediaCrawler.exe",
+        package / "SiYe.exe",
         package / "四野.exe",
         package / "browser_extension",
     )
@@ -198,7 +198,7 @@ def main() -> int:
     parser.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
     package = args.package.resolve()
-    exe = package / "MediaCrawler.exe"
+    exe = package / "SiYe.exe"
     validate_distribution(package)
     if _request("http://127.0.0.1:8080/api/health")[0] != 0:
         raise AssertionError("port 8080 is already in use; leave the existing application untouched")

@@ -46,7 +46,7 @@ def validate(distribution: Path) -> None:
 def archive(distribution: Path, output_dir: Path) -> tuple[Path, Path]:
     validate(distribution)
     archive_path = Path(shutil.make_archive(
-        str(output_dir / "MediaCrawler-Windows-x64"),
+        str(output_dir / "SiYe-Windows-x64"),
         "zip",
         root_dir=distribution.parent,
         base_dir=distribution.name,
@@ -61,7 +61,7 @@ def archive(distribution: Path, output_dir: Path) -> tuple[Path, Path]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--distribution", type=Path,
-                        default=Path("dist") / "MediaCrawler")
+                        default=Path("dist") / "SiYe")
     parser.add_argument("--output", type=Path, default=Path("dist"))
     args = parser.parse_args()
     distribution = args.distribution.resolve()

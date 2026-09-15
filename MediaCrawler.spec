@@ -115,5 +115,5 @@ coll = COLLECT(
     a.zipfiles,
     strip=False,
     upx=False,
-    name="MediaCrawler",
+    name="SiYe",
 )

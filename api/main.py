@@ -17,7 +17,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 """
-MediaCrawler WebUI API Server
+SiYe WebUI API Server
 Start command: uvicorn api.main:app --port 8080 --reload
 Or: python -m api.main
 """
@@ -37,8 +37,8 @@ from .services.search_job_manager import search_job_manager
 from .services.favorites_job_manager import favorites_job_manager
 
 app = FastAPI(
-    title="MediaCrawler WebUI API",
-    description="API for controlling MediaCrawler from WebUI",
+    title="SiYe WebUI API",
+    description="API for controlling SiYe from WebUI",
     version="0.2.0"
 )
 
@@ -116,7 +116,7 @@ def _serve_frontend(path: str = ""):
     if path:
         raise HTTPException(status_code=404, detail="WebUI build not found")
     return {
-        "message": "MediaCrawler WebUI API",
+        "message": "SiYe WebUI API",
         "version": "0.2.0",
         "docs": "/docs",
         "note": "WebUI not found, please build it first: cd webui && npm run build",

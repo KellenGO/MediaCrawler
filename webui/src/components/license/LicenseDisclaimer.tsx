@@ -103,7 +103,7 @@ export function LicenseDisclaimer({ onAccept }: LicenseDisclaimerProps) {
         {/* License Link */}
         <div className="flex justify-center mb-6">
           <a
-            href="https://github.com/KellenGO/MediaCrawler/blob/main/LICENSE"
+            href="https://github.com/KellenGO/SiYe/blob/main/LICENSE"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-brand-strong hover:underline text-sm"

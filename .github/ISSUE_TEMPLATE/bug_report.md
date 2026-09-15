@@ -1,6 +1,6 @@
 ---  
-name: MediaCrawler Bug反馈  
-about: 创建一个问题Bug以帮助MediaCrawler开源项目改进 
+name: 四野 Bug 反馈  
+about: 创建一个问题 Bug 以帮助四野改进 
 title: '[BUG] '  
 labels: bug  
 assignees: ''  
@@ -9,8 +9,8 @@ assignees: ''
 ## 🔍 问题检查清单  
 <!-- 请在提交issue前确认以下事项 -->  
 
-- [ ] 我已经仔细阅读了 README 中的 [常见启动问题](https://github.com/KellenGO/MediaCrawler/blob/master/README.md#%E5%B8%B8%E8%A7%81%E5%90%AF%E5%8A%A8%E9%97%AE%E9%A2%98)
-- [ ] 我已经搜索并查看了[已关闭的 issues](https://github.com/KellenGO/MediaCrawler/issues?q=is%3Aissue+is%3Aclosed)
+- [ ] 我已经仔细阅读了 README 中的 [常见启动问题](https://github.com/KellenGO/SiYe/blob/master/README.md#%E5%B8%B8%E8%A7%81%E5%90%AF%E5%8A%A8%E9%97%AE%E9%A2%98)
+- [ ] 我已经搜索并查看了[已关闭的 issues](https://github.com/KellenGO/SiYe/issues?q=is%3Aissue+is%3Aclosed)
 - [ ] 我确认这不是由于滑块验证码、Cookie过期、Cookie提取错误、平台风控等常见原因导致的问题  
 
 ## 🐛 问题描述  

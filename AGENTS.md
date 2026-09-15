@@ -134,7 +134,7 @@
 
 ### 支线任务 worktree 怎么启动
 
-`MediaCrawler.bat` 的**产品行为不变**：存在 `dist\MediaCrawler\四野.exe` 就直接启动它。
+`MediaCrawler.bat` 的**产品行为不变**：存在 `dist\SiYe\四野.exe` 就直接启动它。
 （原来还有一个内容与它逐字节相同的 `启动.bat`，2026-09-14 已删 —— 双击 `MediaCrawler.bat` 即可。）
 **没有打包产物时**（开发用 worktree 通常如此）回退到 `启动-源码.bat` —— 从源码起后端，
 **端口默认 8090**（本目录专用，避免和主目录的 8080 撞车），可用 `SIYE_PORT` 覆盖。

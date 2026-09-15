@@ -1,6 +1,6 @@
 # 四野（SiYe）
 
-> 仓库沿用 fork 时的旧工程名 `MediaCrawler`，产品名是**四野**，对外 ASCII 标识为 `SiYe`。
+> 产品中文名**四野**，仓库与对外 ASCII 标识同为 `SiYe`。
 
 ## 中文社交平台聚合搜索
 
@@ -15,16 +15,16 @@
 
 ![四野搜索结果页：小红书、抖音、B站、知乎结果合并展示](site/shot-search.png)
 
-- 推广落地页：<https://kellengo.github.io/MediaCrawler/>（仓库内 `site/index.html`，单文件无依赖，可直接部署到静态托管）
-- 使用说明：<https://kellengo.github.io/MediaCrawler/guide.html>（仓库内 `docs/使用说明.md`）
+- 推广落地页：<https://kellengo.github.io/SiYe/>（仓库内 `site/index.html`，单文件无依赖，可直接部署到静态托管）
+- 使用说明：<https://kellengo.github.io/SiYe/guide.html>（仓库内 `docs/使用说明.md`）
 - 首页与账号设置截图：`site/shot-home.png`、`site/shot-account.png`
 
 ## 文档入口
 
 | 开始了解    | 看哪里                                                                          |
 | ------- | ---------------------------------------------------------------------------- |
-| 新朋友？➡️  | [落地页](https://kellengo.github.io/MediaCrawler/)（仓库文件 `site/index.html`）         |
-| 如何使用？➡️ | [使用说明](https://kellengo.github.io/MediaCrawler/guide.html)（仓库文件 `docs/使用说明.md`） |
+| 新朋友？➡️  | [落地页](https://kellengo.github.io/SiYe/)（仓库文件 `site/index.html`）         |
+| 如何使用？➡️ | [使用说明](https://kellengo.github.io/SiYe/guide.html)（仓库文件 `docs/使用说明.md`） |
 | 维护记录➡️  | [`site/维护说明.md`](site/维护说明.md)                                              |
 | 源码学习    | 本文下面的「快速开始」「项目架构」「测试」                                                      |
 
@@ -100,12 +100,12 @@
 
 ### 普通用户：Windows 可执行包
 
-1. 下载 `MediaCrawler-Windows-x64.zip` 并**整个解压**（不要把 EXE 单独复制出来）；
+1. 下载 `SiYe-Windows-x64.zip` 并**整个解压**（不要把 EXE 单独复制出来）；
 2. 双击解压出的 **`四野.exe`**（托盘启动器，不会弹控制台窗口）；
 3. 浏览器会自动打开，输入关键词即可搜索。
 
 关掉页面后程序仍在后台运行；右键右下角托盘图标可「打开四野 / 打开日志目录 / 退出四野」。
-想看控制台输出时，也可以直接双击同目录的 `MediaCrawler.exe`（同一份程序，带控制台，也是后端与平台 worker 的实际入口）。
+想看控制台输出时，也可以直接双击同目录的 `SiYe.exe`（同一份程序，带控制台，也是后端与平台 worker 的实际入口）。
 包里已含 Python runtime、后端和 Web UI，默认监听 `127.0.0.1:8080`，使用系统 Chrome / Edge。
 
 ### 从源码运行
@@ -115,7 +115,7 @@
 ```shell
 uv sync                              # 安装依赖
 uv run playwright install chromium   # 可选：安装 Playwright Chromium
-MediaCrawler.bat                     # 打开已构建的 dist/MediaCrawler/四野.exe
+MediaCrawler.bat                     # 打开已构建的 dist/SiYe/四野.exe
 ```
 
 也可以手动启动后端：`uv run uvicorn api.main:app --host 127.0.0.1 --port 8080 --reload`。
@@ -156,7 +156,7 @@ cd webui && npm ci && npm run build   # 构建，产物在 webui/dist/
 如果浏览器里已经有现成的登录状态，装一次扩展可以省掉扫码：
 
 1. 浏览器打开 `chrome://extensions`（Edge 为 `edge://extensions`），开启「开发者模式」；
-2. 点「加载已解压的扩展程序」，选择 `MediaCrawler/browser_extension/`；
+2. 点「加载已解压的扩展程序」，选择 `SiYe/browser_extension/`；
 3. 在浏览器里登录对应平台，回到「账号与登录」点「从浏览器同步」。
 
 两条路径写入同一个 profile，互不冲突；同一时间只处理一个登录或搜索（后端排他保护）。

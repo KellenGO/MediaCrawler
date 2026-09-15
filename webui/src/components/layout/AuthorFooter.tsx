@@ -9,7 +9,7 @@ interface AuthorFooterProps {
 /** 原项目 GitHub（NanmiCoder/MediaCrawler）。 */
 const ORIGINAL_PROJECT_URL = 'https://github.com/NanmiCoder/MediaCrawler'
 /** 当前项目 GitHub（KellenGong 维护/改造的分支）。 */
-const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/MediaCrawler'
+const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/SiYe'
 
 /**
  * Round 14.3 页脚：普通、低调、随页面内容滚动。

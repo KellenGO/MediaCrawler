@@ -3,9 +3,9 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-rem 1) 打包版优先：存在 dist\MediaCrawler\四野.exe 就直接启动它（产品默认行为）。
-if exist "%~dp0dist\MediaCrawler\四野.exe" (
-    start "" "%~dp0dist\MediaCrawler\四野.exe"
+rem 1) 打包版优先：存在 dist\SiYe\四野.exe 就直接启动它（产品默认行为）。
+if exist "%~dp0dist\SiYe\四野.exe" (
+    start "" "%~dp0dist\SiYe\四野.exe"
     exit /b 0
 )
 

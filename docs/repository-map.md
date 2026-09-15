@@ -1,6 +1,6 @@
 # 仓库目录与日常入口
 
-日常测试使用 `dist/MediaCrawler/四野.exe`，根目录 `MediaCrawler.bat` 优先打开它；`MediaCrawler.exe` 是托盘和工作进程使用的后端程序。`启动-源码.bat` 是独立的源码开发入口，默认 8090；直接运行 `scripts/start.ps1` 默认 8080。多工作区开发用 `SIYE_PORT` 显式区分端口。
+日常测试使用 `dist/SiYe/四野.exe`，根目录 `MediaCrawler.bat` 优先打开它；`SiYe.exe` 是托盘和工作进程使用的后端程序。`启动-源码.bat` 是独立的源码开发入口，默认 8090；直接运行 `scripts/start.ps1` 默认 8080。多工作区开发用 `SIYE_PORT` 显式区分端口。
 
 | 位置 | 放什么 |
 | --- | --- |

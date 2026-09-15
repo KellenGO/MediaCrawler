@@ -48,7 +48,7 @@ if (-not $SkipTests) {
 
 Invoke-Checked $pythonCommand ($pythonPrefix + @("-m", "PyInstaller", "--clean", "--noconfirm", "MediaCrawler.spec"))
 
-$distribution = Join-Path $repoRoot "dist\MediaCrawler"
+$distribution = Join-Path $repoRoot "dist\SiYe"
 $extensionTarget = Join-Path $distribution "browser_extension"
 if (Test-Path $extensionTarget) {
     Remove-Item -LiteralPath $extensionTarget -Recurse -Force
@@ -69,5 +69,5 @@ if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME) {
 $versionFile = Join-Path $distribution "RELEASE_VERSION"
 Set-Content -LiteralPath $versionFile -Value $releaseVersion -Encoding ascii
 
-Invoke-Checked $pythonCommand ($pythonPrefix + @("scripts/package_exe.py", "--distribution", "dist/MediaCrawler", "--output", "dist"))
-Write-Host "EXE distribution ready: dist/MediaCrawler/MediaCrawler.exe" -ForegroundColor Green
+Invoke-Checked $pythonCommand ($pythonPrefix + @("scripts/package_exe.py", "--distribution", "dist/SiYe", "--output", "dist"))
+Write-Host "EXE distribution ready: dist/SiYe/SiYe.exe" -ForegroundColor Green

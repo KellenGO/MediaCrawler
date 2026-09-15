@@ -6,7 +6,7 @@
   worker 子进程是通过 ``sys.executable`` 拉起的，且父子进程用 stdin/stdout 管道通信，
   所以**这个 EXE 必须保留控制台**（PyInstaller 的 windowed 模式会让 stdout 失效）。
 - ``四野.exe``（console=False）：本文件里的"启动器"角色 = 无窗口 + 托盘图标。
-  它不会自己跑后端，而是把 ``MediaCrawler.exe --no-browser`` 以隐藏窗口方式拉起来，
+  它不会自己跑后端，而是把 ``SiYe.exe --no-browser`` 以隐藏窗口方式拉起来，
   把它的输出重定向到 ``data/logs/backend-YYYYMMDD.log``。
 
 角色由参数决定（``detect_role``）：

@@ -77,9 +77,9 @@ def _port_is_open() -> bool:
 def _run_existing_backend() -> int:
     health = _request_health()
     if not health or not _is_mediacrawler_health(health):
-        print(f"[X] {PORT} 端口已被其他程序占用，无法启动 MediaCrawler。")
+        print(f"[X] {PORT} 端口已被其他程序占用，无法启动四野。")
         return 1
-    print("已检测到正在运行的 MediaCrawler backend，直接打开页面。")
+    print("已检测到正在运行的 四野 backend，直接打开页面。")
     webbrowser.open(BASE_URL)
     return 0
 
@@ -96,7 +96,7 @@ def _run_server(open_browser: bool = True, stop_event: threading.Event | None = 
         reload=False,
     )
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, name="mediacrawler-backend")
+    thread = threading.Thread(target=server.run, name="siye-backend")
     thread.start()
     try:
         health = _wait_for_health(thread)
@@ -111,7 +111,7 @@ def _run_server(open_browser: bool = True, stop_event: threading.Event | None = 
             thread.join(timeout=0.5)
         return 0 if server.should_exit else 1
     except KeyboardInterrupt:
-        print("\n正在关闭 MediaCrawler...")
+        print("\n正在关闭四野...")
         return 0
     finally:
         server.should_exit = True

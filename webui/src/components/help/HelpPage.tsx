@@ -1,7 +1,7 @@
 import { ExternalLink } from 'lucide-react'
 
 const ORIGINAL_PROJECT_URL = 'https://github.com/NanmiCoder/MediaCrawler'
-const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/MediaCrawler'
+const CURRENT_PROJECT_URL = 'https://github.com/KellenGO/SiYe'
 
 interface HelpPageProps {
   onShowDisclaimer: () => void
@@ -22,7 +22,7 @@ export function HelpPage({ onShowDisclaimer }: HelpPageProps) {
         <section className="help-section">
           <h2>使用流程</h2>
           <ol className="steps">
-            <li><strong>启动本机服务</strong>保持 MediaCrawler 后端运行，网页会自动检查连接状态。</li>
+            <li><strong>启动本机服务</strong>保持四野后端运行，网页会自动检查连接状态。</li>
             <li><strong>登录平台账号</strong>到「设置 · 账号与登录」，点任意平台的「扫码登录」，用手机 App 扫一下即可。</li>
             <li><strong>开始聚合搜索</strong>输入关键词、选择平台，已返回的内容可以边搜边看。</li>
             <li><strong>收藏与整理</strong>保存到本地收藏，添加备注，或导出一份备份。</li>

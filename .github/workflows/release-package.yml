@@ -68,17 +68,17 @@ jobs:
           $cleanRoot = Join-Path $env:RUNNER_TEMP "mediacrawler-exe-clean-room"
           if (Test-Path $cleanRoot) { Remove-Item -LiteralPath $cleanRoot -Recurse -Force }
           New-Item -ItemType Directory -Path $cleanRoot | Out-Null
-          Expand-Archive -LiteralPath "dist/MediaCrawler-Windows-x64.zip" -DestinationPath $cleanRoot
-          $package = Join-Path $cleanRoot "MediaCrawler"
+          Expand-Archive -LiteralPath "dist/SiYe-Windows-x64.zip" -DestinationPath $cleanRoot
+          $package = Join-Path $cleanRoot "SiYe"
           uv run python scripts/exe_clean_room_smoke.py --package $package
 
       - name: Upload validated executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MediaCrawler-Windows-x64
+          name: SiYe-Windows-x64
           path: |
-            dist/MediaCrawler-Windows-x64.zip
-            dist/MediaCrawler-Windows-x64.zip.sha256
+            dist/SiYe-Windows-x64.zip
+            dist/SiYe-Windows-x64.zip.sha256
           if-no-files-found: error
 
       - name: Publish tagged GitHub Release
@@ -89,8 +89,8 @@ jobs:
         run: |
           $arguments = @(
             "release", "create", $env:GITHUB_REF_NAME,
-            "dist/MediaCrawler-Windows-x64.zip",
-            "dist/MediaCrawler-Windows-x64.zip.sha256",
+            "dist/SiYe-Windows-x64.zip",
+            "dist/SiYe-Windows-x64.zip.sha256",
             "--verify-tag",
             "--title", "四野 $env:GITHUB_REF_NAME",
             "--generate-notes"
