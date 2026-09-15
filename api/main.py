@@ -39,7 +39,7 @@ from .services.favorites_job_manager import favorites_job_manager
 app = FastAPI(
     title="MediaCrawler WebUI API",
     description="API for controlling MediaCrawler from WebUI",
-    version="1.0.0"
+    version="0.2.0"
 )
 
 # Production frontend build directory. It is intentionally kept outside the
@@ -117,7 +117,7 @@ def _serve_frontend(path: str = ""):
         raise HTTPException(status_code=404, detail="WebUI build not found")
     return {
         "message": "MediaCrawler WebUI API",
-        "version": "1.0.0",
+        "version": "0.2.0",
         "docs": "/docs",
         "note": "WebUI not found, please build it first: cd webui && npm run build",
     }

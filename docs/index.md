@@ -21,6 +21,7 @@
 - [`plans/`](plans/) —— 一次性方案与改造计划（**不是当前行为的依据**，看功能 wiki）
 - [`history/2026-09-14-三项功能审查与修复.md`](history/2026-09-14-三项功能审查与修复.md) —— 历史修复记录，当前行为以功能 wiki 为准
 - [`repository-map.md`](repository-map.md) —— 目录用途、唯一启动入口与整理边界
+- [`CHANGELOG.md`](../CHANGELOG.md) —— 版本更新记录
 - [`decisions/`](decisions/) —— 决策记录：为什么这么选
 
 ## 发布链路（与功能无关但常要用）

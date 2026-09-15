@@ -91,8 +91,8 @@ def test_log_file_is_daily_and_inside_directory(tmp_path: Path) -> None:
 
 
 def test_is_our_backend_requires_the_project_health_shape() -> None:
-    assert is_our_backend({"backend_available": True, "api_version": "1.0.0", "platforms": {}}) is True
-    assert is_our_backend({"backend_available": True, "api_version": "1.0.0"}) is False
+    assert is_our_backend({"backend_available": True, "api_version": "0.2.0", "platforms": {}}) is True
+    assert is_our_backend({"backend_available": True, "api_version": "0.2.0"}) is False
     assert is_our_backend({"status": "ok"}) is False
     assert is_our_backend(None) is False
     assert is_our_backend("不是对象") is False
