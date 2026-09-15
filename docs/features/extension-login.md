@@ -31,11 +31,17 @@ profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
 - 可见浏览器自身展示二维码，不另弹系统图片查看器；无头模式仍保留图片二维码。
 - 重启不信任磁盘上的旧验证结论。没有扩展时，自动复核本机已有登录状态；与扩展自动同步共用冷却，避免重复操作，全部成功时不打扰。
 - 切去搜索页仍保留登录轮询，任务结束后再释放搜索等待；不能因离开账号页就假定登录结束。整页刷新后仍由后端互斥兜底。
-- 账号卡片只展示登录确认状态和对应操作，不再显示「可尝试搜索／暂时无法搜索」徽章。诊断是上次搜索与内部状态推导，不是实时检测；旧搜索失败不能覆盖新登录结论。保留在折叠区的记录明确标注为历史信息。
+- 账号页分开展示登录验证与最近搜索／收藏同步结果，附实际观察时间；没有记录显示「尚未检测」，不把公开搜索成功当作登录证明。
+- 进入账号页发起轻量检查，复用一分钟内的结果，最多同时检查两个平台；没有本机会话时跳过，繁忙或风控不自动重试。轮询只读本机状态，不向平台发请求。明确要求登录或开始新验证时立即废弃旧验证缓存，不能继续返回一分钟内的旧成功结论。
+- 小红书接口响应缺字段归为无法确认；接口与浏览器不一致时，用同一 profile 的「我」入口复核一次。明确风控直接停止，不追加页面请求；临时验证失败保留现有会话快照。
+- 扫码 worker 在浏览器关闭前完成验证，后端直接接受该成功结论；前端不再重开浏览器重复验证。新登录清除旧功能证据，旧任务不能覆盖新会话；缓存与取消不能作为使用成功证据。
+- 历史功能结果只描述发生过什么，不保证此刻所有功能均可用。成功搜索可以撤销旧的笼统失效提示，但登录身份仍需实际验证。
 - 为什么不能「应用直接读浏览器 cookie」：**Chrome 127+ 的 App-Bound Encryption**
   让外部程序即使拿到 cookie 数据库也解不开，只有跑在浏览器进程内的扩展能合法读取。
 
 ## 已知坑 / 边界
+
+- 自动化验证使用模拟平台响应和浏览器交互；尚未使用真实账号复现用户的小红书状态，平台页面标记变化仍可能导致「暂未确认」。
 
 - 扩展仍固定连接 8080；开发实例改端口时使用扫码登录。
 - 扫码结果仍需四平台真实账号验收；自动化验证生命周期和界面交互，不能替代手机扫码。
@@ -48,7 +54,7 @@ profile 目录：`browser_data/{xhs,dy,bili,zhihu}_user_data_dir`。
 ## 测试怎么跑
 
 - 后端：`tests/test_xhs_session_restore.py`、`tests/test_xhs_account_verification.py`、
-  `tests/test_session_snapshot_lifecycle.py`、`tests/test_extension_security.py`、
+  `tests/test_account_evidence.py`、`tests/test_session_snapshot_lifecycle.py`、`tests/test_extension_security.py`、
   `tests/test_extension_runtime.py`、`tests/test_account_coordinator.py`、`tests/test_account_sync_timings.py`
 - 前端：`webui/tests/accountBulkSync.test.ts`、`accountGate.test.ts`、`accounts.test.ts`、
   `extensionSync.test.ts`、`useAccountsOptions.test.ts`

@@ -142,6 +142,18 @@ def main():
                 expect(page.get_by_text("新的学习备注", exact=True)).to_be_visible()
                 assert store.get_item("xhs", "a")["note"] == "新的学习备注"
                 (ROOT / "build").mkdir(exist_ok=True)
+                page.get_by_role("button", name="新建收藏夹", exact=True).click()
+                long_name = "LongFolder" * 6
+                page.get_by_role("textbox", name="新收藏夹名称").fill(long_name)
+                page.get_by_role("button", name="创建收藏夹", exact=True).click()
+                for width in (1440, 1024, 390):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    expect(page.get_by_text(long_name, exact=True)).to_be_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    label = page.locator(".library-folder-name").filter(has_text=long_name)
+                    assert label.evaluate("el => el.scrollWidth > el.clientWidth")
+                    assert label.get_attribute("title") == long_name
+                page.set_viewport_size({"width": 1440, "height": 1000})
                 page.get_by_role("button", name="重命名收藏夹 跨平台学习", exact=True).hover()
                 page.screenshot(path=str(ROOT / "build" / "review-favorites-desktop.png"), full_page=True)
                 for width in (1024, 390):
@@ -165,13 +177,14 @@ def main():
                 expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
                 failures["sync"] = False
                 page.get_by_role("button", name="重新同步", exact=True).click()
-                expect(page.get_by_role("button", name="取消同步", exact=True)).to_be_enabled()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True)).to_be_enabled()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True).locator(".spinner")).to_be_visible()
                 page.screenshot(path=str(ROOT / "build" / "review-cancel-button.png"), full_page=True)
-                page.get_by_role("button", name="取消同步", exact=True).click()
+                page.get_by_role("button", name="正在同步 · 取消", exact=True).click()
                 expect(page.get_by_role("alert")).to_contain_text("测试取消失败")
                 failures["cancel"] = False
-                page.get_by_role("button", name="取消同步", exact=True).click()
-                expect(page.get_by_role("button", name="取消同步", exact=True)).to_have_count(0)
+                page.get_by_role("button", name="正在同步 · 取消", exact=True).click()
+                expect(page.get_by_role("button", name="正在同步 · 取消", exact=True)).to_have_count(0)
                 expect(page.get_by_role("button", name="重新同步", exact=True)).to_be_enabled()
                 expect(page.get_by_text("视频收藏测试", exact=True)).to_be_visible()
                 page.set_viewport_size({"width": 390, "height": 844})

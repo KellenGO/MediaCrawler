@@ -48,6 +48,8 @@ export interface AccountStatusInfo {
   safe_message: string | null;
   browser_backend: string | null;
   diagnostic?: PlatformDiagnostic | null;
+  verification?: { status: string; checked_at: string; source: string } | null;
+  usage?: Partial<Record<"search" | "favorites", { status: string; checked_at: string }>>;
 }
 
 export type DiagnosticTone = "normal" | "available" | "limited" | "unavailable";
@@ -180,9 +182,7 @@ export function summarizeAccounts(
   };
 }
 
-/** 平台状态在浮层中的一行文案（"可公开搜索"保留，但不计入登录数量）。
- *  Round 17.2: unavailable + login_verification_rate_limited（小红书
- *  461/471 风控）→ "验证受限"；普通 unavailable 仍为"验证暂不可用"。 */
+/** 浮层与账号卡片区分已确认、待确认和验证受限；不从 profile 推断搜索能力。 */
 export function accountSummaryLabel(
   acc: Pick<
     AccountStatusInfo,
@@ -190,7 +190,7 @@ export function accountSummaryLabel(
   >
 ): string {
   if (acc.status === "connected" && acc.verified) return "已连接";
-  if (acc.status === "unverified" && acc.profile_exists) return "可公开搜索";
+  if (acc.status === "unverified" && acc.profile_exists) return "登录待确认";
   if (acc.status === "unverified") return "尚未验证";
   if (acc.status === "expired") return "登录已失效";
   if (acc.status === "failed") return "同步失败";
@@ -337,4 +337,11 @@ export function consumeUnverifiedWarning(): boolean {
 export function resetAccountNoticeStateForTests(): void {
   LOGIN_EXPIRY_NOTIFIED.clear();
   UNVERIFIED_WARNING_SHOWN.shown = false;
+}
+
+export function accountOperationLabel(operation: "search" | "favorites", evidence?: { status: string; checked_at: string }): string {
+  const name = operation === "search" ? "搜索" : "收藏同步";
+  if (!evidence) return `${name}：尚未检测`;
+  const labels: Record<string, string> = { succeeded: "成功", empty: "完成，无结果", login_required: "要求登录", rate_limited: "受到平台限制", timed_out: "超时", failed: "失败" };
+  return `最近${name}${labels[evidence.status] || "未完成"} · ${new Date(evidence.checked_at).toLocaleString("zh-CN")}`;
 }

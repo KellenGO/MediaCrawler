@@ -80,6 +80,7 @@ async def _run_login_worker(platform: str, job_id: str):
     proc = None
     stdout_task = None
     stderr_task = None
+    await accounts_service.begin_scan_login(platform)
     done_received = False
     error_received = False
     final_status = "failed"
@@ -240,6 +241,7 @@ async def _run_login_worker(platform: str, job_id: str):
                 pass
         _login_procs.pop(job_id, None)
 
+    accounts_service.finish_scan_login(platform, final_status == "succeeded")
     _login_jobs[job_id].update(
         status=final_status, message=final_message,
         completed_at=datetime.now(timezone.utc).isoformat())
@@ -579,8 +581,14 @@ async def sync_account_cookies(
 
 
 @search_router.post("/accounts/{platform}/verify")
-async def verify_account(platform: str):
+async def verify_account(platform: str, reuse_recent: bool = False):
     """Re-open the headless profile and verify the session via pong."""
+    if reuse_recent:
+        if platform in accounts_service.PLATFORM_PROFILE_DIRS and not accounts_service.profile_dir_for(platform).is_dir():
+            return {"success": True, "platform": platform, "verified": False, "status": "disconnected", "skipped": True}
+        cached = accounts_service.recent_verification(platform)
+        if cached:
+            return cached
     reason = await _operation_coordinator.acquire_account(platform, "verify")
     if reason:
         if search_job_manager.is_search_active():
@@ -594,12 +602,12 @@ async def verify_account(platform: str):
                                   platform)
         return _account_error(409, "account_op_in_progress",
                               "已有两个账号操作正在进行，请稍后再试", platform)
-    # 竞态消除（Round 16）：acquire 成功后、操作前复查搜索是否已启动。
+    # 竞态消除（）：acquire 成功后、操作前复查搜索是否已启动。
     if search_job_manager.is_search_active():
         await _operation_coordinator.release_account(platform)
         return _account_error(409, "search_in_progress",
                               "正在搜索，暂时不能验证账号，请等待搜索完成", platform)
-    # Round 16：账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
+    # 账号操作前停止该平台常驻 worker（避免与 profile 锁冲突）。
     await search_job_manager.stop_platform_worker(platform)
     try:
         try:

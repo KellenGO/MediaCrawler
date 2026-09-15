@@ -423,7 +423,7 @@ html.dark .search-submit { color: #101525; }
 .library-side { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 3px; }
 .library-side-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 12px; border-radius: 9px; color: var(--siye-secondary); font-size: 13px; text-align: left; }
 .library-side-item svg { width: 15px; height: 15px; flex: none; }
-.library-side-item span { margin-left: auto; color: var(--siye-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.library-side-item > span:not(.library-folder-name) { margin-left: auto; color: var(--siye-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .library-side-item:hover { background: var(--siye-brand-soft); }
 .library-side-item.active { background: var(--siye-brand-soft); color: var(--siye-brand-ink); font-weight: 600; }
 .library-side-row { display: flex; align-items: center; gap: 2px; }
@@ -1293,3 +1293,15 @@ footer > div { width: 100% !important; max-width: none !important; padding: 0 !i
 }
 .account-card .diagnostic { margin-top: 12px; color: var(--siye-secondary); font-size: 11px; line-height: 2; }
 .btn svg, .account-actions svg { width: 14px; height: 14px; }
+
+/* User-entered names must shrink independently of counts and actions. */
+.library-side, .library-side-row, .library-side-item { min-width: 0; max-width: 100%; }
+.library-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-folder-count { flex: none; }
+.collection-count, .account-card p, .status-message { overflow-wrap: anywhere; }
+.library-side input, .library-batch select { min-width: 0; max-width: 100%; }
+.account-evidence { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; margin: 12px 0; border: 1px solid var(--siye-line); border-radius: 9px; background: var(--siye-soft); font-size: 12px; color: var(--siye-secondary); }
+.account-evidence span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .library-side-row { width: 100%; } }
+
+.library-batch > label { min-width: 0; max-width: 100%; }

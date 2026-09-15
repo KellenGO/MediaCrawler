@@ -56,6 +56,8 @@ for event, data in [('status', {'status':'empty'}), ('done', None)]:
     await asyncio.wait_for(manager._run(job), timeout=15)
     assert job.platforms["xhs"].status == "empty"
     assert job.response().persistence_error
+    from api.services.accounts import usage_evidence
+    assert usage_evidence("xhs")["favorites"]["status"] == "failed"
 
 
 @pytest.mark.asyncio
