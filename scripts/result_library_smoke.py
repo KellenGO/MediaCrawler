@@ -10,7 +10,7 @@ import argparse
 import csv
 import io
 import json
-import re
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -23,6 +23,11 @@ from playwright.sync_api import expect, sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from api.routers.library import library_router
+from api.services.library_store import LibraryStore, get_library_store
 BOOKMARKS_KEY = "aggregate_search_bookmarks_v1"
 
 
@@ -60,6 +65,8 @@ def main() -> None:
                           for p in ("xhs", "bilibili", "zhihu")})
     serving_job = True
     api_writes = []
+    fail_write = False
+    client = None
     errors = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(dist)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -69,6 +76,13 @@ def main() -> None:
         url = urlparse(route.request.url)
         if not route.request.url.startswith(origin + "/"):
             route.abort()
+        elif url.path.startswith("/api/library/"):
+            if fail_write and route.request.method != "GET":
+                route.fulfill(status=503, json={"detail": "测试收藏写入失败"})
+                return
+            response = client.request(route.request.method, url.path + ("?" + url.query if url.query else ""),
+                content=route.request.post_data, headers={"content-type": "application/json"})
+            route.fulfill(status=response.status_code, body=response.content, content_type="application/json")
         elif url.path.startswith("/api/"):
             if route.request.method != "GET":
                 api_writes.append((route.request.method, url.path))
@@ -76,17 +90,24 @@ def main() -> None:
                 data = {"status": "ok", "environment_status": "ok"}
             elif url.path == "/api/search/accounts":
                 data = {"accounts": []}
+            elif url.path == "/api/search/favorites/jobs/latest":
+                data = None
             elif url.path.startswith("/api/search/jobs/"):
                 data = job if serving_job else None
             else:
                 data = {}
-            route.fulfill(json=data)
+            route.fulfill(body=json.dumps(data), content_type="application/json")
         else:
             route.continue_()
 
     try:
         (ROOT / "build").mkdir(exist_ok=True)
         with TemporaryDirectory(prefix="result-library-", dir=ROOT / "build") as temp, sync_playwright() as p:
+            store = LibraryStore(Path(temp) / "library.db")
+            app = FastAPI()
+            app.include_router(library_router)
+            app.dependency_overrides[get_library_store] = lambda: store
+            client = TestClient(app)
             browser = p.chromium.launch(**({} if args.channel == "chromium" else {"channel": args.channel}))
             context = browser.new_context(viewport={"width": 1280, "height": 900},
                                           permissions=["clipboard-read", "clipboard-write"])
@@ -94,17 +115,15 @@ def main() -> None:
             context.route("**/*", route_request)
             page = context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
-            page.goto(origin)
+            page.goto(origin + "/#/search")
             expect(page.get_by_role("button", name="选择收藏平台 研究素材图文", exact=True)).to_be_visible()
             expect(page.get_by_role("button", name="导出 CSV", exact=True)).to_have_count(0)
             expect(page.get_by_role("checkbox", name="选择当前全部结果", exact=True)).to_have_count(0)
             page.get_by_role("button", name="导出 / 复制", exact=True).click()
-            page.get_by_label("发布时间筛选").select_option("7")
-            page.get_by_label("内容类型筛选").select_option("note")
+            page.get_by_label("结果内关键词").fill("不存在的内容")
             expect(page.get_by_role("button", name="导出 CSV", exact=True)).to_be_disabled()
-            page.get_by_label("内容类型筛选").select_option("video")
-            expect(page.get_by_role("checkbox", name="选择 研究素材视频", exact=True)).to_be_visible()
             page.get_by_label("结果内关键词").fill("视频")
+            expect(page.get_by_role("checkbox", name="选择 研究素材视频", exact=True)).to_be_visible()
             expect(page.locator("mark")).to_have_text(["视频"])
             page.get_by_role("button", name="清除筛选", exact=True).click()
             page.get_by_role("button", name="收起导出", exact=True).click()
@@ -114,98 +133,77 @@ def main() -> None:
             if args.screenshots:
                 page.screenshot(path=str(ROOT / "build/result-bookmark-menu.png"), full_page=True)
             popup.get_by_role("button", name="收藏 研究素材视频", exact=True).click()
-            items = page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items")
-            assert len(items) == 1 and items[0]["result"]["platform"] == "bilibili"
+            expect(popup.get_by_role("button", name="取消收藏 研究素材视频", exact=True)).to_be_visible()
+            assert store.get_item("bilibili", "new-video") is not None
             page.keyboard.press("Escape")
-            page.get_by_role("button", name="查看各平台版本", exact=True).click()
-            page.get_by_role("button", name="收藏 研究素材图文", exact=True).click()
-            page.get_by_role("button", name="取消收藏 研究素材图文", exact=True).click()
-            assert page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items.length") == 1
-            page.get_by_role("button", name="收起平台版本", exact=True).click()
+            page.get_by_role("button", name="展开完整内容", exact=True).click()
+            expect(page.get_by_text("2 个平台的内容版本", exact=True)).to_be_visible()
+            page.get_by_role("button", name="收起完整内容", exact=True).click()
             page.get_by_role("button", name="选择收藏平台 研究素材图文", exact=True).click()
+            popup.get_by_role("button", name="收藏 研究素材图文", exact=True).click()
+            popup.get_by_role("button", name="取消收藏 研究素材图文", exact=True).first.click()
+            expect(popup.get_by_role("button", name="收藏 研究素材图文", exact=True)).to_be_visible()
+            assert store.get_item("xhs", "old-note") is None
             popup.get_by_role("button", name="收藏全部来源 研究素材图文", exact=True).click()
+            expect(popup.get_by_role("button", name="取消收藏 研究素材图文", exact=True)).to_have_count(2)
             page.keyboard.press("Escape")
             assert page.locator("a button, a input, a textarea").count() == 0
-            page.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            library = page.get_by_role("region", name="本地收藏", exact=True)
-            expect(library.get_by_role("checkbox")).to_have_count(0)
-            expect(library.locator("textarea")).to_have_count(0)
-            library.get_by_role("button", name="添加备注 研究素材视频", exact=True).click()
-            library.get_by_label("备注 研究素材视频", exact=True).fill("稍后整理，保留原文")
-            library.locator("button:enabled").filter(has_text=re.compile("^保存备注$")).click()
-            expect(library.get_by_text("尚未保存", exact=False)).to_have_count(0)
-
-            page.reload()
-            page.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            expect(library.locator("textarea")).to_have_count(0)
-            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
-            if args.screenshots:
-                page.screenshot(path=str(ROOT / "build/result-bookmarks-reading.png"), full_page=True)
-            library.get_by_role("button", name="编辑备注 研究素材视频", exact=True).click()
-            library.get_by_label("备注 研究素材视频", exact=True).fill("取消后不应保留")
-            library.get_by_role("button", name="取消编辑", exact=True).click()
-            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
-            library.get_by_role("button", name="导出 / 复制", exact=True).click()
-            library.get_by_role("checkbox", name="选择 研究素材视频", exact=True).check()
+            # Export and clipboard still operate on selected search sources.
+            page.get_by_role("button", name="导出 / 复制", exact=True).click()
+            page.get_by_label("结果内关键词").fill("视频")
+            page.get_by_role("checkbox", name="选择 研究素材视频", exact=True).check()
             for label, filename in (("导出 CSV", "selected.csv"), ("导出 Markdown", "selected.md")):
                 with page.expect_download() as download:
-                    library.get_by_role("button", name=label, exact=True).click()
+                    page.get_by_role("button", name=label, exact=True).click()
                 path = Path(temp) / filename
                 download.value.save_as(path)
                 text = path.read_text(encoding="utf-8-sig")
-                assert "稍后整理，保留原文" in text and video["url"] in text
-                assert note["url"] not in text and fetched in text
+                assert video["url"] in text and note["url"] not in text
                 if filename.endswith(".csv"):
                     rows = list(csv.DictReader(io.StringIO(text)))
                     assert len(rows) == 1 and rows[0]["标题"] == video["title"]
-                    assert rows[0]["收藏时间"]
-            library.get_by_role("button", name="复制链接", exact=True).click()
+            page.get_by_role("button", name="复制链接", exact=True).click()
             expect(page.get_by_text("原文链接已复制", exact=True)).to_be_visible()
             assert page.evaluate("navigator.clipboard.readText()") == video["url"]
-
-            # No recovered job is needed to access previously saved content.
+            page.goto(origin + "/#/favorites/local")
+            expect(page.get_by_role("heading", name="留住值得再看的内容", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="取消收藏 研究素材视频", exact=True)).to_be_visible()
+            page.get_by_role("button", name="添加备注 研究素材视频", exact=True).click()
+            page.get_by_label("备注 研究素材视频", exact=True).fill("稍后整理，保留原文")
+            page.get_by_role("button", name="保存备注", exact=True).click()
+            expect(page.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
             serving_job = False
-            page.evaluate("sessionStorage.clear()")
             page.reload()
-            page.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            expect(library.locator("textarea")).to_have_count(0)
-            expect(library.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
-            for width in (390, 320, 1280):
+            expect(page.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
+            page.get_by_role("button", name="编辑备注 研究素材视频", exact=True).click()
+            page.get_by_label("备注 研究素材视频", exact=True).fill("取消后不应保留")
+            page.get_by_role("button", name="取消编辑", exact=True).click()
+            expect(page.get_by_text("稍后整理，保留原文", exact=True)).to_be_visible()
+            assert store.get_item("bilibili", "new-video")["note"] == "稍后整理，保留原文"
+            if args.screenshots:
+                page.screenshot(path=str(ROOT / "build/result-bookmarks-reading.png"), full_page=True)
+            for width in (390, 1024, 1440):
                 page.set_viewport_size({"width": width, "height": 900})
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"Overflow at {width}px"
-
-            # Real storage events from another tab must update this page.
-            other = context.new_page()
-            other.goto(origin)
-            other.get_by_role("button", name="本地收藏（2）", exact=True).click()
-            other.get_by_role("button", name="取消收藏 研究素材图文", exact=True).click()
-            expect(library.get_by_role("button", name="取消收藏 研究素材图文", exact=True)).to_have_count(0)
-            assert page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items.length") == 1
-            other.close()
-
+            # Saving failures are API failures now, not localStorage quota errors.
             serving_job = True
-            page.reload()
-            expect(page.get_by_role("button", name="收藏 独立文章", exact=True)).to_be_visible()
-            page.evaluate("""key => {
-                const original = Storage.prototype.setItem;
-                Storage.prototype.setItem = function(k, v) {
-                    if (k === key) throw new DOMException('Denied', 'QuotaExceededError');
-                    return original.call(this, k, v);
-                };
-            }""", BOOKMARKS_KEY)
+            page.goto(origin + "/#/search")
+            fail_write = True
             page.get_by_role("button", name="收藏 独立文章", exact=True).click()
-            expect(page.get_by_text("收藏未保存：浏览器存储不可用或空间不足。请先导出已有收藏。", exact=True)).to_be_visible()
+            expect(page.get_by_text("测试收藏写入失败", exact=True)).to_be_visible()
             expect(page.get_by_role("button", name="收藏 独立文章", exact=True)).to_have_attribute("aria-pressed", "false")
-            assert page.evaluate(f"JSON.parse(localStorage.getItem('{BOOKMARKS_KEY}')).items.length") == 1
+            assert store.get_item("zhihu", "article") is None
             assert not errors, errors
             assert not api_writes, api_writes
             browser.close()
     finally:
+        if client is not None:
+            client.close()
         server.shutdown()
         server.server_close()
-    print(json.dumps({"result": "passed", "checks": ["group filters", "highlight", "bookmark reload",
-                     "notes collapsed/read/edit/cancel", "per-source bookmarks", "export disclosure", "selected CSV/Markdown export", "clipboard", "idle library", "mobile layout",
-                     "cross-tab updates", "storage failure", "no API writes", "no page errors"]}))
+    print(json.dumps({"result": "passed", "checks": ["group filters", "highlight", "per-source bookmarks",
+        "SQLite bookmark and note reload", "export disclosure", "selected CSV/Markdown export", "clipboard",
+        "narrow layout", "API write failure", "no platform traffic", "no page errors"]}))
 
 
 if __name__ == "__main__":

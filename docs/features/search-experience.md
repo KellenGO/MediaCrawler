@@ -74,3 +74,5 @@ node run-compiled-tests.mjs
 `metricOrder.test.ts`、`searchDedupContract.test.ts`、`searchCooldown.test.ts`；
 后端缓存与冷却：`tests/test_result_cache.py`、`tests/test_expiring_local_cache.py`、
 `tests/test_search_statistics.py`。
+
+构建前端后运行 `scripts/result_library_smoke.py --screenshots`，用临时 SQLite 与模拟搜索响应检查分来源收藏、详情展开、筛选、导出、复制及备注持久化。脚本走当前 hash 路由与收藏 API，不再依赖旧版 localStorage 收藏或已移除的时间／类型筛选控件；不会访问真实平台。

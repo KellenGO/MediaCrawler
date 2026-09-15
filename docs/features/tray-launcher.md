@@ -27,7 +27,7 @@
 - 退出优先走**优雅通道**（关 stdin → `PeekNamedPipe` 轮询探测写端关闭 → 通知后端收尾），
   超时才 `taskkill /F /T` 强杀整个进程树。
 - 后端日志写 `data/logs/backend-<日期>.log`。
-- 本机测试统一使用 `dist/MediaCrawler/四野.exe`，根目录两份 BAT 都打开这一份。源码开发仍可显式运行 `scripts/start.ps1`；不再把源码服务和多个测试包作为并列日常入口。
+- 本机测试统一使用 `dist/MediaCrawler/四野.exe`，根目录 `MediaCrawler.bat` 优先打开这一份。没有打包产物时才回退到 `启动-源码.bat`；该源码入口默认 8090，产品默认 8080。直接使用 `scripts/start.ps1` 时默认仍为 8080，并行开发须显式区分端口。
 - 清理旧测试包时，将其收藏、登录资料和缓存备份到根目录 `data/version-backups/`，不覆盖常用 dist 的用户数据；此备份同样不能进入发布包。
 - 发布包校验会**拒绝**含 `data` / `.cache` / `browser_data` 的产物（防止把本机登录态和个人收藏发出去）。
 
