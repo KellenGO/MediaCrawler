@@ -62,6 +62,7 @@
     "retryFailed": "Update failed",
     "loginNeeded": "Login required on:",
     "goAccounts": "Account settings",
+    "goSettings": "Settings",
     "noResults": "No results on this platform",
     "retrying": "Retrying"
   },

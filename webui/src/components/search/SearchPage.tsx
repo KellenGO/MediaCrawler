@@ -12,6 +12,7 @@ import { useBookmarks } from "@/hooks/useBookmarks";
 import { TOOL_BUTTON } from "./ResultTools";
 import { useHomePreferencesStore } from "@/store/homePreferencesStore";
 import { safeContentUrl } from "@/lib/resultTools";
+import { useTranslation } from "react-i18next";
 
 interface SearchPageProps {
   homeRequested?: boolean;
@@ -25,6 +26,7 @@ interface SearchPageProps {
  * 历史 / 任务恢复 —— 本组件只改布局与视觉。
  */
 export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateAccounts }: SearchPageProps) {
+  const { t } = useTranslation();
   const library = useBookmarks();
   const homePreferences = useHomePreferencesStore();
   // Round 15: 每个平台独立搜索数量（展示用；搜索请求由 useSearchExperience 读取）。
@@ -231,7 +233,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
       {isCancellingState && (
         <div className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-warn/40 bg-warn-soft text-warn text-sm w-fit">
           <Loader2 className="w-4 h-4 animate-spin" />
-          正在取消搜索...
+          {t("search.cancelling")}
         </div>
       )}
 
@@ -247,7 +249,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
             disabled={isCancellingState}
             className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg border border-warn/50 hover:bg-warn/10 text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Loader2 className="w-3 h-3" />再次取消
+            <Loader2 className="w-3 h-3" />{t("search.cancelAgain")}
           </button>
         </div>
       )}
@@ -256,7 +258,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
       {cancelledNotice && !busy && !createError && !cancelError && (
         <div className="mt-6 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-warn/40 bg-warn-soft text-warn text-sm">
-            ⏹ 搜索已取消，保留上次结果
+            ⏹ {t("search.cancelledNotice")}
           </div>
         </div>
       )}
@@ -276,7 +278,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
       {showInitialIdle && !isHome && (
         <div className="mt-16 text-center">
           <p className="text-sm text-cyber-text-muted">
-            输入关键词，选择平台，开始跨平台搜索
+            {t("search.enterKeyword")}
           </p>
         </div>
       )}
@@ -286,7 +288,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
         <div className="mt-16 text-center">
           <div className="inline-block animate-dsh-spin rounded-full h-8 w-8 border-2 border-brand border-t-transparent" />
           <p className="mt-4 text-sm text-cyber-text-muted">
-            正在搜索中...
+            {t("search.searching")}
           </p>
         </div>
       )}
@@ -295,7 +297,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
       {displayJobResponse && displayJobResponse.overall === "failed" && (
         <div className="mt-6 w-full max-w-2xl">
           <div className="text-center mb-3 px-4 py-2 rounded-xl border border-danger/40 bg-danger-soft text-danger text-sm">
-            <AlertTriangle className="w-4 h-4 inline mr-2" />所有平台搜索失败
+            <AlertTriangle className="w-4 h-4 inline mr-2" />{t("search.allFailed")}
           </div>
           {Object.entries(displayJobResponse.platforms).map(([p, info]) => (
             <div key={p} className="flex items-center justify-between px-3.5 py-2.5 mb-1.5 rounded-lg bg-cyber-bg-secondary border border-cyber-border-subtle text-sm">
@@ -305,7 +307,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
               {info.status === "login_required" && (
                 <button onClick={handleGoAccounts}
                   className="px-3 py-1 rounded-lg bg-brand-soft border border-brand/40 text-brand-strong hover:bg-brand/10 text-xs transition-all">
-                  <UserCog className="w-3 h-3 inline mr-1" />前往账号设置
+                  <UserCog className="w-3 h-3 inline mr-1" />{t("search.goAccounts")}
                 </button>
               )}
             </div>
@@ -316,7 +318,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
       {/* Partial */}
       {displayJobResponse && displayJobResponse.overall === "partial" && (
         <div className="mt-4 w-full max-w-2xl px-3.5 py-2 rounded-xl border border-warn/40 bg-warn-soft text-warn text-xs">
-          ⚠ 部分平台失败: {Object.entries(displayJobResponse.platforms)
+          ⚠ {t("search.partialFailed")}: {Object.entries(displayJobResponse.platforms)
             .filter(([, i]) => !["succeeded", "empty"].includes(i.status))
             .map(([p, i]) => `${PLATFORM_LABELS[p as PlatformSlug] || p}(${i.error_summary || i.status})`)
             .join(", ")}
@@ -329,7 +331,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
           {(liveHint || refreshing) && (
             <div className="mb-3 flex items-center gap-2 px-3.5 py-2 rounded-xl border border-brand/40 bg-brand-soft text-brand-strong text-xs w-fit">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              {liveHint ?? "正在更新，暂时显示上次结果"}
+              {liveHint ?? t("search.updating")}
             </div>
           )}
 
@@ -337,9 +339,9 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
             <p>
               <span>{displayJobResponse.results.length} 条内容</span>
               {isTerminal && displayJobResponse.completed_at && (
-                <span className="ml-3">完成于 {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
+                <span className="ml-3">{t("search.completedAt")} {new Date(displayJobResponse.completed_at).toLocaleTimeString("zh-CN")}</span>
               )}
-              {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">搜索中...</span>}
+              {!isTerminal && <span className="ml-3 text-brand-strong animate-pulse">{t("search.searchingLive")}</span>}
             </p>
             {isTerminal && <div className="button-row">
               {exploration && <button type="button" onClick={handleNextBatch}
@@ -376,13 +378,13 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
           {/* 单平台重试失败提示（保留旧结果，仅显示安全摘要） */}
           {Object.entries(retryErrors).map(([platform, message]) => (
             <div key={platform} className="mb-2 px-3.5 py-2 rounded-xl border border-danger/30 bg-danger-soft text-danger text-xs">
-              更新失败：{PLATFORM_LABELS[platform as PlatformSlug] || platform} {message}
+              {t("search.retryFailed")}：{PLATFORM_LABELS[platform as PlatformSlug] || platform} {message}
             </div>
           ))}
 
           {loginRequiredPlatforms.length > 0 && (
             <div className="mb-3 p-3 rounded-xl border border-warn/30 bg-warn-soft/60">
-              <p className="text-xs text-warn mb-2">以下平台需要先登录：</p>
+              <p className="text-xs text-warn mb-2">{t("search.loginNeeded")}</p>
               <div className="flex flex-wrap gap-2 mb-2">
                 {loginRequiredPlatforms.map((p) => (
                   <span
@@ -396,7 +398,7 @@ export function SearchPage({ homeRequested = false, onSearchStarted, onNavigateA
               <button onClick={handleGoAccounts}
                 className="px-3 py-1.5 rounded-lg bg-warn-soft border border-warn/40 text-warn hover:bg-warn/10 text-xs transition-all">
                 <UserCog className="w-3 h-3 inline mr-1" />
-                前往设置
+                {t("search.goSettings")}
               </button>
             </div>
           )}

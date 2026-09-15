@@ -14,12 +14,26 @@ current-job recovery race rules. They read the real files — nothing is
 copied or re-implemented here.
 """
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).parent.parent / "webui" / "src"
+_LOCALES = _ROOT / "i18n" / "locales"
+
+
+def _zh(ns_key: str) -> str:
+    """取 zh-CN 里 'namespace.key' 的文案。
+
+    搜索页的状态/提示文案已改走 i18n（`{t("search.xxx")}`），所以断言从
+    "源码里有这串中文" 变成 "源码接了这个键，且这个键在 zh-CN 里就是这句话"——
+    意图不变（界面确实显示这句话），但不再把文案钉死在组件里。
+    """
+    namespace, _, key = ns_key.partition(".")
+    data = json.loads((_LOCALES / "zh-CN" / "common.json").read_text(encoding="utf-8"))
+    return data[namespace][key]
 
 _PLATFORM_STATUS = (_ROOT / "components" / "search" / "PlatformStatus.tsx").read_text(encoding="utf-8")
 _STATUS_DISPLAY = (_ROOT / "lib" / "statusDisplay.ts").read_text(encoding="utf-8")
@@ -43,10 +57,17 @@ _SCAN_LOGIN = (_ROOT / "lib" / "scanLogin.ts").read_text(encoding="utf-8")
 # ── cancelling / cancelled UI text ──────────────────────────────────────
 
 def test_overall_badge_texts():
-    """cancelling → 正在取消; cancelled → 搜索已取消; failed → ✗ 搜索失败."""
-    assert "正在取消" in _SEARCH_PAGE
-    assert "搜索已取消" in _SEARCH_PAGE
-    assert "所有平台搜索失败" in _SEARCH_PAGE
+    """cancelling → 正在取消; cancelled → 搜索已取消; failed → 搜索失败。
+
+    文案已迁到 i18n（zh-CN/common.json 的 search 命名空间），这里同时验
+    「组件接了那个键」和「那个键就是这句话」。
+    """
+    assert 't("search.cancelling")' in _SEARCH_PAGE
+    assert _zh("search.cancelling").startswith("正在取消")
+    assert 't("search.cancelledNotice")' in _SEARCH_PAGE
+    assert "搜索已取消" in _zh("search.cancelledNotice")
+    assert 't("search.allFailed")' in _SEARCH_PAGE
+    assert _zh("search.allFailed") == "所有平台搜索失败"
 
 
 def test_platform_status_has_cancelled_case():
@@ -81,7 +102,8 @@ def test_platform_status_union_includes_cancelled():
 # ── login_required → 账号设置 (no aux login from search page) ───────────
 
 def test_search_page_navigates_to_accounts():
-    assert "前往账号设置" in _SEARCH_PAGE
+    assert 't("search.goAccounts")' in _SEARCH_PAGE
+    assert _zh("search.goAccounts") == "前往账号设置"
     assert "onNavigateAccounts" in _SEARCH_PAGE
 
 
@@ -281,3 +303,65 @@ def test_accounts_bulk_progress_total_is_dynamic():
     """手动同步也可能只同步部分平台，进度分母不能用写死的 4。"""
     assert "/4`" not in _ACCOUNTS
     assert "${bulkCompleted}/${bulkTotal}" in _ACCOUNTS
+
+
+# ── i18n 键守卫 ─────────────────────────────────────────────────────────
+
+def _flatten(table, prefix=""):
+    """把嵌套的 locale 表压成 {"ns.key": "文案"}。"""
+    out = {}
+    for key, value in table.items():
+        full = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, full + "."))
+        else:
+            out[full] = value
+    return out
+
+
+def _locale_keys(name: str) -> set:
+    """某个语言认识的键 = common.json + license.json 的并集。"""
+    keys = set()
+    for fname in ("common.json", "license.json"):
+        path = _LOCALES / name / fname
+        if path.is_file():
+            keys |= set(_flatten(json.loads(path.read_text(encoding="utf-8"))))
+    return keys
+
+
+# 只认有命名空间的写法（ns.key），避免把 t("普通词") 当成 i18n 键
+_T_USED_RE = re.compile(r'\bt\(\s*"([A-Za-z][\w]*(?:\.[\w]+)+)"')
+
+
+def test_i18n_keys_used_in_source_exist_in_every_locale():
+    """组件里 t("ns.key") 用到的键必须在每个语言的 locale 里都存在。
+
+    i18next 拼错键时**不报错**，而是把键名当文案渲染出去，用户会看到
+    「search.某个键」这种字符串。所以这条守卫只做一件事：扫源码里的
+    t("ns.key") 调用，逐个回查 locale（common 与 license 都算命中）。
+    """
+    locales = sorted(p.name for p in _LOCALES.iterdir() if p.is_dir())
+    assert locales, "缺少 i18n/locales/*"
+    known = {name: _locale_keys(name) for name in locales}
+
+    used = set()
+    for path in list(_ROOT.rglob("*.ts")) + list(_ROOT.rglob("*.tsx")):
+        used |= set(_T_USED_RE.findall(path.read_text(encoding="utf-8")))
+
+    assert used, '源码里没扫到任何 t("ns.key") 调用，守卫失效了？'
+    problems = {name: sorted(k for k in used if k not in known[name])
+                for name in locales}
+    problems = {k: v for k, v in problems.items() if v}
+    assert problems == {}, f"这些 t() 键在 locale 里找不到: {problems}"
+
+
+def test_locales_define_the_same_keys():
+    """两种语言的键集合必须一致 —— 少一条就等于该语言会渲染出键名。"""
+    names = sorted(p.name for p in _LOCALES.iterdir() if p.is_dir())
+    assert len(names) >= 2, "至少要有两种语言才谈得上对齐"
+    base = names[0]
+    for other in names[1:]:
+        only_base = sorted(_locale_keys(base) - _locale_keys(other))
+        only_other = sorted(_locale_keys(other) - _locale_keys(base))
+        assert not only_base and not only_other, (
+            f"{base} 与 {other} 的键不一致: 缺 {only_base} / 多 {only_other}")

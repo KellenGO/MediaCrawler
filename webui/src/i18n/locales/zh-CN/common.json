@@ -62,6 +62,7 @@
     "retryFailed": "更新失败",
     "loginNeeded": "以下平台需要先登录：",
     "goAccounts": "前往账号设置",
+    "goSettings": "前往设置",
     "noResults": "该平台暂无结果",
     "retrying": "正在重试"
   },
