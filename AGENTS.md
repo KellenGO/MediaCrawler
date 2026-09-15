@@ -89,8 +89,15 @@
 
 ## 在这台机器上干活（环境坑，都踩过了）
 
-- **npm 被安全策略拦**（会拉起 wsl.exe）。前端改用 node 绝对路径：
-  `node_modules/typescript/bin/tsc`、`node_modules/vite/bin/vite.js`、`node run-compiled-tests.mjs`。
+- **bash 里跑 npm 会被拦，PowerShell 里完全不会。** 真正被拦的是 `wsl.exe`（安全中心的程序黑名单）：
+  bash 执行 `npm` 会解析到无扩展名的 Unix shell 脚本（`C:\Program Files\nodejs\npm`，与
+  `npm.cmd` / `npm.ps1` 并列），进而触发 WSL，于是报 "PROGRAM BLOCKED BY SECURITY POLICY"。
+  **PowerShell 里 npm 是好的**：`npm --version` = 10.9.7、`npm view <pkg> version` 能连 registry、
+  `npm install --save-dev <pkg>` 也能跑。所以前端命令**用 PowerShell 跑就行**，
+  不必绕 node 绝对路径。`scripts/build_exe.ps1` 是 .ps1，里面的 `npm ci` / `npm run build` 同样没事。
+- **同一个根因让 bash 工具基本不可用**：WorkBuddy 的 bash shim
+  `shell-runtime-bash-env.sh` 第 3 行 `dirname` 就失败，PATH 整个是坏的，
+  于是 `grep` / `find` / `head` 全部 "command not found"。**排查环境时别指望 bash，用 PowerShell。**
 - **pytest 写不进系统 Temp**，必须带项目内临时目录：`--basetemp=.tmp_pytest_xxx`。
   **而且每次都要换新的子目录**（`--basetemp=.tmp_pytest_run/r<时间戳>`，父目录先建好）——
   复用同一目录会触发沙箱的 safe-delete 批量保护，报成上百个 setup ERROR 的**假回归**。

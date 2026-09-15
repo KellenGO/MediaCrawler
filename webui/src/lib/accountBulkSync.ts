@@ -114,7 +114,7 @@ export async function runBulkSync(options: BulkSyncOptions): Promise<BulkSyncRes
     let outcome: SyncAttemptOutcome;
     try {
       outcome = await syncOne(platform);
-    } catch (err) {
+    } catch {
       // 单平台异常：记录安全失败，绝不透出原始错误细节。
       outcome = {
         platform,

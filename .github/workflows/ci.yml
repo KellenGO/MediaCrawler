@@ -20,6 +20,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # tests/test_sync_wire_contract.py 会拿真实的 sync_protocol.js 去喂生产校验函数；
+      # 没装 Node 时这些用例会被 skip，CI 上显示成绿的，实际一条都没跑过。
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:
